@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 14 full backend + frontend testing. BACKEND (7/7 pass, 1 skipped AI gen): /api/tasks/stats admin returns weekly/by_shift/by_employee/team shape ✓ ; /api/tasks/stats as julie@luminahr.ca is scoped — a task assigned to Karim (e3) does NOT surface in Julie's by_employee, admin sees both Karim + Julie ✓ ; /api/tasks/bulk admin creates N=3 non-assigned tasks (verified via GET /api/tasks), julie → 403 ✓ ; POST /api/tasks qualification_warning=true for 'Préparations magistrales complexes' assigned to e2, false for 'Comptage des pilules du soir' assigned to e2, false for unassigned task ✓. Schedule generation with absences[] payload validated by main agent via curl — pytest skipped to avoid AI cost. FRONTEND (admin): sidebar-link-tasks opens tasks-module ✓ ; toggle Semaine/Statistiques with data-testid tasks-view-week + tasks-view-stats ✓ ; task-stats-panel renders (empty state 'Aucune donnée pour l'instant' shown since fresh env has no past-week tasks — this is the correct branch per TaskStatsPanel.tsx line 48-52) ✓ ; open-templates-button opens template-dialog ✓ ; template-pick-fermeture switches template-shift-select to 'Soir' ✓ ; template-item-0 unchecked, template-custom-input + template-add-custom adds 'TEST_ITER14 tache manuelle' ✓ ; template-submit creates 6 tasks (5 remaining Fermeture + 1 custom) all visible in the Lundi/Soir card of the week grid ✓ ; new-task dialog fills 'Vaccination antigrippale' assigned to Julie → after submit, backend returns qualification_warning=true, card shows task-qualif-warning-{id} amber badge 'Qualification à vérifier' ✓, post-submit sonner toast fires ✓ ; schedule-proposals-panel text mentions 'absences approuvées' + 'tâches' ✓ ; generate-schedule-dialog text mentions absences transmise automatiquement ✓ ; regression: create/toggle/delete task, recurring checkbox, week nav (tasks-week-next changes label) ✓. FRONTEND (julie): open-templates-button count=0, add-task-button count=0 (correctly hidden), tasks-view-stats visible ✓ ; stats panel shows empty state (Julie has no past tasks). All test data cleaned (7 tasks deleted at end).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "TasksModule.tsx / Nouvelle tâche dialog",
+        "issue": "The pre-submit amber qualification warning 'create-qualif-warning' NEVER appears in the create-task dialog when an unqualified employee is selected. The div is bound to `createQualifWarning = tAssignee!=='team' && tTitle && (caps[tAssignee]??[]).length > 0 && !isQualified(...)`, but the `caps` state (line 67: `const [caps, setCaps] = useState<Record<string,string[]>>({})`) is declared and NEVER populated — there is no axios call to fetch employee capacities from `/api/profiles/{employee_id}`. Consequently `(caps[tAssignee] ?? []).length > 0` is always false, and the amber banner never renders before submit. The POST-submit sonner toast + card badge task-qualif-warning-{id} DO work correctly (both driven by the backend's qualification_warning flag), so the feature is only half-implemented on the frontend.",
+        "selector": "[data-testid=\"create-qualif-warning\"]",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration14.py",
+    "/app/test_reports/pytest/iter14_results.xml"
+  ],
+  "action_items": [
+    "In /app/frontend/src/components/modules/TasksModule.tsx, populate the `caps` state by fetching employee capacities (e.g., an axios useEffect calling GET /api/profiles/{id} for each active employee, or GET /api/profiles bulk). Without this, the specified 'avertissement ambre dans le dialogue de création' feature never triggers pre-submit — only post-submit toast + card badge work. Consider triggering the fetch lazily when tAssignee changes and cache in caps state to avoid N calls."
+  ],
+  "critical_code_review_comments": [
+    "TasksModule.tsx: `caps` state is declared but never populated — dead code path. Either wire up a profiles fetch or remove the state + createQualifWarning computation entirely (the toast+badge already cover the UX).",
+    "(carried over) Sidebar renders twice in DOM (desktop persistent + mobile drawer) with identical data-testid; Playwright must loop .nth() + is_visible() to click sidebar-link-*."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration14.py"
+  ],
+  "success_rate": {"backend": "100% (7/7 pass, 1 skipped by design)", "frontend": "~92% — all iter 14 features work EXCEPT the pre-submit create-qualif-warning amber banner (never rendered due to uninitialized `caps` state)"},
+  "seed_data_creation": "Backend pytest: 7 tasks created + deleted (TEST_iter14 team/Julie/Karim + bulk items + qualification variants). Frontend E2E: 1 'Vaccination antigrippale' assigned to Julie + 6 Fermeture template tasks (5 stock + 1 custom 'TEST_ITER14 tache manuelle'). All 7 leftover tasks deleted via /api/tasks/{id} in cleanup step (status 200 confirmed). Nothing left in DB.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "Admin admin@luminahr.ca/admin123 (OK); Employee julie@luminahr.ca/employe123 (OK, employee_id=e2 display name 'Julie Gagnon'). Karim = e3.",
+  "context_for_next_testing_agent": "Iteration 14 delivered /app/backend/tests/test_iteration14.py (7 tests + 1 skip). Testids confirmed working: tasks-view-week, tasks-view-stats, task-stats-panel, open-templates-button, template-dialog, template-pick-{ouverture|fermeture|inventaire}, template-item-{i}, template-custom-input, template-add-custom, template-submit, template-shift-select, task-qualif-warning-{id} (card badge), schedule-proposals-panel, proposal-warnings-badge-{id}, proposal-alerts-{id}, shift-warning-icon-{id}, generate-schedule-dialog. The dialog Select components remain Radix (not native); use click + role=option pattern with force=True. localStorage key for auth is 'luminahr_auth_v3' (JSON with {token,user}). AI schedule generation was NOT triggered from the test agent (cost); main agent validated via curl. If iteration 15 needs to test warnings_count>0 in UI, seed a proposition via backend/db-fixture rather than triggering AI.",
+  "rca_of_the_issue": "The `create-qualif-warning` bug is a straightforward missing-fetch: `TasksModule.tsx` line 67 declares `const [caps, setCaps] = useState<Record<string,string[]>>({})` but no code path ever calls setCaps. Grep for 'caps|setCaps|capacities|profiles' in that file returns only the declaration, the usage inside `createQualifWarning`, and the type of the local helper `isQualified` — no axios.get for /api/profiles. Fix by adding a useEffect (deps: [tAssignee]) that fetches the selected employee's profile and merges capacities into `caps`, OR fetch all profiles once on mount. Alternatively, compute qualification locally by mirroring backend's title vs. employee.position/capacities from HRContext (though HRContext currently only exposes basic Employee data — capacities live on profile documents, not on employees list)."
+}

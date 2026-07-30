@@ -460,6 +460,7 @@ export interface ShiftTask {
   assignee_name: string;
   recurring?: boolean;
   series_id?: string;
+  qualification_warning?: boolean;
   done: boolean;
   done_by: string;
   done_at: string | null;
@@ -507,6 +508,7 @@ export interface ProposalShift {
   start: string;
   end: string;
   role: string;
+  warnings?: string[];
 }
 
 export interface ApprovalSlot {
@@ -527,6 +529,8 @@ export interface ScheduleProposal {
   summary: string;
   instructions: string;
   shifts: ProposalShift[];
+  alerts?: string[];
+  warnings_count?: number;
   employee_approvals: Record<string, ApprovalSlot>;
   admin_status: 'pending' | 'approved' | 'rejected';
   approval_deadline: string;

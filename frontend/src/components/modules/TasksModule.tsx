@@ -4,6 +4,8 @@ import { useAuth } from '@/context/AuthContext';
 import { useHR } from '@/context/HRContext';
 import { ShiftTask } from '@/types';
 import { ModuleHeader } from '@/components/modules/shared';
+import { TaskStatsPanel } from '@/components/TaskStatsPanel';
+import { TaskTemplatesDialog } from '@/components/TaskTemplatesDialog';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Progress } from '@/components/ui/progress';
@@ -11,7 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, ChevronLeft, ChevronRight, Trash2, CopyPlus, Sunrise, Sun, Moon, Repeat, LucideIcon } from 'lucide-react';
+import { Plus, ChevronLeft, ChevronRight, Trash2, CopyPlus, Sunrise, Sun, Moon, Repeat, LayoutTemplate, BarChart3, CalendarDays, AlertTriangle, LucideIcon } from 'lucide-react';
 import { toast } from 'sonner';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -38,6 +40,21 @@ const apiError = (err: unknown): string => {
   return 'Une erreur est survenue.';
 };
 
+const QUALIF_STOP = new Set(['gestion', 'verification', 'verifier', 'faire', 'avant', 'apres', 'pour', 'dans',
+  'avec', 'sans', 'sous', 'tous', 'tout', 'toute', 'toutes', 'cette', 'chaque', 'pharmacie', 'responsable',
+  'service', 'prise', 'mise']);
+
+const normWords = (s: string): string[] => {
+  const txt = s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return (txt.match(/[a-z]{4,}/g) ?? []).filter((w) => !QUALIF_STOP.has(w));
+};
+
+const isQualified = (title: string, caps: string[]): boolean => {
+  const tw = normWords(title);
+  if (tw.length === 0 || caps.length === 0) return true;
+  return caps.some((c) => normWords(c).some((w) => tw.includes(w)));
+};
+
 export default function TasksModule(): JSX.Element {
   const { token, currentUser } = useAuth();
   const { state } = useHR();
@@ -45,6 +62,9 @@ export default function TasksModule(): JSX.Element {
   const headers = { Authorization: `Bearer ${token ?? ''}` };
   const [weekOffset, setWeekOffset] = useState(0);
   const [tasks, setTasks] = useState<ShiftTask[]>([]);
+  const [view, setView] = useState<'week' | 'stats'>('week');
+  const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [caps, setCaps] = useState<Record<string, string[]>>({});
   const [createOpen, setCreateOpen] = useState(false);
   const [tDate, setTDate] = useState('');
   const [tShift, setTShift] = useState('Matin');
@@ -135,7 +155,7 @@ export default function TasksModule(): JSX.Element {
     e.preventDefault();
     const emp = state.employees.find((x) => x.id === tAssignee);
     try {
-      await axios.post(`${API}/tasks`, {
+      const res = await axios.post<ShiftTask>(`${API}/tasks`, {
         date: tDate,
         shift: tShift,
         title: tTitle,
@@ -145,12 +165,18 @@ export default function TasksModule(): JSX.Element {
         recurring: tRecurring,
       }, { headers });
       toast.success(tRecurring ? 'Tâche ajoutée — elle reviendra automatiquement chaque semaine.' : 'Tâche ajoutée au quart.');
+      if (res.data.qualification_warning && emp) {
+        toast.warning(`Cette tâche ne figure pas dans les capacités du profil de ${emp.firstName} ${emp.lastName} — qualification à vérifier.`);
+      }
       setCreateOpen(false);
       await refresh();
     } catch (err) {
       toast.error(apiError(err));
     }
   };
+
+  const createQualifWarning = tAssignee !== 'team' && tTitle.trim().length > 0
+    && (caps[tAssignee] ?? []).length > 0 && !isQualified(tTitle, caps[tAssignee] ?? []);
 
   const fmtDay = (dateIso: string, i: number): string =>
     `${DAY_LABELS[i]} ${dateIso.slice(8, 10)}/${dateIso.slice(5, 7)}`;
@@ -167,6 +193,9 @@ export default function TasksModule(): JSX.Element {
             <Button data-testid="copy-week-button" variant="outline" onClick={() => void copyPreviousWeek()} className="rounded-full">
               <CopyPlus className="w-4 h-4 mr-1" /> Dupliquer la semaine préc.
             </Button>
+            <Button data-testid="open-templates-button" variant="outline" onClick={() => setTemplatesOpen(true)} className="rounded-full border-bronze-300 text-bronze-800 hover:bg-bronze-50">
+              <LayoutTemplate className="w-4 h-4 mr-1" /> Modèles
+            </Button>
             <Button data-testid="add-task-button" onClick={() => openCreate()} className="rounded-full bg-emerald-600 hover:bg-emerald-700">
               <Plus className="w-4 h-4 mr-1" /> Nouvelle tâche
             </Button>
@@ -174,6 +203,27 @@ export default function TasksModule(): JSX.Element {
         ) : undefined}
       />
 
+      <div className="inline-flex rounded-full border border-slate-200 bg-white p-1 mb-6">
+        <button
+          data-testid="tasks-view-week"
+          onClick={() => setView('week')}
+          className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-semibold transition-colors ${view === 'week' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:text-emerald-700'}`}
+        >
+          <CalendarDays className="w-3.5 h-3.5" /> Semaine
+        </button>
+        <button
+          data-testid="tasks-view-stats"
+          onClick={() => setView('stats')}
+          className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-semibold transition-colors ${view === 'stats' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:text-emerald-700'}`}
+        >
+          <BarChart3 className="w-3.5 h-3.5" /> Statistiques
+        </button>
+      </div>
+
+      {view === 'stats' ? (
+        <TaskStatsPanel isAdmin={isAdmin} />
+      ) : (
+        <>
       <div className="flex flex-wrap items-center gap-3 mb-6">
         <Button data-testid="tasks-week-prev" variant="outline" size="icon" className="rounded-full" onClick={() => setWeekOffset(weekOffset - 1)}>
           <ChevronLeft className="w-4 h-4" />
@@ -232,6 +282,11 @@ export default function TasksModule(): JSX.Element {
                                 {t.recurring && <> · chaque semaine</>}
                                 {t.done && t.done_by && <> · fait par {t.done_by}</>}
                               </p>
+                              {isAdmin && t.qualification_warning && (
+                                <p data-testid={`task-qualif-warning-${t.id}`} className="text-[11px] text-amber-700 font-semibold mt-0.5 inline-flex items-center gap-1">
+                                  <AlertTriangle className="w-3 h-3" /> Qualification à vérifier
+                                </p>
+                              )}
                             </div>
                             {isAdmin && (t.recurring || t.series_id) ? (
                               <button
@@ -262,6 +317,12 @@ export default function TasksModule(): JSX.Element {
           );
         })}
       </div>
+        </>
+      )}
+
+      {isAdmin && (
+        <TaskTemplatesDialog open={templatesOpen} onOpenChange={setTemplatesOpen} days={days} onCreated={refresh} />
+      )}
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent data-testid="create-task-dialog">
@@ -308,6 +369,12 @@ export default function TasksModule(): JSX.Element {
                   ))}
                 </SelectContent>
               </Select>
+              {createQualifWarning && (
+                <p data-testid="create-qualif-warning" className="text-xs text-amber-700 font-semibold inline-flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                  <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                  Cette tâche ne figure pas dans les capacités du profil de cet employé — vérifiez sa qualification avant d'assigner.
+                </p>
+              )}
             </div>
             <label className="flex items-start gap-2.5 rounded-lg border border-slate-200 px-3 py-2.5 cursor-pointer hover:border-bronze-300 transition-colors">
               <Checkbox data-testid="task-recurring-checkbox" checked={tRecurring} onCheckedChange={(v) => setTRecurring(v === true)} className="mt-0.5" />

@@ -27,7 +27,7 @@ const RateBar = ({ rate }: { rate: number }): JSX.Element => (
   </div>
 );
 
-export const TaskStatsPanel = (): JSX.Element => {
+export const TaskStatsPanel = ({ isAdmin }: { isAdmin: boolean }): JSX.Element => {
   const { token } = useAuth();
   const [stats, setStats] = useState<TaskStats | null>(null);
   const [error, setError] = useState(false);
@@ -53,7 +53,7 @@ export const TaskStatsPanel = (): JSX.Element => {
         <>
           <div>
             <h2 className="font-heading text-base font-bold text-slate-900 mb-3 inline-flex items-center gap-2">
-              <BarChart3 className="w-4 h-4 text-bronze-600" /> Taux de complétion par quart (8 dernières semaines)
+              <BarChart3 className="w-4 h-4 text-bronze-600" /> {isAdmin ? 'Taux de complétion par quart (8 dernières semaines)' : 'Vos taux de complétion par quart (8 dernières semaines)'}
             </h2>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4" data-testid="stats-by-shift">
               {stats.by_shift.map((s) => (
@@ -87,10 +87,12 @@ export const TaskStatsPanel = (): JSX.Element => {
 
           <div className="bg-white rounded-xl border border-slate-200 p-6">
             <h2 className="font-heading text-base font-bold text-slate-900 mb-1 inline-flex items-center gap-2">
-              <Users className="w-4 h-4 text-bronze-600" /> Par employé
+              <Users className="w-4 h-4 text-bronze-600" /> {isAdmin ? 'Par employé' : 'Votre bilan personnel'}
             </h2>
             <p className="text-xs text-slate-500 mb-4">
-              Tâches assignées personnellement + coups de main sur les tâches d'équipe ({stats.team.done}/{stats.team.total} tâches d'équipe complétées).
+              {isAdmin
+                ? <>Tâches assignées personnellement + coups de main sur les tâches d'équipe ({stats.team.done}/{stats.team.total} tâches d'équipe complétées).</>
+                : <>Vos tâches assignées + vos coups de main sur les tâches d'équipe ({stats.team.done}/{stats.team.total} tâches d'équipe complétées au total).</>}
             </p>
             {stats.by_employee.length === 0 ? (
               <p className="text-sm text-slate-400">Aucune tâche assignée à un employé pour le moment.</p>

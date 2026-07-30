@@ -5,6 +5,8 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import io
+import re
+import unicodedata
 import json
 import logging
 import uuid
@@ -1681,14 +1683,42 @@ async def save_pay_settings(payload: PaySettingsIn, principal: dict = Depends(ge
     return doc
 
 
+# ==================== Qualification (correspondance tâches/rôles ↔ capacités) ====================
+
+QUALIF_STOP_WORDS = {"gestion", "verification", "verifier", "faire", "avant", "apres", "pour", "dans",
+                     "avec", "sans", "sous", "tous", "tout", "toute", "toutes", "cette", "chaque",
+                     "pharmacie", "responsable", "service", "prise", "mise"}
+
+
+def _norm_words(text: str) -> set:
+    txt = unicodedata.normalize("NFD", (text or "").lower())
+    txt = "".join(c for c in txt if unicodedata.category(c) != "Mn")
+    return {w for w in re.findall(r"[a-z]{4,}", txt) if w not in QUALIF_STOP_WORDS}
+
+
+def task_qualification_ok(title: str, capacities: list) -> bool:
+    if not capacities:
+        return True
+    tw = _norm_words(title)
+    if not tw:
+        return True
+    return any(tw & _norm_words(c) for c in capacities)
+
+
 # ==================== Horaires générés par IA (double approbation) ====================
 
 SCHEDULE_SYSTEM = (
     "Tu es un expert en planification d'horaires pour les pharmacies du Québec. À partir de la liste des employés, "
-    "de leurs profils (rôles, capacités, disponibilités par jour, restrictions, heures minimales et maximales par semaine) "
+    "de leurs profils (rôles, capacités, disponibilités par jour, restrictions, heures minimales et maximales par semaine), "
+    "des absences approuvées, des tâches à faire durant la semaine "
     "et des consignes du gestionnaire, tu crées l'horaire de la semaine demandée.\n\n"
     "Règles impératives :\n"
     "- RESPECTE STRICTEMENT les disponibilités (jour et plage horaire) et les restrictions de chaque employé.\n"
+    "- Ne planifie JAMAIS un employé pendant une absence approuvée (vacances, maladie, congé, formation).\n"
+    "- Tiens compte des tâches à faire : si une tâche est assignée à un employé un jour donné, planifie-le ce jour-là "
+    "sur une plage couvrant le quart de la tâche (Matin ≈ 8h-12h, Après-midi ≈ 12h-17h, Soir ≈ 17h-21h30), "
+    "si ses disponibilités le permettent; sinon explique pourquoi dans le summary.\n"
+    "- N'attribue à un employé qu'un rôle figurant dans ses rôles ou capacités; s'il faut faire autrement, signale-le dans le summary.\n"
     "- Ne dépasse jamais le maximum d'heures hebdomadaires d'un employé; vise au moins son minimum.\n"
     "- Assure une couverture adéquate pendant les heures d'ouverture (par défaut lun-ven 8h-21h, sam-dim 9h-17h, "
     "sauf indication contraire dans les consignes), en priorité un pharmacien présent en tout temps si disponible.\n"
@@ -1711,11 +1741,20 @@ class RosterEmployee(BaseModel):
     position: str
 
 
+class AbsenceIn(BaseModel):
+    employee_id: str
+    employee_name: str = ""
+    start: str
+    end: str
+    type: str = ""
+
+
 class ScheduleGenIn(BaseModel):
     week_start: str
     instructions: str = ""
     approval_deadline_hours: int = 48
     employees: list[RosterEmployee]
+    absences: list[AbsenceIn] = []
 
 
 def proposal_view(doc: dict) -> dict:
@@ -1744,13 +1783,26 @@ def proposal_view(doc: dict) -> dict:
 
 
 async def generate_schedule_content(proposal_id: str, pharmacy_id: str, week_start: str,
-                                    instructions: str, roster: list, profiles: list):
+                                    instructions: str, roster: list, profiles: list, absences: list):
     try:
         start = date.fromisoformat(week_start)
         week_days = [(start + timedelta(days=i)).isoformat() for i in range(7)]
+        await materialize_recurring_tasks(pharmacy_id, week_days[0], week_days[-1])
+        week_tasks = await db.shift_tasks.find(
+            {"pharmacy_id": pharmacy_id, "date": {"$gte": week_days[0], "$lte": week_days[-1]}},
+            {"_id": 0}).to_list(1000)
         payload = {
             "semaine": week_days,
             "consignes_du_gestionnaire": instructions or "Aucune consigne particulière.",
+            "absences_approuvees": [{
+                "employee_id": a["employee_id"], "nom": a.get("employee_name", ""),
+                "du": a["start"], "au": a["end"], "type": a.get("type", ""),
+            } for a in absences] or "Aucune absence approuvée cette semaine.",
+            "taches_a_faire_cette_semaine": [{
+                "date": t["date"], "quart": t["shift"], "titre": t["title"],
+                "assignee_employee_id": t.get("assignee_employee_id") or "",
+                "assignee": t.get("assignee_name") or "Toute l'équipe",
+            } for t in week_tasks] or "Aucune tâche planifiée cette semaine.",
             "employes": [{
                 "employee_id": e["id"], "nom": e["name"], "poste": e["position"],
                 "profil": next((p for p in profiles if p["employee_id"] == e["id"]), None),
@@ -1777,14 +1829,50 @@ async def generate_schedule_content(proposal_id: str, pharmacy_id: str, week_sta
                            "start": str(s["start"]), "end": str(s["end"]), "role": str(s.get("role", ""))})
         if not shifts:
             raise ValueError("L'IA n'a généré aucun quart valide")
+        prof_by_id = {p["employee_id"]: p for p in profiles}
+        shift_hours = {"Matin": ("08:00", "12:00"), "Après-midi": ("12:00", "17:00"), "Soir": ("17:00", "21:30")}
+        for s in shifts:
+            warnings = []
+            for a in absences:
+                if a["employee_id"] == s["employee_id"] and a["start"] <= s["date"] <= a["end"]:
+                    warnings.append(
+                        f"Conflit d'absence : {a.get('type') or 'congé'} approuvé du {a['start']} au {a['end']}")
+            prof = prof_by_id.get(s["employee_id"]) or {}
+            known = (prof.get("roles") or []) + (prof.get("capacities") or [])
+            if s["role"] and known and not any(_norm_words(s["role"]) & _norm_words(k) for k in known):
+                warnings.append(
+                    f"Rôle « {s['role']} » absent des rôles/capacités du profil — qualification à vérifier")
+            s["warnings"] = warnings
+        alerts = []
+        for t in week_tasks:
+            eid = t.get("assignee_employee_id") or ""
+            if not eid or eid not in prof_by_id:
+                continue
+            who = t.get("assignee_name") or eid
+            day_shifts = [s for s in shifts if s["employee_id"] == eid and s["date"] == t["date"]]
+            if not day_shifts:
+                alerts.append(f"Tâche « {t['title']} » assignée à {who} le {t['date']} (quart {t['shift']}), "
+                              "mais aucun quart prévu ce jour-là")
+                continue
+            span = shift_hours.get(t["shift"])
+            if span and not any(s["start"] < span[1] and s["end"] > span[0] for s in day_shifts):
+                alerts.append(f"Tâche « {t['title']} » ({t['shift']} du {t['date']}) : "
+                              f"le quart de {who} ne couvre pas cette plage horaire")
+            prof = prof_by_id.get(eid) or {}
+            if not task_qualification_ok(t["title"], prof.get("capacities") or []):
+                alerts.append(f"Tâche « {t['title']} » ({t['date']}) : {who} n'a pas cette capacité "
+                              "dans son profil — qualification à vérifier")
+        warnings_count = sum(len(s["warnings"]) for s in shifts) + len(alerts)
         approvals = {eid: {"status": "pending", "responded_at": None, "comment": ""}
                      for eid in sorted({s["employee_id"] for s in shifts})}
         await db.schedule_proposals.update_one({"id": proposal_id}, {"$set": {
             "status": "pending_approval", "shifts": shifts, "summary": str(data.get("summary", "")),
             "employee_approvals": approvals, "error": None,
+            "alerts": alerts, "warnings_count": warnings_count,
             "updated_at": datetime.now(timezone.utc).isoformat()}})
         await log_audit("système", "system", "GENERATION_HORAIRE", "horaire", proposal_id,
-                        f"Horaire IA généré : {len(shifts)} quart(s) pour la semaine du {week_start}", pharmacy_id)
+                        f"Horaire IA généré : {len(shifts)} quart(s), {warnings_count} point(s) à vérifier "
+                        f"pour la semaine du {week_start}", pharmacy_id)
     except Exception as exc:
         logger.error(f"Génération horaire {proposal_id} échouée : {exc}")
         await db.schedule_proposals.update_one({"id": proposal_id}, {"$set": {
@@ -1803,6 +1891,7 @@ async def schedule_generate(payload: ScheduleGenIn, principal: dict = Depends(ge
     if not (1 <= payload.approval_deadline_hours <= 168):
         raise HTTPException(status_code=400, detail="Délai d'approbation invalide (1 à 168 h).")
     roster = [e.model_dump() for e in payload.employees]
+    absences = [a.model_dump() for a in payload.absences]
     profiles = []
     for e in roster:
         profiles.append(await get_or_create_profile(pid, e["id"], e["name"]))
@@ -1811,7 +1900,8 @@ async def schedule_generate(payload: ScheduleGenIn, principal: dict = Depends(ge
     doc = {
         "id": str(uuid.uuid4()), "pharmacy_id": pid, "week_start": payload.week_start,
         "status": "generating", "error": None, "summary": "", "shifts": [],
-        "instructions": payload.instructions,
+        "instructions": payload.instructions, "absences": absences,
+        "alerts": [], "warnings_count": 0,
         "employee_approvals": {}, "admin_status": "pending", "admin_decided_by": None,
         "approval_deadline": (now + timedelta(hours=payload.approval_deadline_hours)).isoformat(),
         "approval_deadline_hours": payload.approval_deadline_hours,
@@ -1821,7 +1911,8 @@ async def schedule_generate(payload: ScheduleGenIn, principal: dict = Depends(ge
     await db.schedule_proposals.insert_one({**doc})
     await log_audit(principal["email"], principal["role"], "DEMANDE_HORAIRE_IA", "horaire", doc["id"],
                     f"Génération IA demandée pour la semaine du {payload.week_start}", pid)
-    asyncio.create_task(generate_schedule_content(doc["id"], pid, payload.week_start, payload.instructions, roster, profiles))
+    asyncio.create_task(generate_schedule_content(doc["id"], pid, payload.week_start, payload.instructions,
+                                                  roster, profiles, absences))
     return proposal_view(doc)
 
 
@@ -2225,6 +2316,11 @@ async def list_tasks(start: str = Query(...), end: str = Query(...), user: dict 
 async def create_task(payload: ShiftTaskIn, principal: dict = Depends(get_principal)):
     if not payload.title.strip():
         raise HTTPException(status_code=400, detail="Le titre de la tâche est requis.")
+    qualification_warning = False
+    if payload.assignee_employee_id:
+        prof = await get_or_create_profile(principal["pharmacy_id"] or "ph1",
+                                           payload.assignee_employee_id, payload.assignee_name)
+        qualification_warning = not task_qualification_ok(payload.title, prof.get("capacities") or [])
     task_id = str(uuid.uuid4())
     doc = {
         "id": task_id,
@@ -2237,6 +2333,7 @@ async def create_task(payload: ShiftTaskIn, principal: dict = Depends(get_princi
         "assignee_name": payload.assignee_name,
         "recurring": payload.recurring,
         "series_id": task_id if payload.recurring else "",
+        "qualification_warning": qualification_warning,
         "done": False,
         "done_by": "",
         "done_at": None,
@@ -2483,8 +2580,11 @@ def _rate(done: int, total: int) -> int:
 
 
 @api_router.get("/tasks/stats")
-async def task_stats(weeks: int = Query(8, ge=1, le=26), principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+async def task_stats(weeks: int = Query(8, ge=1, le=26), user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    is_employee = user["role"] not in ("admin", "superadmin")
+    my_eid = user.get("employee_id") or ""
+    my_name = user.get("name") or ""
     today = datetime.now(timezone.utc).astimezone(MONTREAL_TZ).date()
     monday = today - timedelta(days=today.weekday())
     start = monday - timedelta(weeks=weeks - 1)
@@ -2496,13 +2596,26 @@ async def task_stats(weeks: int = Query(8, ge=1, le=26), principal: dict = Depen
     by_employee: dict = {}
     team = {"total": 0, "done": 0}
     for t in docs:
+        assigned = t.get("assignee_employee_id") or ""
+        done = bool(t.get("done"))
+        if not assigned:
+            team["total"] += 1
+            if done:
+                team["done"] += 1
+                checker = t.get("done_by") or ""
+                if checker and (not is_employee or checker == my_name):
+                    e = by_employee.setdefault(checker, {"name": checker, "total": 0, "done": 0, "team_checks": 0})
+                    e["team_checks"] += 1
+            if is_employee:
+                continue
+        elif is_employee and assigned != my_eid:
+            continue
         d = datetime.fromisoformat(t["date"]).date()
         wk = (d - timedelta(days=d.weekday())).isoformat()
         w = weekly.setdefault(wk, {"week_start": wk, "total": 0, "done": 0})
         w["total"] += 1
         s = by_shift.setdefault(t["shift"], {"shift": t["shift"], "total": 0, "done": 0})
         s["total"] += 1
-        done = bool(t.get("done"))
         if done:
             w["done"] += 1
             s["done"] += 1
@@ -2512,14 +2625,6 @@ async def task_stats(weeks: int = Query(8, ge=1, le=26), principal: dict = Depen
             e["total"] += 1
             if done:
                 e["done"] += 1
-        else:
-            team["total"] += 1
-            if done:
-                team["done"] += 1
-                checker = t.get("done_by") or ""
-                if checker:
-                    e = by_employee.setdefault(checker, {"name": checker, "total": 0, "done": 0, "team_checks": 0})
-                    e["team_checks"] += 1
     for coll in (weekly, by_shift, by_employee):
         for v in coll.values():
             v["rate"] = _rate(v.get("done", 0), v.get("total", 0))
@@ -2896,3 +3001,4 @@ app.add_middleware(
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+

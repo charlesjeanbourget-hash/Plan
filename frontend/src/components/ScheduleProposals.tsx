@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Sparkles, Loader2, Check, X, Trash2, CalendarPlus } from 'lucide-react';
+import { Sparkles, Loader2, Check, X, Trash2, CalendarPlus, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -64,16 +64,34 @@ export const ScheduleProposals = (): JSX.Element => {
   const generate = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
     setBusy(true);
+    const endDate = new Date(`${weekStart}T00:00:00`);
+    endDate.setDate(endDate.getDate() + 6);
+    const weekEnd = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, '0')}-${String(endDate.getDate()).padStart(2, '0')}`;
+    const absences = state.leaveRequests
+      .filter((l) => l.status === 'Approuvée' && l.startDate <= weekEnd && l.endDate >= weekStart)
+      .map((l) => {
+        const emp = state.employees.find((e2) => e2.id === l.employeeId);
+        return {
+          employee_id: l.employeeId,
+          employee_name: emp ? `${emp.firstName} ${emp.lastName}` : '',
+          start: l.startDate,
+          end: l.endDate,
+          type: l.type,
+        };
+      });
     try {
       await axios.post(`${API}/schedule/generate`, {
         week_start: weekStart,
         instructions,
         approval_deadline_hours: Number(deadlineHours),
+        absences,
         employees: state.employees.filter((emp) => emp.status === 'Actif').map((emp) => ({
           id: emp.id, name: `${emp.firstName} ${emp.lastName}`, position: emp.position,
         })),
       }, { headers });
-      toast.success('L\'IA prépare l\'horaire en respectant les profils des employés…');
+      toast.success(absences.length > 0
+        ? `L'IA prépare l'horaire en tenant compte de ${absences.length} absence(s) approuvée(s) et des tâches de la semaine…`
+        : 'L\'IA prépare l\'horaire en respectant les profils et les tâches de la semaine…');
       setGenOpen(false);
       await refresh();
     } catch (err) {
@@ -129,8 +147,9 @@ export const ScheduleProposals = (): JSX.Element => {
         </Button>
       </div>
       <p className="text-xs text-slate-500 mb-4">
-        L'IA respecte les profils (disponibilités, rôles, restrictions, heures min/max). Vous approuvez, puis chaque employé approuve
-        dans le délai fixé — sans réponse au délai, l'approbation est tacite.
+        L'IA respecte les profils (disponibilités, rôles, restrictions, heures min/max), les absences approuvées et les tâches à faire
+        de la semaine. Les quarts douteux (qualification manquante, conflit d'absence) sont signalés — approuvez ou rejetez en connaissance de cause,
+        puis chaque employé approuve dans le délai fixé (sans réponse, l'approbation est tacite).
       </p>
 
       {proposals.length === 0 && <p className="text-sm text-slate-500">Aucune proposition. Générez votre premier horaire par IA.</p>}
@@ -147,6 +166,11 @@ export const ScheduleProposals = (): JSX.Element => {
                   {p.effective_status === 'generating' && <Loader2 className="w-4 h-4 text-sky-600 animate-spin" />}
                   <p className="text-sm font-bold text-slate-800">Semaine du {p.week_start}</p>
                   <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${meta.cls}`}>{meta.label}</span>
+                  {(p.warnings_count ?? 0) > 0 && p.effective_status !== 'applied' && (
+                    <span data-testid={`proposal-warnings-badge-${p.id}`} className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">
+                      <AlertTriangle className="w-3 h-3" /> {p.warnings_count} point(s) à vérifier
+                    </span>
+                  )}
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {p.effective_status !== 'generating' && (
@@ -201,15 +225,31 @@ export const ScheduleProposals = (): JSX.Element => {
               {isOpen && (
                 <div className="mt-4 pt-4 border-t border-slate-100">
                   {p.summary && <p className="text-xs text-slate-500 italic mb-4">{p.summary}</p>}
+                  {(p.alerts ?? []).length > 0 && (
+                    <div data-testid={`proposal-alerts-${p.id}`} className="rounded-lg border border-amber-200 bg-amber-50 p-3 mb-4">
+                      <p className="text-xs font-bold text-amber-800 mb-1.5 inline-flex items-center gap-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5" /> Points à vérifier avant d'approuver
+                      </p>
+                      <ul className="space-y-1">
+                        {(p.alerts ?? []).map((a, i) => <li key={i} className="text-xs text-amber-800">— {a}</li>)}
+                      </ul>
+                    </div>
+                  )}
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                     {days.map((d) => (
                       <div key={d} className="rounded-lg bg-slate-50 border border-slate-200 p-3">
                         <p className="text-xs font-bold text-slate-700 mb-2">{d}</p>
                         {p.shifts.filter((s) => s.date === d).sort((a, b) => a.start.localeCompare(b.start)).map((s) => (
-                          <p key={s.id} className="text-xs text-slate-600 mb-1">
-                            <span className="font-semibold text-slate-800">{s.start}–{s.end}</span> {s.employee_name}
-                            {s.role && <span className="text-slate-400"> · {s.role}</span>}
-                          </p>
+                          <div key={s.id} className="mb-1.5 last:mb-0">
+                            <p className="text-xs text-slate-600">
+                              <span className="font-semibold text-slate-800">{s.start}–{s.end}</span> {s.employee_name}
+                              {s.role && <span className="text-slate-400"> · {s.role}</span>}
+                              {(s.warnings ?? []).length > 0 && <AlertTriangle data-testid={`shift-warning-icon-${s.id}`} className="w-3 h-3 text-amber-600 inline ml-1.5 align-[-1px]" />}
+                            </p>
+                            {(s.warnings ?? []).map((w, i) => (
+                              <p key={i} className="text-[11px] text-amber-700 font-semibold pl-2">{w}</p>
+                            ))}
+                          </div>
                         ))}
                       </div>
                     ))}
@@ -230,6 +270,7 @@ export const ScheduleProposals = (): JSX.Element => {
             <div className="space-y-2">
               <Label>Semaine (lundi)</Label>
               <Input data-testid="gen-week-start-input" type="date" value={weekStart} onChange={(e) => setWeekStart(e.target.value)} required />
+              <p className="text-xs text-slate-500">Les absences approuvées et les tâches planifiées de cette semaine sont transmises automatiquement à l'IA.</p>
             </div>
             <div className="space-y-2">
               <Label>Consignes pour l'IA (besoins, heures d'ouverture, événements…)</Label>
