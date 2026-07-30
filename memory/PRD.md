@@ -66,6 +66,13 @@ admin@luminahr.ca/admin123 · julie@luminahr.ca/employe123 · super@luminahr.ca/
 ## Backlog technique (suggestions revue de code, non bloquant)
 - Throttle sur POST /api/licenses/reminders/run (1 exécution/min) et plafond de reprises Resend en cas d'échec transitoire (éviter renvois en boucle).
 
+## Itération 5 (30 juin 2026) — testée à 100% (iteration_7.json : backend 45/45, frontend tous flux)
+- **Formations par IA** : l'admin dépose un dossier de formation PDF (max 15 Mo) → gpt-5.4 (clé Emergent) découpe le contenu par secteur (ouverture, comptage des pilules, nettoyage, savoir-être, conformité…) + génère un examen QCM (10-15 questions, 4 choix). Statuts processing→draft→published (polling 5 s). Admin révise/édite sections & questions, note de passage (défaut 80 %), publie/dépublie, consulte les résultats. Employé : lecture par accordéon + points clés, examen à choix multiples (réponses cachées côté serveur), corrigé après soumission, reprises illimitées. PDF stocké dans l'Object Store, audit complet. Formation démo publiée : « Formation d'intégration Proxim » (6 sections, 14 questions).
+- **Cloche de notifications** (fixe en haut à droite) : admin → congés en attente, échanges de quarts, licences expirantes ; employé → statuts de ses demandes + formations à compléter. Lu/non-lu persistant par utilisateur (localStorage), navigation au clic.
+- **Tableau superadmin global** : GET /api/superadmin/overview — par pharmacie : comptes (admins/employés/suspendus), licences (total/≤60j/≤30j/expirées), formations, rapport mensuel activé + 4 StatCards globales.
+- **Expéditeur courriel configurable** : GET/POST /api/email-settings (édition superadmin), utilisé par les rapports mensuels et rappels 30 j. Défaut : LuminaHR <onboarding@resend.dev>. Une fois le domaine vérifié sur resend.com/domains, entrer l'adresse du domaine dans le panneau du module Superadmin.
+- Nouveaux fichiers : TrainingModule/TrainingEditor/TrainingViewer.tsx, NotificationBell.tsx, SuperadminOverview.tsx, popover.d.ts. Dépendance backend : pypdf.
+
 ## Notes techniques
 - Ne jamais recréer `jsconfig.json` (conflit CRA avec tsconfig.json)
 - npm interdit — yarn uniquement
