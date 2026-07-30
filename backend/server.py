@@ -917,7 +917,7 @@ async def generate_training_content(training_id: str, pharmacy_id: str, text: st
 
 
 @api_router.post("/trainings/upload")
-async def upload_training(title: str = Form(...), pharmacy_id: str = Form(""),
+async def upload_training(title: str = Form(...), pharmacy_id: str = Form(""), category: str = Form("Formation continue"),
                           file: UploadFile = File(...), principal: dict = Depends(get_principal)):
     pid = pharmacy_id if (principal["role"] == "superadmin" and pharmacy_id) else principal["pharmacy_id"]
     if not pid:
@@ -938,7 +938,7 @@ async def upload_training(title: str = Form(...), pharmacy_id: str = Form(""),
     now = datetime.now(timezone.utc).isoformat()
     doc = {
         "id": str(uuid.uuid4()), "pharmacy_id": pid, "title": title.strip(),
-        "status": "processing", "error": None,
+        "status": "processing", "error": None, "category": category.strip() or "Formation continue",
         "source_filename": file.filename, "source_size": len(data), "storage_path": result["path"],
         "sections": [], "exam": [], "passing_score": 80,
         "created_by": principal["email"], "created_at": now, "updated_at": now, "published_at": None,
@@ -946,6 +946,33 @@ async def upload_training(title: str = Form(...), pharmacy_id: str = Form(""),
     await db.trainings.insert_one(doc)
     await log_audit(principal["email"], principal["role"], "CREATION_FORMATION", "formation", doc["id"],
                     f"Formation « {doc['title']} » créée à partir de {file.filename}", pid)
+    asyncio.create_task(generate_training_content(doc["id"], pid, text))
+    return training_public(doc, True)
+
+
+class ManualTrainingIn(BaseModel):
+    title: str
+    category: str = "Formation continue"
+    source_text: str
+
+
+@api_router.post("/trainings/manual")
+async def create_manual_training(payload: ManualTrainingIn, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    text = payload.source_text.strip()
+    if len(text) < 200:
+        raise HTTPException(status_code=400, detail="Décrivez la formation plus en détail (au moins 200 caractères) pour que l'IA puisse la construire.")
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "id": str(uuid.uuid4()), "pharmacy_id": pid, "title": payload.title.strip(),
+        "status": "processing", "error": None, "category": payload.category.strip() or "Formation continue",
+        "source_filename": "Saisie manuelle (formulaire)", "source_size": len(text), "storage_path": None,
+        "sections": [], "exam": [], "passing_score": 80,
+        "created_by": principal["email"], "created_at": now, "updated_at": now, "published_at": None,
+    }
+    await db.trainings.insert_one({**doc})
+    await log_audit(principal["email"], principal["role"], "CREATION_FORMATION", "formation", doc["id"],
+                    f"Formation « {doc['title']} » créée par formulaire ({doc['category']})", pid)
     asyncio.create_task(generate_training_content(doc["id"], pid, text))
     return training_public(doc, True)
 
@@ -1012,6 +1039,7 @@ class ExamQuestionIn(BaseModel):
 
 class TrainingUpdateIn(BaseModel):
     title: Optional[str] = None
+    category: Optional[str] = None
     sections: Optional[list[TrainingSectionIn]] = None
     exam: Optional[list[ExamQuestionIn]] = None
     passing_score: Optional[int] = None
@@ -1025,6 +1053,8 @@ async def update_training(training_id: str, payload: TrainingUpdateIn, principal
     patch: dict = {"updated_at": datetime.now(timezone.utc).isoformat()}
     if payload.title is not None:
         patch["title"] = payload.title.strip()
+    if payload.category is not None:
+        patch["category"] = payload.category.strip() or "Formation continue"
     if payload.passing_score is not None:
         if not (0 < payload.passing_score <= 100):
             raise HTTPException(status_code=400, detail="Note de passage invalide (1 à 100).")
@@ -1400,11 +1430,7 @@ async def do_punch(pharmacy_id: str, employee_id: str, employee_name: str, sourc
     return {"action": "in", "employee_name": employee_name, "time": now.isoformat()}
 
 
-@api_router.post("/punch")
-async def punch_by_code(payload: PunchCodeIn, request: Request):
-    code = payload.code.strip()
-    if len(code) != 4 or not code.isdigit():
-        raise HTTPException(status_code=400, detail="NIP invalide (4 chiffres).")
+async def punch_throttle_check(request: Request) -> str:
     fwd = request.headers.get("x-forwarded-for", "")
     ip = fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else "inconnu")
     identifier = f"punch:{ip}"
@@ -1414,8 +1440,16 @@ async def punch_by_code(payload: PunchCodeIn, request: Request):
         raise HTTPException(status_code=429,
                             detail="Trop de NIP invalides. Borne verrouillée quelques minutes — contactez l'administration.",
                             headers={"Retry-After": str(LOCKOUT_MINUTES * 60)})
+    return identifier
+
+
+async def resolve_punch_code(code: str, identifier: str) -> dict:
+    if len(code) != 4 or not code.isdigit():
+        raise HTTPException(status_code=400, detail="NIP invalide (4 chiffres).")
     prof = await db.employee_profiles.find_one({"punch_code": code}, {"_id": 0})
     if not prof:
+        now = datetime.now(timezone.utc)
+        attempt = await db.login_attempts.find_one({"identifier": identifier}, {"_id": 0})
         count = (attempt.get("count", 0) if attempt else 0) + 1
         update = {"identifier": identifier, "count": count, "updated_at": now.isoformat()}
         if count >= LOCKOUT_ATTEMPTS:
@@ -1424,6 +1458,23 @@ async def punch_by_code(payload: PunchCodeIn, request: Request):
         await db.login_attempts.update_one({"identifier": identifier}, {"$set": update}, upsert=True)
         raise HTTPException(status_code=404, detail="NIP inconnu. Vérifiez votre code ou contactez l'administration.")
     await db.login_attempts.delete_one({"identifier": identifier})
+    return prof
+
+
+@api_router.post("/punch/preview")
+async def punch_preview(payload: PunchCodeIn, request: Request):
+    identifier = await punch_throttle_check(request)
+    prof = await resolve_punch_code(payload.code.strip(), identifier)
+    open_p = await db.punches.find_one(
+        {"pharmacy_id": prof["pharmacy_id"], "employee_id": prof["employee_id"], "punch_out": None}, {"_id": 0})
+    return {"employee_name": prof.get("employee_name", ""), "next_action": "out" if open_p else "in",
+            "since": open_p["punch_in"] if open_p else None}
+
+
+@api_router.post("/punch")
+async def punch_by_code(payload: PunchCodeIn, request: Request):
+    identifier = await punch_throttle_check(request)
+    prof = await resolve_punch_code(payload.code.strip(), identifier)
     return await do_punch(prof["pharmacy_id"], prof["employee_id"], prof.get("employee_name", ""), "punch", "borne")
 
 
@@ -1541,10 +1592,12 @@ async def punches_summary(start: str = Query(...), end: str = Query(...), princi
     docs = await db.punches.find(
         {"pharmacy_id": pid, "date": {"$gte": start, "$lte": end}}, {"_id": 0}).to_list(5000)
     rows: dict = {}
+    weekly: dict = {}
     for p in docs:
         r = rows.setdefault(p["employee_id"], {
             "employee_id": p["employee_id"], "employee_name": p["employee_name"],
-            "punched_hours": 0.0, "manual_hours": 0.0, "total_hours": 0.0, "entries": 0, "open_entries": 0})
+            "punched_hours": 0.0, "manual_hours": 0.0, "total_hours": 0.0,
+            "regular_hours": 0.0, "overtime_hours": 0.0, "entries": 0, "open_entries": 0})
         if not p.get("punch_out"):
             r["open_entries"] += 1
             continue
@@ -1552,10 +1605,50 @@ async def punches_summary(start: str = Query(...), end: str = Query(...), princi
         r["entries"] += 1
         r["punched_hours" if p["source"] == "punch" else "manual_hours"] += h
         r["total_hours"] += h
+        iso = date.fromisoformat(p["date"]).isocalendar()
+        wk = (p["employee_id"], iso[0], iso[1])
+        weekly[wk] = weekly.get(wk, 0.0) + h
+    for (eid, _, _), h in weekly.items():
+        if h > 40:
+            rows[eid]["overtime_hours"] += h - 40
     for r in rows.values():
-        for k in ("punched_hours", "manual_hours", "total_hours"):
+        r["regular_hours"] = r["total_hours"] - r["overtime_hours"]
+        for k in ("punched_hours", "manual_hours", "total_hours", "regular_hours", "overtime_hours"):
             r[k] = round(r[k], 2)
     return sorted(rows.values(), key=lambda r: r["employee_name"])
+
+
+@api_router.get("/punches/export")
+async def export_punches(start: str = Query(...), end: str = Query(...), principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    docs = await db.punches.find(
+        {"pharmacy_id": pid, "date": {"$gte": start, "$lte": end}}, {"_id": 0}).to_list(5000)
+    lines = ["Employé;Date;Entrée;Sortie;Heures;Source;Saisie par;Note"]
+    for p in sorted(docs, key=lambda x: (x["employee_name"], x["date"], x["punch_in"])):
+        t_in = datetime.fromisoformat(p["punch_in"]).astimezone(MONTREAL_TZ).strftime("%H:%M")
+        if p.get("punch_out"):
+            t_out = datetime.fromisoformat(p["punch_out"]).astimezone(MONTREAL_TZ).strftime("%H:%M")
+            h = round((datetime.fromisoformat(p["punch_out"]) - datetime.fromisoformat(p["punch_in"])).total_seconds() / 3600, 2)
+        else:
+            t_out, h = "en cours", ""
+        src = "Punch" if p["source"] == "punch" else "Saisie manuelle"
+        note = (p.get("note") or "").replace(";", ",")
+        lines.append(f"{p['employee_name']};{p['date']};{t_in};{t_out};{str(h).replace('.', ',')};{src};{p.get('created_by', '')};{note}")
+    csv_content = "\ufeff" + "\n".join(lines)
+    await log_audit(principal["email"], principal["role"], "EXPORT_HEURES_CSV", "punch", f"{start}_{end}",
+                    f"Export CSV des heures du {start} au {end} ({len(docs)} entrées)", pid)
+    return Response(content=csv_content.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="heures_{start}_{end}.csv"'})
+
+
+@api_router.get("/punches/open")
+async def open_punches(principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    docs = await db.punches.find({"pharmacy_id": pid, "punch_out": None}, {"_id": 0}).to_list(500)
+    now = datetime.now(timezone.utc)
+    for p in docs:
+        p["elapsed_hours"] = round((now - datetime.fromisoformat(p["punch_in"])).total_seconds() / 3600, 1)
+    return sorted(docs, key=lambda p: -p["elapsed_hours"])
 
 
 # ==================== Paramètres de période de paie ====================
@@ -1830,6 +1923,421 @@ async def delete_proposal(proposal_id: str, principal: dict = Depends(get_princi
     await db.schedule_proposals.delete_one({"id": proposal_id})
     await log_audit(principal["email"], principal["role"], "SUPPRESSION_HORAIRE_IA", "horaire", proposal_id,
                     f"Proposition d'horaire de la semaine du {doc['week_start']} supprimée", doc["pharmacy_id"])
+    return {"status": "supprimée"}
+
+
+# ==================== Évaluations de performance & suggestion salariale ====================
+
+def compute_answers_score(answers: dict) -> float:
+    vals = [int(v) for v in answers.values()]
+    if not vals or any(not (1 <= v <= 5) for v in vals):
+        raise HTTPException(status_code=400, detail="Réponses invalides (échelle de 1 à 5).")
+    return round(sum(vals) / (5 * len(vals)) * 100, 1)
+
+
+def compute_salary_suggestion(doc: dict) -> Optional[dict]:
+    admin_eval, self_eval = doc.get("admin_eval"), doc.get("self_eval")
+    if not admin_eval or not self_eval:
+        return None
+    perf = round(0.7 * admin_eval["score"] + 0.3 * self_eval["score"], 1)
+    if perf >= 90:
+        mult = 1.2
+    elif perf >= 75:
+        mult = 1.0
+    elif perf >= 60:
+        mult = 0.7
+    elif perf >= 45:
+        mult = 0.4
+    else:
+        mult = 0.0
+    inc = round(doc["baiia_increase_pct"] * mult, 2)
+    rate = round(doc["current_rate"] * (1 + inc / 100) * 20) / 20
+    return {"performance_score": perf, "multiplier": mult, "suggested_increase_pct": inc, "suggested_rate": rate}
+
+
+class EvaluationCreateIn(BaseModel):
+    employee_id: str
+    employee_name: str
+    current_rate: float
+    baiia_increase_pct: float
+
+
+class EmployerEvalIn(BaseModel):
+    answers: dict
+    strengths: str = ""
+    improvements: str = ""
+    objectives: str = ""
+
+
+class SelfEvalIn(BaseModel):
+    answers: dict
+    accomplishments: str = ""
+    needs: str = ""
+    goals: str = ""
+
+
+class ProposeRateIn(BaseModel):
+    proposed_rate: float
+
+
+class EvalRespondIn(BaseModel):
+    accepted: bool
+    comment: str = ""
+
+
+@api_router.post("/evaluations")
+async def create_evaluation(payload: EvaluationCreateIn, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    if payload.current_rate <= 0:
+        raise HTTPException(status_code=400, detail="Taux horaire actuel invalide.")
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "id": str(uuid.uuid4()), "pharmacy_id": pid,
+        "employee_id": payload.employee_id, "employee_name": payload.employee_name,
+        "current_rate": payload.current_rate, "baiia_increase_pct": payload.baiia_increase_pct,
+        "status": "en_cours", "admin_eval": None, "self_eval": None, "suggestion": None,
+        "proposed_rate": None, "proposed_at": None, "employee_decision": None,
+        "agreed_rate": None, "applied": False,
+        "created_by": principal["email"], "created_at": now, "updated_at": now,
+    }
+    await db.evaluations.insert_one({**doc})
+    await log_audit(principal["email"], principal["role"], "CREATION_EVALUATION", "évaluation", doc["id"],
+                    f"Évaluation lancée pour {payload.employee_name} (BAIIA +{payload.baiia_increase_pct} %)", pid)
+    return doc
+
+
+@api_router.get("/evaluations")
+async def list_evaluations(user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or ""
+    if user["role"] in ("admin", "superadmin"):
+        query: dict = {"pharmacy_id": pid} if pid else {}
+    else:
+        if not user.get("employee_id"):
+            return []
+        query = {"pharmacy_id": pid, "employee_id": user["employee_id"]}
+    return await db.evaluations.find(query, {"_id": 0}).sort("created_at", -1).to_list(200)
+
+
+async def get_evaluation_or_404(evaluation_id: str) -> dict:
+    doc = await db.evaluations.find_one({"id": evaluation_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Évaluation introuvable.")
+    return doc
+
+
+@api_router.put("/evaluations/{evaluation_id}/employer")
+async def submit_employer_eval(evaluation_id: str, payload: EmployerEvalIn, principal: dict = Depends(get_principal)):
+    doc = await get_evaluation_or_404(evaluation_id)
+    admin_eval = {"answers": payload.answers, "score": compute_answers_score(payload.answers),
+                  "strengths": payload.strengths, "improvements": payload.improvements,
+                  "objectives": payload.objectives, "completed_at": datetime.now(timezone.utc).isoformat(),
+                  "by": principal["email"]}
+    merged = {**doc, "admin_eval": admin_eval}
+    suggestion = compute_salary_suggestion(merged)
+    patch = {"admin_eval": admin_eval, "suggestion": suggestion,
+             "status": "a_proposer" if suggestion else "en_cours",
+             "updated_at": datetime.now(timezone.utc).isoformat()}
+    await db.evaluations.update_one({"id": evaluation_id}, {"$set": patch})
+    await log_audit(principal["email"], principal["role"], "EVALUATION_EMPLOYEUR", "évaluation", evaluation_id,
+                    f"Évaluation employeur de {doc['employee_name']} : {admin_eval['score']} %", doc["pharmacy_id"])
+    return {**merged, **patch}
+
+
+@api_router.put("/evaluations/{evaluation_id}/self")
+async def submit_self_eval(evaluation_id: str, payload: SelfEvalIn, user: dict = Depends(get_current_user)):
+    doc = await get_evaluation_or_404(evaluation_id)
+    if user["role"] == "employee" and user.get("employee_id") != doc["employee_id"]:
+        raise HTTPException(status_code=403, detail="Cette évaluation ne vous concerne pas.")
+    self_eval = {"answers": payload.answers, "score": compute_answers_score(payload.answers),
+                 "accomplishments": payload.accomplishments, "needs": payload.needs,
+                 "goals": payload.goals, "completed_at": datetime.now(timezone.utc).isoformat()}
+    merged = {**doc, "self_eval": self_eval}
+    suggestion = compute_salary_suggestion(merged)
+    patch = {"self_eval": self_eval, "suggestion": suggestion,
+             "status": "a_proposer" if suggestion else "en_cours",
+             "updated_at": datetime.now(timezone.utc).isoformat()}
+    await db.evaluations.update_one({"id": evaluation_id}, {"$set": patch})
+    await log_audit(user["email"], user["role"], "AUTO_EVALUATION", "évaluation", evaluation_id,
+                    f"Auto-évaluation de {doc['employee_name']} : {self_eval['score']} %", doc["pharmacy_id"])
+    return {**merged, **patch}
+
+
+@api_router.post("/evaluations/{evaluation_id}/propose")
+async def propose_rate(evaluation_id: str, payload: ProposeRateIn, principal: dict = Depends(get_principal)):
+    doc = await get_evaluation_or_404(evaluation_id)
+    if not doc.get("admin_eval") or not doc.get("self_eval"):
+        raise HTTPException(status_code=400, detail="Les deux évaluations doivent être complétées avant de proposer un salaire.")
+    if payload.proposed_rate <= 0:
+        raise HTTPException(status_code=400, detail="Taux proposé invalide.")
+    patch = {"proposed_rate": round(payload.proposed_rate, 2),
+             "proposed_at": datetime.now(timezone.utc).isoformat(),
+             "employee_decision": None, "status": "propose",
+             "updated_at": datetime.now(timezone.utc).isoformat()}
+    await db.evaluations.update_one({"id": evaluation_id}, {"$set": patch})
+    await log_audit(principal["email"], principal["role"], "PROPOSITION_SALAIRE", "évaluation", evaluation_id,
+                    f"Salaire proposé à {doc['employee_name']} : {patch['proposed_rate']} $/h "
+                    f"(actuel {doc['current_rate']} $/h)", doc["pharmacy_id"])
+    return {**doc, **patch}
+
+
+@api_router.post("/evaluations/{evaluation_id}/respond")
+async def respond_evaluation(evaluation_id: str, payload: EvalRespondIn, user: dict = Depends(get_current_user)):
+    doc = await get_evaluation_or_404(evaluation_id)
+    if user["role"] == "employee" and user.get("employee_id") != doc["employee_id"]:
+        raise HTTPException(status_code=403, detail="Cette évaluation ne vous concerne pas.")
+    if doc.get("proposed_rate") is None or doc["status"] not in ("propose",):
+        raise HTTPException(status_code=400, detail="Aucune proposition salariale en attente.")
+    decision = {"accepted": payload.accepted, "comment": payload.comment.strip(),
+                "at": datetime.now(timezone.utc).isoformat()}
+    patch: dict = {"employee_decision": decision, "updated_at": decision["at"]}
+    if payload.accepted:
+        patch["agreed_rate"] = doc["proposed_rate"]
+        patch["status"] = "accepte"
+        await db.employee_profiles.update_one(
+            {"pharmacy_id": doc["pharmacy_id"], "employee_id": doc["employee_id"]},
+            {"$set": {"hourly_rate": doc["proposed_rate"]}})
+    else:
+        patch["status"] = "refuse"
+    await db.evaluations.update_one({"id": evaluation_id}, {"$set": patch})
+    await log_audit(user["email"], user["role"],
+                    "SALAIRE_ACCEPTE" if payload.accepted else "SALAIRE_REFUSE",
+                    "évaluation", evaluation_id,
+                    f"{doc['employee_name']} a {'accepté' if payload.accepted else 'refusé'} le taux de {doc['proposed_rate']} $/h"
+                    + (f" — {decision['comment']}" if decision["comment"] else ""), doc["pharmacy_id"])
+    return {**doc, **patch}
+
+
+@api_router.post("/evaluations/{evaluation_id}/applied")
+async def mark_evaluation_applied(evaluation_id: str, principal: dict = Depends(get_principal)):
+    doc = await get_evaluation_or_404(evaluation_id)
+    if doc["status"] != "accepte":
+        raise HTTPException(status_code=400, detail="Le salaire doit d'abord être accepté par l'employé.")
+    await db.evaluations.update_one({"id": evaluation_id}, {"$set": {
+        "applied": True, "status": "applique", "updated_at": datetime.now(timezone.utc).isoformat()}})
+    await log_audit(principal["email"], principal["role"], "SALAIRE_APPLIQUE", "évaluation", evaluation_id,
+                    f"Nouveau taux de {doc['agreed_rate']} $/h appliqué au dossier de {doc['employee_name']}",
+                    doc["pharmacy_id"])
+    return {"status": "applique"}
+
+
+@api_router.delete("/evaluations/{evaluation_id}")
+async def delete_evaluation(evaluation_id: str, principal: dict = Depends(get_principal)):
+    doc = await get_evaluation_or_404(evaluation_id)
+    await db.evaluations.delete_one({"id": evaluation_id})
+    await log_audit(principal["email"], principal["role"], "SUPPRESSION_EVALUATION", "évaluation", evaluation_id,
+                    f"Évaluation de {doc['employee_name']} supprimée", doc["pharmacy_id"])
+    return {"status": "supprimée"}
+
+
+# ==================== Remplaçants : agences, demandes, offres ====================
+
+class AgencyIn(BaseModel):
+    name: str
+    email: str
+    roles: list[str]
+
+
+@api_router.get("/agencies")
+async def list_agencies(principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    return await db.agencies.find({"pharmacy_id": pid}, {"_id": 0}).sort("name", 1).to_list(200)
+
+
+@api_router.post("/agencies")
+async def create_agency(payload: AgencyIn, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    doc = {"id": str(uuid.uuid4()), "pharmacy_id": pid, "name": payload.name.strip(),
+           "email": payload.email.strip().lower(), "roles": payload.roles,
+           "created_at": datetime.now(timezone.utc).isoformat()}
+    await db.agencies.insert_one({**doc})
+    await log_audit(principal["email"], principal["role"], "AJOUT_AGENCE", "remplacement", doc["id"],
+                    f"Agence « {doc['name']} » ({', '.join(doc['roles'])}) ajoutée", pid)
+    return doc
+
+
+@api_router.delete("/agencies/{agency_id}")
+async def delete_agency(agency_id: str, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    doc = await db.agencies.find_one({"id": agency_id, "pharmacy_id": pid}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Agence introuvable.")
+    await db.agencies.delete_one({"id": agency_id})
+    await log_audit(principal["email"], principal["role"], "RETRAIT_AGENCE", "remplacement", agency_id,
+                    f"Agence « {doc['name']} » retirée", pid)
+    return {"status": "retirée"}
+
+
+class ReplacementSlot(BaseModel):
+    date: str
+    start: str
+    end: str
+
+
+class ReplacementRequestIn(BaseModel):
+    role: str
+    slots: list[ReplacementSlot]
+    notes: str = ""
+    urgency: str = "Normale"
+    public_base_url: str
+
+
+def replacement_email_html(pharmacy_name: str, role: str, slots: list, notes: str, urgency: str, link: str) -> str:
+    slot_lines = "".join(f"<li><strong>{s['date']}</strong> de {s['start']} à {s['end']}</li>" for s in slots)
+    return (
+        "<div style='font-family:Arial,sans-serif;max-width:640px;margin:0 auto;color:#0f172a'>"
+        "<h2 style='color:#059669'>LuminaHR — Demande de remplacement</h2>"
+        f"<p><strong>{pharmacy_name}</strong> recherche un(e) <strong>{role}</strong> (urgence : {urgency}).</p>"
+        f"<ul>{slot_lines}</ul>"
+        + (f"<p>Précisions : {notes}</p>" if notes else "")
+        + f"<p style='margin:24px 0'><a href='{link}' style='background:#059669;color:#ffffff;padding:12px 24px;"
+          "border-radius:9999px;text-decoration:none;font-weight:bold'>Voir la demande et proposer un remplaçant</a></p>"
+          "<p style='font-size:12px;color:#94a3b8'>Ce lien vous permet de consulter la demande et de soumettre votre candidat "
+          "directement — l'administration de la pharmacie recevra votre offre instantanément.</p>"
+        "</div>"
+    )
+
+
+@api_router.post("/replacements/requests")
+async def create_replacement_request(payload: ReplacementRequestIn, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    if not payload.slots:
+        raise HTTPException(status_code=400, detail="Ajoutez au moins une plage à combler.")
+    for s in payload.slots:
+        try:
+            date.fromisoformat(s.date)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Date de plage invalide.")
+    token = secrets.token_urlsafe(24)
+    link = f"{payload.public_base_url.rstrip('/')}/?remplacement={token}"
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "id": str(uuid.uuid4()), "pharmacy_id": pid, "role": payload.role,
+        "slots": [s.model_dump() for s in payload.slots], "notes": payload.notes.strip(),
+        "urgency": payload.urgency, "status": "open", "token": token, "link": link,
+        "chosen_offer_id": None, "emails_sent": 0,
+        "created_by": principal["email"], "created_at": now, "updated_at": now,
+    }
+    sent = 0
+    api_key = os.environ.get("RESEND_API_KEY", "")
+    agencies = await db.agencies.find({"pharmacy_id": pid, "roles": payload.role}, {"_id": 0}).to_list(200)
+    if api_key and agencies:
+        resend.api_key = api_key
+        sender = await get_sender()
+        pharmacy_name = "Pharmacie LuminaHR"
+        html = replacement_email_html(pharmacy_name, payload.role, doc["slots"], doc["notes"], doc["urgency"], link)
+        for ag in agencies:
+            try:
+                await asyncio.to_thread(resend.Emails.send, {
+                    "from": sender, "to": [ag["email"]],
+                    "subject": f"Demande de remplacement — {payload.role} ({doc['slots'][0]['date']})",
+                    "html": html})
+                sent += 1
+            except Exception as exc:
+                logger.error(f"Courriel agence {ag['email']} échoué : {exc}")
+    doc["emails_sent"] = sent
+    await db.replacement_requests.insert_one({**doc})
+    await log_audit(principal["email"], principal["role"], "DEMANDE_REMPLACEMENT", "remplacement", doc["id"],
+                    f"Demande {payload.role} ({len(payload.slots)} plage(s)) — {sent} courriel(s) envoyé(s) aux agences", pid)
+    return {k: v for k, v in doc.items() if k != "token"} | {"link": link}
+
+
+@api_router.get("/replacements/requests")
+async def list_replacement_requests(principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    docs = await db.replacement_requests.find({"pharmacy_id": pid}, {"_id": 0, "token": 0}).sort("created_at", -1).to_list(200)
+    for d in docs:
+        d["offers_count"] = await db.replacement_offers.count_documents({"request_id": d["id"]})
+    return docs
+
+
+@api_router.get("/replacements/requests/{request_id}/offers")
+async def list_replacement_offers(request_id: str, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    req = await db.replacement_requests.find_one({"id": request_id, "pharmacy_id": pid}, {"_id": 0})
+    if not req:
+        raise HTTPException(status_code=404, detail="Demande introuvable.")
+    return await db.replacement_offers.find({"request_id": request_id}, {"_id": 0}).sort("created_at", 1).to_list(200)
+
+
+@api_router.get("/replacements/public/{token}")
+async def public_replacement_request(token: str):
+    doc = await db.replacement_requests.find_one({"token": token}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Demande introuvable ou expirée.")
+    return {"role": doc["role"], "slots": doc["slots"], "notes": doc["notes"],
+            "urgency": doc["urgency"], "status": doc["status"], "created_at": doc["created_at"]}
+
+
+class ReplacementOfferIn(BaseModel):
+    agency_name: str
+    agency_email: str
+    candidate_name: str
+    license_number: str = ""
+    experience_years: int = 0
+    hourly_rate: float
+    phone: str = ""
+    email: str = ""
+    note: str = ""
+
+
+@api_router.post("/replacements/public/{token}/offers")
+async def submit_replacement_offer(token: str, payload: ReplacementOfferIn):
+    req = await db.replacement_requests.find_one({"token": token}, {"_id": 0})
+    if not req:
+        raise HTTPException(status_code=404, detail="Demande introuvable ou expirée.")
+    if req["status"] != "open":
+        raise HTTPException(status_code=400, detail="Cette demande est déjà comblée ou fermée.")
+    if payload.hourly_rate <= 0 or not payload.candidate_name.strip():
+        raise HTTPException(status_code=400, detail="Nom du remplaçant et taux horaire requis.")
+    doc = {
+        "id": str(uuid.uuid4()), "request_id": req["id"], "pharmacy_id": req["pharmacy_id"],
+        "agency_name": payload.agency_name.strip(), "agency_email": payload.agency_email.strip().lower(),
+        "candidate_name": payload.candidate_name.strip(), "license_number": payload.license_number.strip(),
+        "experience_years": payload.experience_years, "hourly_rate": round(payload.hourly_rate, 2),
+        "phone": payload.phone.strip(), "email": payload.email.strip().lower(), "note": payload.note.strip(),
+        "status": "received", "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.replacement_offers.insert_one({**doc})
+    await log_audit("agence", "public", "OFFRE_REMPLACEMENT", "remplacement", req["id"],
+                    f"Offre reçue de {doc['agency_name']} : {doc['candidate_name']} ({req['role']})", req["pharmacy_id"])
+    return {"status": "reçue", "id": doc["id"]}
+
+
+class ChooseOfferIn(BaseModel):
+    offer_id: str
+
+
+@api_router.post("/replacements/requests/{request_id}/choose")
+async def choose_replacement_offer(request_id: str, payload: ChooseOfferIn, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    req = await db.replacement_requests.find_one({"id": request_id, "pharmacy_id": pid}, {"_id": 0})
+    if not req:
+        raise HTTPException(status_code=404, detail="Demande introuvable.")
+    offer = await db.replacement_offers.find_one({"id": payload.offer_id, "request_id": request_id}, {"_id": 0})
+    if not offer:
+        raise HTTPException(status_code=404, detail="Offre introuvable.")
+    now = datetime.now(timezone.utc).isoformat()
+    await db.replacement_requests.update_one({"id": request_id}, {"$set": {
+        "status": "filled", "chosen_offer_id": offer["id"], "updated_at": now}})
+    await db.replacement_offers.update_one({"id": offer["id"]}, {"$set": {"status": "chosen"}})
+    await db.replacement_offers.update_many(
+        {"request_id": request_id, "id": {"$ne": offer["id"]}}, {"$set": {"status": "declined"}})
+    await log_audit(principal["email"], principal["role"], "CHOIX_REMPLACANT", "remplacement", request_id,
+                    f"{offer['candidate_name']} ({offer['agency_name']}) retenu(e) à {offer['hourly_rate']} $/h "
+                    f"pour {len(req['slots'])} plage(s)", pid)
+    return {"request": {**req, "status": "filled", "chosen_offer_id": offer["id"]}, "offer": offer}
+
+
+@api_router.delete("/replacements/requests/{request_id}")
+async def delete_replacement_request(request_id: str, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    req = await db.replacement_requests.find_one({"id": request_id, "pharmacy_id": pid}, {"_id": 0})
+    if not req:
+        raise HTTPException(status_code=404, detail="Demande introuvable.")
+    await db.replacement_requests.delete_one({"id": request_id})
+    await db.replacement_offers.delete_many({"request_id": request_id})
+    await log_audit(principal["email"], principal["role"], "SUPPRESSION_DEMANDE_REMPLACEMENT", "remplacement",
+                    request_id, f"Demande {req['role']} supprimée avec ses offres", pid)
     return {"status": "supprimée"}
 
 

@@ -329,6 +329,7 @@ export interface Training {
   pharmacy_id: string;
   title: string;
   status: TrainingStatus;
+  category?: string;
   error?: string | null;
   source_filename: string;
   source_size: number;
@@ -449,6 +450,8 @@ export interface PunchSummaryRow {
   punched_hours: number;
   manual_hours: number;
   total_hours: number;
+  regular_hours: number;
+  overtime_hours: number;
   entries: number;
   open_entries: number;
 }
@@ -508,6 +511,116 @@ export interface ScheduleProposal {
   deadline_passed: boolean;
   applied_at: string | null;
   created_by: string;
+  created_at: string;
+}
+
+export interface PunchPreview {
+  employee_name: string;
+  next_action: 'in' | 'out';
+  since: string | null;
+}
+
+export interface EvalSuggestion {
+  performance_score: number;
+  multiplier: number;
+  suggested_increase_pct: number;
+  suggested_rate: number;
+}
+
+export interface AdminEval {
+  answers: Record<string, number>;
+  score: number;
+  strengths: string;
+  improvements: string;
+  objectives: string;
+  completed_at: string;
+  by: string;
+}
+
+export interface SelfEval {
+  answers: Record<string, number>;
+  score: number;
+  accomplishments: string;
+  needs: string;
+  goals: string;
+  completed_at: string;
+}
+
+export type EvaluationStatus = 'en_cours' | 'a_proposer' | 'propose' | 'accepte' | 'refuse' | 'applique';
+
+export interface Evaluation {
+  id: string;
+  pharmacy_id: string;
+  employee_id: string;
+  employee_name: string;
+  current_rate: number;
+  baiia_increase_pct: number;
+  status: EvaluationStatus;
+  admin_eval: AdminEval | null;
+  self_eval: SelfEval | null;
+  suggestion: EvalSuggestion | null;
+  proposed_rate: number | null;
+  proposed_at: string | null;
+  employee_decision: { accepted: boolean; comment: string; at: string } | null;
+  agreed_rate: number | null;
+  applied: boolean;
+  created_by: string;
+  created_at: string;
+}
+
+export interface Agency {
+  id: string;
+  pharmacy_id: string;
+  name: string;
+  email: string;
+  roles: string[];
+  created_at: string;
+}
+
+export interface ReplacementSlotT {
+  date: string;
+  start: string;
+  end: string;
+}
+
+export interface ReplacementRequestDoc {
+  id: string;
+  pharmacy_id: string;
+  role: string;
+  slots: ReplacementSlotT[];
+  notes: string;
+  urgency: string;
+  status: 'open' | 'filled';
+  link?: string;
+  chosen_offer_id: string | null;
+  emails_sent: number;
+  offers_count?: number;
+  created_by: string;
+  created_at: string;
+}
+
+export interface ReplacementOfferDoc {
+  id: string;
+  request_id: string;
+  agency_name: string;
+  agency_email: string;
+  candidate_name: string;
+  license_number: string;
+  experience_years: number;
+  hourly_rate: number;
+  phone: string;
+  email: string;
+  note: string;
+  status: 'received' | 'chosen' | 'declined';
+  created_at: string;
+}
+
+export interface PublicReplacementRequest {
+  role: string;
+  slots: ReplacementSlotT[];
+  notes: string;
+  urgency: string;
+  status: string;
   created_at: string;
 }
 
