@@ -1401,13 +1401,29 @@ async def do_punch(pharmacy_id: str, employee_id: str, employee_name: str, sourc
 
 
 @api_router.post("/punch")
-async def punch_by_code(payload: PunchCodeIn):
+async def punch_by_code(payload: PunchCodeIn, request: Request):
     code = payload.code.strip()
     if len(code) != 4 or not code.isdigit():
         raise HTTPException(status_code=400, detail="NIP invalide (4 chiffres).")
+    fwd = request.headers.get("x-forwarded-for", "")
+    ip = fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else "inconnu")
+    identifier = f"punch:{ip}"
+    now = datetime.now(timezone.utc)
+    attempt = await db.login_attempts.find_one({"identifier": identifier}, {"_id": 0})
+    if attempt and attempt.get("locked_until") and datetime.fromisoformat(attempt["locked_until"]) > now:
+        raise HTTPException(status_code=429,
+                            detail="Trop de NIP invalides. Borne verrouillée quelques minutes — contactez l'administration.",
+                            headers={"Retry-After": str(LOCKOUT_MINUTES * 60)})
     prof = await db.employee_profiles.find_one({"punch_code": code}, {"_id": 0})
     if not prof:
+        count = (attempt.get("count", 0) if attempt else 0) + 1
+        update = {"identifier": identifier, "count": count, "updated_at": now.isoformat()}
+        if count >= LOCKOUT_ATTEMPTS:
+            update["locked_until"] = (now + timedelta(minutes=LOCKOUT_MINUTES)).isoformat()
+            update["count"] = 0
+        await db.login_attempts.update_one({"identifier": identifier}, {"$set": update}, upsert=True)
         raise HTTPException(status_code=404, detail="NIP inconnu. Vérifiez votre code ou contactez l'administration.")
+    await db.login_attempts.delete_one({"identifier": identifier})
     return await do_punch(prof["pharmacy_id"], prof["employee_id"], prof.get("employee_name", ""), "punch", "borne")
 
 

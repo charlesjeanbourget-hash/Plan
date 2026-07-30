@@ -80,6 +80,14 @@ admin@luminahr.ca/admin123 · julie@luminahr.ca/employe123 · super@luminahr.ca/
 - Correctifs revue de code : validation format date (400), portée pharmacie des relances manuelles. NOTE : le testing agent avait écrasé la bannière d'échéance du viewer — re-ajoutée et vérifiée.
 - Assignation démo : Julie → Formation Proxim, échéance 2026-08-05 (réussie à 100 %).
 
+## Itération 7 (30 juin 2026) — testée à 100% (iteration_9.json : backend 68/68, frontend tous flux)
+- **Profils employés (MongoDB, synchro admin↔employé)** : disponibilités par jour (switch + plage horaire), heures min/max par semaine, rôles (22 rôles de pharmacie), capacités/tâches (28 tâches), restrictions (10 prédéfinies + libres), notes. Éditables par l'employé (Mon espace) ET l'admin (Dossiers employés). ProfileEditor partagé.
+- **Système de punch** : NIP personnel 4 chiffres (généré/réinitialisé par l'admin, affiché dans le profil). Borne kiosque publique (page d'accueil → « Borne de punch », pavé numérique sombre) + punch depuis Mon espace (MyPunchCard). Saisie manuelle admin journalisée. Anti-énumération : 5 NIP invalides par IP → verrou 15 min (429). Panneau « Heures punchées » dans Paie : résumé par employé (punchées/manuelles/total), détails avec suppression, création d'entrée de paie à partir des heures punchées UNIQUEMENT (gross = h × taux, déductions 25 %).
+- **Période de paie configurable** : hebdomadaire ou aux 2 semaines + date d'ancrage (choix du client admin), navigation entre périodes.
+- **Horaires générés par IA (gpt-5.4) avec double approbation** : l'admin fournit semaine + consignes + délai (24/48/72h/7j) ; l'IA respecte les profils (vérifié : Julie sans mercredi/soir/week-end, 24 h dans sa fourchette). Admin approuve → chaque employé approuve/refuse depuis Mon espace (avec commentaire) → approbation tacite au délai écoulé sans refus → « Appliquer à l'horaire » (bloqué 400 sinon — fix testé) ajoute les quarts à la grille. Notification cloche « Horaire à approuver » pour les employés.
+- Données démo : NIP Julie (e2) 7068, NIP Karim (e3) 1976, proposition cb21ac33 (semaine 2026-08-03 : admin ✓, Julie ✓, e1/e3 en attente).
+- Nouveaux fichiers : ProfileEditor, PunchKiosk, MyPunchCard, MyProposalsPanel, ScheduleProposals, PunchHoursPanel (.tsx) + lib/pharmacy.ts.
+
 ## Notes techniques
 - Ne jamais recréer `jsconfig.json` (conflit CRA avec tsconfig.json)
 - npm interdit — yarn uniquement
