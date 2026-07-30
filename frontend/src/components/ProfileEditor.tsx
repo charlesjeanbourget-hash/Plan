@@ -129,16 +129,16 @@ export const ProfileEditor = ({ employeeId, employeeName, canManageCode }: Props
             {DAY_KEYS.map((d) => {
               const day = profile.availability[d];
               return (
-                <div key={d} className="flex items-center gap-3">
+                <div key={d} className="flex flex-wrap items-center gap-2 sm:gap-3">
                   <Switch
                     data-testid={`availability-toggle-${d}`}
                     checked={day.available}
                     onCheckedChange={(v: boolean) => patchDay(d, { available: v })}
                   />
-                  <span className={`w-20 text-sm font-semibold ${day.available ? 'text-slate-800' : 'text-slate-400 line-through'}`}>{DAY_NAMES[d]}</span>
-                  <Input type="time" className="w-28 h-8 text-xs" disabled={!day.available} value={day.start} onChange={(e) => patchDay(d, { start: e.target.value })} />
+                  <span className={`w-16 sm:w-20 text-sm font-semibold ${day.available ? 'text-slate-800' : 'text-slate-400 line-through'}`}>{DAY_NAMES[d]}</span>
+                  <Input type="time" className="w-24 sm:w-28 h-8 text-xs" disabled={!day.available} value={day.start} onChange={(e) => patchDay(d, { start: e.target.value })} />
                   <span className="text-slate-400 text-xs">à</span>
-                  <Input type="time" className="w-28 h-8 text-xs" disabled={!day.available} value={day.end} onChange={(e) => patchDay(d, { end: e.target.value })} />
+                  <Input type="time" className="w-24 sm:w-28 h-8 text-xs" disabled={!day.available} value={day.end} onChange={(e) => patchDay(d, { end: e.target.value })} />
                 </div>
               );
             })}

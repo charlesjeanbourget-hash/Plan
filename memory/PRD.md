@@ -103,6 +103,12 @@ admin@luminahr.ca/admin123 · julie@luminahr.ca/employe123 · super@luminahr.ca/
 - **Remplaçant à l'horaire** : GET /replacements/requests enrichi de chosen_offer ; la grille Horaires (admin) affiche une ligne « Remplaçants (agence) » avec puces bronze (heures + candidat + rôle) aux dates comblées ; la carte de demande affiche « Retenu : candidat (agence) ».
 - Nouveaux fichiers : BrandLogo.tsx, SalaryHistory.tsx, assets.d.ts, assets/logo-arriere-plan.png ; réécrits : LandingPage, Sidebar, PunchKiosk (clair), AgencyPortal (clair).
 
+## Itération 10 (30 juin 2026) — Typographie premium + responsive + favicon — testée (iteration_12.json, ~97 % → 100 % après correctif)
+- **Nouvelle typographie « haut de gamme »** : titres en **Fraunces** (serif éditorial, letter-spacing -0.015em) + corps en **Archivo**, chargées via <link> dans public/index.html (Manrope/Figtree retirées, @import CSS supprimé).
+- **Favicon** : logo Arrière Plan recadré (emblème carré) → public/favicon.png (256), favicon.ico, apple-touch-icon.png (180) ; index.html : lang="fr", title « Arrière Plan — SIRH pour pharmacies », theme-color #059669, meta description.
+- **Responsive complet (390/768/1920)** : BrandLogo responsive + wordmark masqué <480px dans les headers publics (prop hideTextOnSmall) ; header landing compact mobile ; main de l'app avec pt-20 mobile (plus de chevauchement hamburger/cloche) ; flex-wrap sur les contrôles (Paie, Horaires, Licences) ; select pleine largeur mobile ; paddings réduits mobile (login, cartes landing, page publique agence) ; ProfileEditor : lignes de disponibilités wrap + inputs réduits (corrige les 33px de scroll horizontal sur Employés / Mon espace).
+- Validé par testing agent aux 3 viewports sur TOUTES les pages (14 modules admin, pages publiques, kiosque, portails, cloche, dialogues).
+
 ## Notes techniques
 - Ne jamais recréer `jsconfig.json` (conflit CRA avec tsconfig.json)
 - npm interdit — yarn uniquement
