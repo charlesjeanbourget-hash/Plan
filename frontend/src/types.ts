@@ -458,6 +458,8 @@ export interface ShiftTask {
   description: string;
   assignee_employee_id: string;
   assignee_name: string;
+  recurring?: boolean;
+  series_id?: string;
   done: boolean;
   done_by: string;
   done_at: string | null;

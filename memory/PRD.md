@@ -116,6 +116,11 @@ admin@luminahr.ca/admin123 · julie@luminahr.ca/employe123 · super@luminahr.ca/
 - **Comparatif d'équipe** (module Performance, admin) : tableau classé par score global (dernière évaluation par employé), trophées top 3, colonnes employeur/auto/global/augmentation suggérée/statut.
 - **PWA installable** : public/manifest.json (« Arrière Plan », standalone, icônes 192/512 générées du logo), sw.js minimal enregistré dans index.tsx, metas Apple → ajout à l'écran d'accueil iOS/Android pour puncher et voir l'horaire.
 
+## Itération 12 (30 juin 2026) — Tâches récurrentes + rappels de fin de quart — testée (curl backend complet + screenshot UI)
+- **Tâches récurrentes « chaque semaine »** : case « Se répète chaque semaine » à la création (champ recurring + series_id) ; matérialisation automatique et idempotente à la lecture (GET /api/tasks crée l'instance de la semaine demandée si absente, même jour + même quart, max 31 jours de plage) ; icône Repeat bronze sur la tâche (admin : clic pour activer/désactiver la série via PUT /api/tasks/{id}/recurring — propagé à toutes les instances) ; supprimer une tâche récurrente arrête aussi la série (series_stopped) pour éviter les réapparitions.
+- **Rappels de fin de quart** : courriel automatique au(x) gestionnaire(s) de la pharmacie listant les tâches NON cochées du quart — crons America/Montreal : Matin 12 h, Après-midi 17 h, Soir 21 h 30 ; endpoint manuel POST /api/tasks/reminders/run?shift=&date= → {sent, par_quart} ; audit journalisé. Vérifié : l'envoi est bien tenté (bloqué seulement par le mode test Resend qui n'autorise que l'adresse du propriétaire — connu, en attente de vérification du domaine).
+- UI : sous-titre admin mentionne les heures d'envoi ; toasts adaptés ; testids task-recurring-checkbox / task-recurring-toggle-{id}.
+
 ## Notes techniques
 - Ne jamais recréer `jsconfig.json` (conflit CRA avec tsconfig.json)
 - npm interdit — yarn uniquement

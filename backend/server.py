@@ -2201,6 +2201,7 @@ class ShiftTaskIn(BaseModel):
     description: str = ""
     assignee_employee_id: str = ""
     assignee_name: str = ""
+    recurring: bool = False
 
 
 class TaskCopyWeekIn(BaseModel):
@@ -2211,6 +2212,8 @@ class TaskCopyWeekIn(BaseModel):
 @api_router.get("/tasks")
 async def list_tasks(start: str = Query(...), end: str = Query(...), user: dict = Depends(get_current_user)):
     pid = user.get("pharmacy_id") or ""
+    if pid:
+        await materialize_recurring_tasks(pid, start, end)
     query: dict = {"pharmacy_id": pid, "date": {"$gte": start, "$lte": end}}
     if user["role"] not in ("admin", "superadmin"):
         eid = user.get("employee_id") or ""
@@ -2222,8 +2225,9 @@ async def list_tasks(start: str = Query(...), end: str = Query(...), user: dict 
 async def create_task(payload: ShiftTaskIn, principal: dict = Depends(get_principal)):
     if not payload.title.strip():
         raise HTTPException(status_code=400, detail="Le titre de la tâche est requis.")
+    task_id = str(uuid.uuid4())
     doc = {
-        "id": str(uuid.uuid4()),
+        "id": task_id,
         "pharmacy_id": principal["pharmacy_id"] or "ph1",
         "date": payload.date,
         "shift": payload.shift,
@@ -2231,6 +2235,8 @@ async def create_task(payload: ShiftTaskIn, principal: dict = Depends(get_princi
         "description": payload.description.strip(),
         "assignee_employee_id": payload.assignee_employee_id,
         "assignee_name": payload.assignee_name,
+        "recurring": payload.recurring,
+        "series_id": task_id if payload.recurring else "",
         "done": False,
         "done_by": "",
         "done_at": None,
@@ -2295,9 +2301,136 @@ async def delete_task(task_id: str, principal: dict = Depends(get_principal)):
     if not doc:
         raise HTTPException(status_code=404, detail="Tâche introuvable.")
     await db.shift_tasks.delete_one({"id": task_id})
+    series_stopped = False
+    if doc.get("series_id"):
+        await db.shift_tasks.update_many({"series_id": doc["series_id"]}, {"$set": {"recurring": False}})
+        series_stopped = bool(doc.get("recurring"))
     await log_audit(principal["email"], principal["role"], "SUPPRESSION_TACHE", "tâche", task_id,
                     f"Tâche « {doc['title']} » supprimée", doc["pharmacy_id"])
-    return {"status": "supprimée"}
+    return {"status": "supprimée", "series_stopped": series_stopped}
+
+
+# ---------------------- Tâches récurrentes + rappels de fin de quart ----------------------
+
+async def materialize_recurring_tasks(pid: str, start: str, end: str) -> None:
+    try:
+        start_d = datetime.fromisoformat(start).date()
+        end_d = datetime.fromisoformat(end).date()
+    except ValueError:
+        return
+    if (end_d - start_d).days > 31 or end_d < start_d:
+        return
+    series_docs = await db.shift_tasks.find(
+        {"pharmacy_id": pid, "series_id": {"$nin": ["", None]}}, {"_id": 0}).to_list(2000)
+    templates: dict = {}
+    for d in series_docs:
+        cur = templates.get(d["series_id"])
+        if not cur or d["date"] > cur["date"]:
+            templates[d["series_id"]] = d
+    for sid, tpl in templates.items():
+        if not tpl.get("recurring"):
+            continue
+        tpl_date = datetime.fromisoformat(tpl["date"]).date()
+        day = start_d
+        while day <= end_d:
+            if day.weekday() == tpl_date.weekday() and day > tpl_date:
+                exists = await db.shift_tasks.find_one({"series_id": sid, "date": day.isoformat()})
+                if not exists:
+                    await db.shift_tasks.insert_one({
+                        **tpl, "id": str(uuid.uuid4()), "date": day.isoformat(),
+                        "done": False, "done_by": "", "done_at": None,
+                        "created_at": datetime.now(timezone.utc).isoformat()})
+            day += timedelta(days=1)
+
+
+class TaskRecurringIn(BaseModel):
+    recurring: bool
+
+
+@api_router.put("/tasks/{task_id}/recurring")
+async def set_task_recurring(task_id: str, payload: TaskRecurringIn, principal: dict = Depends(get_principal)):
+    doc = await db.shift_tasks.find_one({"id": task_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Tâche introuvable.")
+    sid = doc.get("series_id") or doc["id"]
+    await db.shift_tasks.update_many(
+        {"$or": [{"series_id": sid}, {"id": task_id}]},
+        {"$set": {"recurring": payload.recurring, "series_id": sid}})
+    await log_audit(principal["email"], principal["role"], "RECURRENCE_TACHE", "tâche", task_id,
+                    f"Récurrence hebdomadaire {'activée' if payload.recurring else 'désactivée'} pour « {doc['title']} »",
+                    doc["pharmacy_id"])
+    return {**doc, "recurring": payload.recurring, "series_id": sid}
+
+
+TASK_SHIFTS = ["Matin", "Après-midi", "Soir"]
+
+
+def unfinished_tasks_html(shift: str, date_str: str, tasks: list) -> str:
+    rows = "".join(
+        f"<li style='margin-bottom:6px'><strong>{t['title']}</strong>"
+        f"{(' — ' + t['assignee_name']) if t.get('assignee_name') else ' — Toute l’équipe'}"
+        f"{(' <span style=&quot;color:#64748b&quot;>(' + t['description'] + ')</span>') if t.get('description') else ''}</li>"
+        for t in tasks)
+    return (
+        "<div style='font-family:Arial,sans-serif;max-width:640px;margin:0 auto;color:#0f172a'>"
+        "<h2 style='color:#059669'>Arrière Plan — Tâches non complétées</h2>"
+        f"<p>Le quart <strong>{shift}</strong> du <strong>{date_str}</strong> se termine et "
+        f"<strong>{len(tasks)} tâche(s)</strong> n'ont pas été cochées :</p>"
+        f"<ul>{rows}</ul>"
+        "<p>Ouvrez le module « Tâches par quart » pour faire le suivi avec votre équipe.</p>"
+        "<p style='font-size:12px;color:#94a3b8;margin-top:24px'>Résumé automatique de fin de quart envoyé par Arrière Plan.</p>"
+        "</div>")
+
+
+async def send_shift_task_reminders(shift: str, date_str: str = "") -> int:
+    api_key = os.environ.get("RESEND_API_KEY", "")
+    if not api_key:
+        logger.warning("Rappels tâches non faites : RESEND_API_KEY manquante, envoi ignoré.")
+        return 0
+    today = date_str or datetime.now(timezone.utc).astimezone(MONTREAL_TZ).date().isoformat()
+    pending = await db.shift_tasks.find({"date": today, "shift": shift, "done": False}, {"_id": 0}).to_list(500)
+    if not pending:
+        return 0
+    resend.api_key = api_key
+    sender = await get_sender()
+    by_pharmacy: dict = {}
+    for t in pending:
+        by_pharmacy.setdefault(t["pharmacy_id"], []).append(t)
+    sent = 0
+    for pid, tasks in by_pharmacy.items():
+        admins = await db.users.find({"role": "admin", "pharmacy_id": pid}, {"_id": 0}).to_list(50)
+        html = unfinished_tasks_html(shift, today, tasks)
+        for a in admins:
+            if not a.get("email"):
+                continue
+            try:
+                await asyncio.to_thread(resend.Emails.send, {
+                    "from": sender, "to": [a["email"]],
+                    "subject": f"{len(tasks)} tâche(s) non faite(s) — quart {shift} du {today}",
+                    "html": html})
+                sent += 1
+            except Exception as exc:
+                logger.error(f"Rappel tâches ({shift}) vers {a['email']} échoué : {exc}")
+        await log_audit("système", "system", "RAPPEL_TACHES_QUART", "tâche", today,
+                        f"Quart {shift} : {len(tasks)} tâche(s) non complétée(s), {sent} courriel(s) envoyé(s)", pid)
+    return sent
+
+
+@api_router.post("/tasks/reminders/run")
+async def run_task_reminders(shift: str = Query(""), date: str = Query(""), principal: dict = Depends(get_principal)):
+    shifts = [shift] if shift else TASK_SHIFTS
+    details: dict = {}
+    total = 0
+    for s in shifts:
+        n = await send_shift_task_reminders(s, date)
+        details[s] = n
+        total += n
+    return {"sent": total, "par_quart": details}
+
+
+async def shift_task_reminders_job(shift: str):
+    sent = await send_shift_task_reminders(shift)
+    logger.info(f"Rappels tâches non faites ({shift}) : {sent} courriel(s) envoyé(s)")
 
 
 # ==================== Remplaçants : agences, demandes, offres ====================
@@ -2642,6 +2775,9 @@ async def startup_tasks():
     scheduler.add_job(license_reminders_job, CronTrigger(hour=8, minute=30))
     scheduler.add_job(training_reminders_job, CronTrigger(hour=8, minute=45))
     scheduler.add_job(evaluation_reminders_job, CronTrigger(hour=9, minute=0))
+    scheduler.add_job(shift_task_reminders_job, CronTrigger(hour=12, minute=0), args=["Matin"])
+    scheduler.add_job(shift_task_reminders_job, CronTrigger(hour=17, minute=0), args=["Après-midi"])
+    scheduler.add_job(shift_task_reminders_job, CronTrigger(hour=21, minute=30), args=["Soir"])
     scheduler.start()
 
 

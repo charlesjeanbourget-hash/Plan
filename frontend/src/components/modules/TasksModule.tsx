@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, ChevronLeft, ChevronRight, Trash2, CopyPlus, Sunrise, Sun, Moon, LucideIcon } from 'lucide-react';
+import { Plus, ChevronLeft, ChevronRight, Trash2, CopyPlus, Sunrise, Sun, Moon, Repeat, LucideIcon } from 'lucide-react';
 import { toast } from 'sonner';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -51,6 +51,7 @@ export default function TasksModule(): JSX.Element {
   const [tTitle, setTTitle] = useState('');
   const [tDescription, setTDescription] = useState('');
   const [tAssignee, setTAssignee] = useState('team');
+  const [tRecurring, setTRecurring] = useState(false);
 
   const monday = mondayOf(weekOffset);
   const days = Array.from({ length: 7 }, (_, i) => {
@@ -88,9 +89,21 @@ export default function TasksModule(): JSX.Element {
 
   const remove = async (t: ShiftTask): Promise<void> => {
     try {
-      await axios.delete(`${API}/tasks/${t.id}`, { headers });
+      const res = await axios.delete<{ status: string; series_stopped: boolean }>(`${API}/tasks/${t.id}`, { headers });
       setTasks((prev) => prev.filter((x) => x.id !== t.id));
-      toast.success('Tâche supprimée.');
+      toast.success(res.data.series_stopped ? 'Tâche supprimée — la répétition hebdomadaire de cette série est arrêtée.' : 'Tâche supprimée.');
+    } catch (err) {
+      toast.error(apiError(err));
+    }
+  };
+
+  const toggleRecurring = async (t: ShiftTask): Promise<void> => {
+    try {
+      await axios.put(`${API}/tasks/${t.id}/recurring`, { recurring: !t.recurring }, { headers });
+      toast.success(!t.recurring
+        ? `« ${t.title} » reviendra automatiquement chaque semaine.`
+        : `« ${t.title} » ne se répétera plus.`);
+      await refresh();
     } catch (err) {
       toast.error(apiError(err));
     }
@@ -114,6 +127,7 @@ export default function TasksModule(): JSX.Element {
     setTTitle('');
     setTDescription('');
     setTAssignee('team');
+    setTRecurring(false);
     setCreateOpen(true);
   };
 
@@ -128,8 +142,9 @@ export default function TasksModule(): JSX.Element {
         description: tDescription,
         assignee_employee_id: emp ? emp.id : '',
         assignee_name: emp ? `${emp.firstName} ${emp.lastName}` : '',
+        recurring: tRecurring,
       }, { headers });
-      toast.success('Tâche ajoutée au quart.');
+      toast.success(tRecurring ? 'Tâche ajoutée — elle reviendra automatiquement chaque semaine.' : 'Tâche ajoutée au quart.');
       setCreateOpen(false);
       await refresh();
     } catch (err) {
@@ -145,7 +160,7 @@ export default function TasksModule(): JSX.Element {
       <ModuleHeader
         title="Tâches par quart"
         subtitle={isAdmin
-          ? 'Distribuez les tâches de la semaine par quart de travail — l\'équipe les coche au fur et à mesure.'
+          ? 'Distribuez les tâches de la semaine par quart — l\'équipe les coche au fur et à mesure. Un courriel récapitulatif des tâches non faites vous est envoyé à la fin de chaque quart (12 h, 17 h, 21 h 30).'
           : 'Vos tâches de la semaine, quart par quart. Cochez-les dès qu\'elles sont faites.'}
         action={isAdmin ? (
           <div className="flex flex-wrap gap-2">
@@ -214,9 +229,23 @@ export default function TasksModule(): JSX.Element {
                               {t.description && <p className="text-xs text-slate-500">{t.description}</p>}
                               <p className="text-[11px] text-slate-400 mt-0.5">
                                 {t.assignee_name ? t.assignee_name : 'Toute l\'équipe'}
+                                {t.recurring && <> · chaque semaine</>}
                                 {t.done && t.done_by && <> · fait par {t.done_by}</>}
                               </p>
                             </div>
+                            {isAdmin && (t.recurring || t.series_id) ? (
+                              <button
+                                data-testid={`task-recurring-toggle-${t.id}`}
+                                onClick={() => void toggleRecurring(t)}
+                                title={t.recurring ? 'Se répète chaque semaine — cliquer pour arrêter' : 'Récurrence arrêtée — cliquer pour réactiver'}
+                                className={`transition-colors ${t.recurring ? 'text-bronze-600 hover:text-bronze-800' : 'text-slate-300 hover:text-bronze-600'}`}
+                                aria-label="Récurrence hebdomadaire"
+                              >
+                                <Repeat className="w-3.5 h-3.5" />
+                              </button>
+                            ) : (
+                              t.recurring && <Repeat className="w-3.5 h-3.5 text-bronze-600 shrink-0" data-testid={`task-recurring-badge-${t.id}`} />
+                            )}
                             {isAdmin && (
                               <button data-testid={`task-delete-${t.id}`} onClick={() => void remove(t)} className="text-slate-300 hover:text-red-500 transition-colors" aria-label="Supprimer">
                                 <Trash2 className="w-3.5 h-3.5" />
@@ -280,6 +309,13 @@ export default function TasksModule(): JSX.Element {
                 </SelectContent>
               </Select>
             </div>
+            <label className="flex items-start gap-2.5 rounded-lg border border-slate-200 px-3 py-2.5 cursor-pointer hover:border-bronze-300 transition-colors">
+              <Checkbox data-testid="task-recurring-checkbox" checked={tRecurring} onCheckedChange={(v) => setTRecurring(v === true)} className="mt-0.5" />
+              <span className="text-sm text-slate-700">
+                <span className="font-semibold inline-flex items-center gap-1.5"><Repeat className="w-3.5 h-3.5 text-bronze-600" /> Se répète chaque semaine</span>
+                <span className="block text-xs text-slate-500">La tâche reviendra automatiquement le même jour et le même quart, sans duplication manuelle.</span>
+              </span>
+            </label>
             <Button data-testid="task-submit-button" type="submit" disabled={!tTitle.trim()} className="w-full rounded-full bg-emerald-600 hover:bg-emerald-700">
               Ajouter la tâche
             </Button>
