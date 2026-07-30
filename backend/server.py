@@ -2433,6 +2433,107 @@ async def shift_task_reminders_job(shift: str):
     logger.info(f"Rappels tâches non faites ({shift}) : {sent} courriel(s) envoyé(s)")
 
 
+# ---------------------- Modèles de tâches + statistiques ----------------------
+
+class TaskBulkItem(BaseModel):
+    title: str
+    description: str = ""
+
+
+class TaskBulkIn(BaseModel):
+    date: str
+    shift: str = "Matin"
+    recurring: bool = False
+    items: list[TaskBulkItem]
+
+
+@api_router.post("/tasks/bulk")
+async def create_tasks_bulk(payload: TaskBulkIn, principal: dict = Depends(get_principal)):
+    created = 0
+    for item in payload.items:
+        if not item.title.strip():
+            continue
+        tid = str(uuid.uuid4())
+        await db.shift_tasks.insert_one({
+            "id": tid,
+            "pharmacy_id": principal["pharmacy_id"] or "ph1",
+            "date": payload.date,
+            "shift": payload.shift,
+            "title": item.title.strip(),
+            "description": item.description.strip(),
+            "assignee_employee_id": "",
+            "assignee_name": "",
+            "recurring": payload.recurring,
+            "series_id": tid if payload.recurring else "",
+            "done": False,
+            "done_by": "",
+            "done_at": None,
+            "created_by": principal["email"],
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        created += 1
+    await log_audit(principal["email"], principal["role"], "AJOUT_MODELE_TACHES", "tâche", payload.date,
+                    f"{created} tâche(s) ajoutée(s) ({payload.date}, quart {payload.shift})",
+                    principal["pharmacy_id"] or "ph1")
+    return {"created": created}
+
+
+def _rate(done: int, total: int) -> int:
+    return round(done / total * 100) if total else 0
+
+
+@api_router.get("/tasks/stats")
+async def task_stats(weeks: int = Query(8, ge=1, le=26), principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    today = datetime.now(timezone.utc).astimezone(MONTREAL_TZ).date()
+    monday = today - timedelta(days=today.weekday())
+    start = monday - timedelta(weeks=weeks - 1)
+    docs = await db.shift_tasks.find(
+        {"pharmacy_id": pid, "date": {"$gte": start.isoformat(), "$lte": today.isoformat()}},
+        {"_id": 0}).to_list(5000)
+    weekly: dict = {}
+    by_shift: dict = {}
+    by_employee: dict = {}
+    team = {"total": 0, "done": 0}
+    for t in docs:
+        d = datetime.fromisoformat(t["date"]).date()
+        wk = (d - timedelta(days=d.weekday())).isoformat()
+        w = weekly.setdefault(wk, {"week_start": wk, "total": 0, "done": 0})
+        w["total"] += 1
+        s = by_shift.setdefault(t["shift"], {"shift": t["shift"], "total": 0, "done": 0})
+        s["total"] += 1
+        done = bool(t.get("done"))
+        if done:
+            w["done"] += 1
+            s["done"] += 1
+        name = t.get("assignee_name") or ""
+        if name:
+            e = by_employee.setdefault(name, {"name": name, "total": 0, "done": 0, "team_checks": 0})
+            e["total"] += 1
+            if done:
+                e["done"] += 1
+        else:
+            team["total"] += 1
+            if done:
+                team["done"] += 1
+                checker = t.get("done_by") or ""
+                if checker:
+                    e = by_employee.setdefault(checker, {"name": checker, "total": 0, "done": 0, "team_checks": 0})
+                    e["team_checks"] += 1
+    for coll in (weekly, by_shift, by_employee):
+        for v in coll.values():
+            v["rate"] = _rate(v.get("done", 0), v.get("total", 0))
+    team["rate"] = _rate(team["done"], team["total"])
+    shifts_sorted = [by_shift[s] for s in TASK_SHIFTS if s in by_shift] + \
+                    [v for k, v in by_shift.items() if k not in TASK_SHIFTS]
+    return {
+        "weekly": sorted(weekly.values(), key=lambda x: x["week_start"], reverse=True),
+        "by_shift": shifts_sorted,
+        "by_employee": sorted(by_employee.values(), key=lambda x: (-x["rate"], x["name"])),
+        "team": team,
+    }
+
+
 # ==================== Remplaçants : agences, demandes, offres ====================
 
 class AgencyIn(BaseModel):
