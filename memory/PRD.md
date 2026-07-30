@@ -96,6 +96,13 @@ admin@luminahr.ca/admin123 · julie@luminahr.ca/employe123 · super@luminahr.ca/
 - Nouveaux fichiers : EvaluationDetail.tsx, MyEvaluationsPanel.tsx, RatingScale.tsx, PublicReplacementPage.tsx ; réécrits : PerformanceModule.tsx, ReplacementModule.tsx, PunchKiosk.tsx ; lib/evaluations.ts (questions + MULTIPLIER_GRID).
 - Fix post-test : payload de POST /replacements/requests/{id}/choose renvoie maintenant l'offre avec status='chosen' (vérifié curl).
 
+## Itération 9 (30 juin 2026) — Rebrand « Arrière Plan » + 3 features — testée à 100 % (iteration_11.json)
+- **REBRAND complet LuminaHR → Arrière Plan** : nouveau logo (src/assets/logo-arriere-plan.png, composant BrandLogo avec wordmark « Arrière Plan »), palette blanc dominant + vert jade (emerald conservé) + **bronze/or** (nouvelle échelle Tailwind `bronze` 50-950, guidelines dans /app/design_guidelines.json). Toutes les pages restylées : landing (header blanc, cartes blanches hover bronze), login (logo + halos vert/bronze), **borne de punch passée en thème clair** (carte blanche + logo), portail agence passé en clair, portail carrières, page publique remplacement (header blanc + logo), **sidebar blanche** (item actif vert à barre latérale, rôle en bronze), barre dégradée vert→bronze sur tous les en-têtes de modules, badges « En attente » en bronze, carte suggestion BAIIA blanche à liseré bronze, PDF (relevés de paie liseré bronze, certificats bordure bronze), courriels renommés. Emails de connexion inchangés (@luminahr.ca). Nom interne APP_NAME (chemins storage) inchangé volontairement.
+- **Rappels d'auto-évaluation** : courriel automatique quotidien (9 h, cron APScheduler) à l'employé quand son auto-évaluation traîne ≥3 jours (anti-doublon self_reminder_at, relance max q3j) + endpoint manuel POST /api/evaluations/reminders/run + notifications cloche employé (« Auto-évaluation à compléter », « Proposition salariale reçue » → naviguent vers Mon espace).
+- **Historique salarial** : panneau SalaryHistory dans le dossier employé (admin) — taux actuel + chaque changement issu des évaluations (ancien → nouveau taux, % d'augmentation, score de performance, statut accepté/appliqué).
+- **Remplaçant à l'horaire** : GET /replacements/requests enrichi de chosen_offer ; la grille Horaires (admin) affiche une ligne « Remplaçants (agence) » avec puces bronze (heures + candidat + rôle) aux dates comblées ; la carte de demande affiche « Retenu : candidat (agence) ».
+- Nouveaux fichiers : BrandLogo.tsx, SalaryHistory.tsx, assets.d.ts, assets/logo-arriere-plan.png ; réécrits : LandingPage, Sidebar, PunchKiosk (clair), AgencyPortal (clair).
+
 ## Notes techniques
 - Ne jamais recréer `jsconfig.json` (conflit CRA avec tsconfig.json)
 - npm interdit — yarn uniquement
