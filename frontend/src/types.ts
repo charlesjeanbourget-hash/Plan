@@ -444,6 +444,10 @@ export interface Punch {
   note: string;
 }
 
+export interface OpenPunch extends Punch {
+  elapsed_hours: number;
+}
+
 export interface PunchSummaryRow {
   employee_id: string;
   employee_name: string;

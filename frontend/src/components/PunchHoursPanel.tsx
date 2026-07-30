@@ -2,14 +2,14 @@ import { useState, useEffect, useCallback, FormEvent } from 'react';
 import axios from 'axios';
 import { useAuth } from '@/context/AuthContext';
 import { useHR } from '@/context/HRContext';
-import { PaySettings, PunchSummaryRow, Punch } from '@/types';
+import { PaySettings, PunchSummaryRow, Punch, OpenPunch } from '@/types';
 import { fmtTime } from '@/lib/pharmacy';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Timer, ChevronLeft, ChevronRight, Plus, Trash2, Wallet, Settings2 } from 'lucide-react';
+import { Timer, ChevronLeft, ChevronRight, Plus, Trash2, Wallet, Settings2, Download, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -46,6 +46,8 @@ export const PunchHoursPanel = (): JSX.Element => {
   const [mStart, setMStart] = useState('09:00');
   const [mEnd, setMEnd] = useState('17:00');
   const [mNote, setMNote] = useState('');
+  const [openPunches, setOpenPunches] = useState<OpenPunch[]>([]);
+  const [closeTimes, setCloseTimes] = useState<Record<string, string>>({});
 
   const period = settings ? periodFor(settings, offset) : null;
 
@@ -61,6 +63,8 @@ export const PunchHoursPanel = (): JSX.Element => {
     try {
       const res = await axios.get<PunchSummaryRow[]>(`${API}/punches/summary?start=${period.start}&end=${period.end}`, { headers });
       setRows(res.data);
+      const op = await axios.get<OpenPunch[]>(`${API}/punches/open`, { headers });
+      setOpenPunches(op.data);
     } catch {
       toast.error('Impossible de charger les heures punchées.');
     }
@@ -123,6 +127,33 @@ export const PunchHoursPanel = (): JSX.Element => {
     }
   };
 
+  const exportCsv = async (): Promise<void> => {
+    if (!period) return;
+    try {
+      const res = await axios.get<Blob>(`${API}/punches/export?start=${period.start}&end=${period.end}`, { headers, responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `heures_${period.start}_${period.end}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('Export CSV des heures téléchargé (journalisé).');
+    } catch {
+      toast.error('Export impossible.');
+    }
+  };
+
+  const closeOpenPunch = async (p: OpenPunch): Promise<void> => {
+    try {
+      await axios.put(`${API}/punches/${p.id}`, { date: p.date, end_time: closeTimes[p.id] ?? '17:00' }, { headers });
+      toast.success(`Punch de ${p.employee_name} clôturé (correction journalisée).`);
+      await refresh();
+    } catch (err) {
+      const detail = axios.isAxiosError(err) && err.response ? (err.response.data as { detail?: unknown }).detail : null;
+      toast.error(typeof detail === 'string' ? detail : 'Clôture impossible.');
+    }
+  };
+
   const createPayrollEntry = (row: PunchSummaryRow): void => {
     if (!period) return;
     const emp = state.employees.find((e2) => e2.id === row.employee_id);
@@ -154,6 +185,9 @@ export const PunchHoursPanel = (): JSX.Element => {
           <Timer className="w-4 h-4 text-emerald-600" /> Heures punchées (source officielle de la paie)
         </h2>
         <div className="flex gap-2">
+          <Button data-testid="export-csv-button" size="sm" variant="outline" onClick={() => void exportCsv()} className="rounded-full text-xs">
+            <Download className="w-3.5 h-3.5 mr-1" /> Exporter CSV
+          </Button>
           <Button data-testid="add-manual-hours-button" size="sm" variant="outline" onClick={() => { setMEmployeeId(state.employees[0]?.id ?? ''); setManualOpen(true); }} className="rounded-full text-xs">
             <Plus className="w-3.5 h-3.5 mr-1" /> Saisie manuelle
           </Button>
@@ -165,6 +199,34 @@ export const PunchHoursPanel = (): JSX.Element => {
       <p className="text-xs text-slate-500 mb-4">
         Seules les heures punchées (NIP à la borne ou depuis « Mon espace ») et les saisies manuelles de l'administration sont comptabilisées.
       </p>
+
+      {openPunches.filter((p) => p.elapsed_hours >= 12).length > 0 && (
+        <div data-testid="forgotten-punch-alert" className="rounded-xl border border-red-200 bg-red-50 p-4 mb-4">
+          <p className="text-sm font-bold text-red-800 inline-flex items-center gap-2 mb-2">
+            <AlertTriangle className="w-4 h-4" /> Punch oublié ? Plus de 12 h sans sortie enregistrée
+          </p>
+          <div className="space-y-2">
+            {openPunches.filter((p) => p.elapsed_hours >= 12).map((p) => (
+              <div key={p.id} data-testid={`forgotten-punch-${p.id}`} className="flex flex-wrap items-center gap-3 text-sm text-red-900">
+                <span className="flex-1 min-w-[220px]">
+                  <strong>{p.employee_name}</strong> — entré(e) le {p.date} à {fmtTime(p.punch_in)} ({p.elapsed_hours} h écoulées)
+                </span>
+                <Input
+                  data-testid={`close-punch-time-${p.id}`}
+                  type="time"
+                  value={closeTimes[p.id] ?? '17:00'}
+                  onChange={(e) => setCloseTimes((prev) => ({ ...prev, [p.id]: e.target.value }))}
+                  className="w-28 h-8 bg-white"
+                />
+                <Button data-testid={`close-punch-${p.id}`} size="sm" onClick={() => void closeOpenPunch(p)} className="rounded-full bg-red-600 hover:bg-red-700 text-xs h-8">
+                  Clôturer à cette heure
+                </Button>
+              </div>
+            ))}
+          </div>
+          <p className="text-[11px] text-red-700/70 mt-2">La clôture inscrit la sortie à l'heure choisie le jour de l'entrée (correction journalisée dans l'audit).</p>
+        </div>
+      )}
 
       {period && (
         <div className="flex items-center gap-3 mb-4">
@@ -194,6 +256,7 @@ export const PunchHoursPanel = (): JSX.Element => {
               <th className="p-3 text-right">Punchées</th>
               <th className="p-3 text-right">Manuelles</th>
               <th className="p-3 text-right">Total</th>
+              <th className="p-3 text-right">Temps supp.</th>
               <th className="p-3 text-right">Actions</th>
             </tr>
           </thead>
@@ -207,6 +270,11 @@ export const PunchHoursPanel = (): JSX.Element => {
                 <td className="p-3 text-right text-slate-600">{r.punched_hours} h</td>
                 <td className="p-3 text-right text-slate-600">{r.manual_hours} h</td>
                 <td className="p-3 text-right font-bold text-emerald-700">{r.total_hours} h</td>
+                <td className="p-3 text-right" data-testid={`overtime-${r.employee_id}`}>
+                  {r.overtime_hours > 0
+                    ? <span className="font-semibold text-orange-600" title="Heures au-delà de 40 h/semaine">{r.overtime_hours} h</span>
+                    : <span className="text-slate-300">—</span>}
+                </td>
                 <td className="p-3 text-right">
                   <div className="flex gap-2 justify-end">
                     <Button data-testid={`punch-detail-${r.employee_id}`} size="sm" variant="outline" onClick={() => void openDetail(r)} className="rounded-full text-xs">
@@ -220,7 +288,7 @@ export const PunchHoursPanel = (): JSX.Element => {
               </tr>
             ))}
             {rows.length === 0 && (
-              <tr><td colSpan={5} className="p-6 text-center text-slate-500">Aucune heure punchée dans cette période.</td></tr>
+              <tr><td colSpan={6} className="p-6 text-center text-slate-500">Aucune heure punchée dans cette période.</td></tr>
             )}
           </tbody>
         </table>

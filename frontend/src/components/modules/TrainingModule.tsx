@@ -8,6 +8,7 @@ import TrainingViewer from '@/components/modules/TrainingViewer';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { GraduationCap, Plus, Loader2, Trash2, FileUp, CheckCircle2, AlertTriangle } from 'lucide-react';
@@ -35,8 +36,10 @@ export default function TrainingModule(): JSX.Element {
   const [trainings, setTrainings] = useState<Training[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [mode, setMode] = useState<'pdf' | 'text'>('pdf');
   const [title, setTitle] = useState('');
   const [file, setFile] = useState<File | null>(null);
+  const [sourceText, setSourceText] = useState('');
   const [progress, setProgress] = useState<number | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Training | null>(null);
   const isEmployee = currentUser?.role === 'employee';
@@ -123,10 +126,10 @@ export default function TrainingModule(): JSX.Element {
         title="Formations"
         subtitle={isEmployee
           ? 'Complétez vos formations par secteur et réussissez l\'examen final.'
-          : 'Déposez un dossier de formation en PDF — l\'IA le découpe par secteur et génère l\'examen final.'}
+          : 'Déposez un PDF ou écrivez votre contenu — l\'IA le découpe par secteur et génère l\'examen final. Modifiable en tout temps.'}
         action={!isEmployee ? (
           <Button data-testid="upload-training-button" onClick={() => setUploadOpen(true)} className="rounded-full bg-emerald-600 hover:bg-emerald-700">
-            <Plus className="w-4 h-4 mr-1" /> Nouvelle formation (PDF)
+            <Plus className="w-4 h-4 mr-1" /> Nouvelle formation (IA)
           </Button>
         ) : undefined}
       />
@@ -209,38 +212,77 @@ export default function TrainingModule(): JSX.Element {
             <DialogTitle className="font-heading">Nouvelle formation par IA</DialogTitle>
           </DialogHeader>
           <p className="text-xs text-slate-500">
-            Déposez votre dossier de formation en PDF (procédures, règlements, tâches…). L'IA préparera le contenu
+            Déposez un PDF ou écrivez directement votre contenu (procédures, règlements, tâches…). L'IA préparera le contenu
             par secteur (ouverture, comptage des pilules, nettoyage, savoir-être…) et un examen final à choix multiples.
           </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              data-testid="training-mode-pdf"
+              onClick={() => setMode('pdf')}
+              className={`flex-1 text-sm font-semibold rounded-full py-2 border transition-colors ${mode === 'pdf' ? 'bg-emerald-600 border-emerald-600 text-white' : 'border-slate-200 text-slate-600 hover:border-emerald-300'}`}
+            >
+              À partir d'un PDF
+            </button>
+            <button
+              type="button"
+              data-testid="training-mode-text"
+              onClick={() => setMode('text')}
+              className={`flex-1 text-sm font-semibold rounded-full py-2 border transition-colors ${mode === 'text' ? 'bg-emerald-600 border-emerald-600 text-white' : 'border-slate-200 text-slate-600 hover:border-emerald-300'}`}
+            >
+              À partir d'un texte
+            </button>
+          </div>
           <form onSubmit={(e) => void submitUpload(e)} className="space-y-4">
             <div className="space-y-2">
               <Label>Titre de la formation</Label>
               <Input data-testid="training-title-input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ex. Intégration des nouveaux employés" required />
             </div>
-            <div className="space-y-2">
-              <Label>Dossier de formation (PDF, max 15 Mo)</Label>
-              <label
-                data-testid="training-file-drop"
-                className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-slate-300 rounded-xl p-6 cursor-pointer hover:border-emerald-400 transition-colors"
-              >
-                <FileUp className="w-6 h-6 text-emerald-600" />
-                <span className="text-sm text-slate-600">{file ? file.name : 'Cliquez pour choisir un PDF'}</span>
-                <input
-                  data-testid="training-file-input"
-                  type="file"
-                  accept="application/pdf"
-                  className="hidden"
-                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            {mode === 'pdf' ? (
+              <div className="space-y-2">
+                <Label>Dossier de formation (PDF, max 15 Mo)</Label>
+                <label
+                  data-testid="training-file-drop"
+                  className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-slate-300 rounded-xl p-6 cursor-pointer hover:border-emerald-400 transition-colors"
+                >
+                  <FileUp className="w-6 h-6 text-emerald-600" />
+                  <span className="text-sm text-slate-600">{file ? file.name : 'Cliquez pour choisir un PDF'}</span>
+                  <input
+                    data-testid="training-file-input"
+                    type="file"
+                    accept="application/pdf"
+                    className="hidden"
+                    onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                  />
+                </label>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Label>Contenu de la formation (procédures, consignes, savoir-être…)</Label>
+                <Textarea
+                  data-testid="training-text-input"
+                  rows={8}
+                  value={sourceText}
+                  onChange={(e) => setSourceText(e.target.value)}
+                  placeholder="Décrivez ce que la formation doit couvrir : ouverture de la pharmacie, comptage des pilules, nettoyage, service à la clientèle…"
                 />
-              </label>
-            </div>
+                <p className={`text-xs text-right ${sourceText.trim().length >= 200 ? 'text-emerald-600' : 'text-slate-400'}`}>
+                  {sourceText.trim().length} / 200 caractères minimum
+                </p>
+              </div>
+            )}
             {progress !== null && (
               <div className="space-y-1">
                 <Progress value={progress} />
                 <p className="text-xs text-slate-500 text-center">{progress < 100 ? `Téléversement… ${progress} %` : 'Analyse du document…'}</p>
               </div>
             )}
-            <Button data-testid="training-submit-button" type="submit" disabled={!file || progress !== null} className="w-full rounded-full bg-emerald-600 hover:bg-emerald-700">
+            <Button
+              data-testid="training-submit-button"
+              type="submit"
+              disabled={(mode === 'pdf' ? !file : sourceText.trim().length < 200) || progress !== null}
+              className="w-full rounded-full bg-emerald-600 hover:bg-emerald-700"
+            >
               {progress !== null ? 'Envoi en cours…' : 'Lancer la génération par IA'}
             </Button>
           </form>

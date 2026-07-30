@@ -12,6 +12,7 @@ import { CalendarClock, Download, TreePalm, ArrowLeftRight, Plus } from 'lucide-
 import { downloadPayStub } from '@/lib/paystub';
 import { MyPunchCard } from '@/components/MyPunchCard';
 import { MyProposalsPanel } from '@/components/MyProposalsPanel';
+import { MyEvaluationsPanel } from '@/components/MyEvaluationsPanel';
 import { ProfileEditor } from '@/components/ProfileEditor';
 import { toast } from 'sonner';
 
@@ -164,6 +165,8 @@ export default function MySpaceModule(): JSX.Element {
             {myLeaves.length === 0 && <p className="text-sm text-slate-500">Aucune demande de congé.</p>}
           </div>
         </div>
+
+        <MyEvaluationsPanel />
 
         <div className="lg:col-span-2">
           <ProfileEditor employeeId={me.id} employeeName={`${me.firstName} ${me.lastName}`} canManageCode={false} />

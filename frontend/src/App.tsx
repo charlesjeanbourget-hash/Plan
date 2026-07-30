@@ -4,6 +4,7 @@ import { View, ModuleKey } from '@/types';
 import { useAuth } from '@/context/AuthContext';
 import LandingPage from '@/components/LandingPage';
 import PunchKiosk from '@/components/PunchKiosk';
+import PublicReplacementPage from '@/components/PublicReplacementPage';
 import LoginPage from '@/components/LoginPage';
 import PublicCareers from '@/components/PublicCareers';
 import AgencyPortal from '@/components/AgencyPortal';
@@ -52,6 +53,15 @@ function App(): JSX.Element {
   const [activeModule, setActiveModule] = useState<ModuleKey>('dashboard');
 
   const navigate = useCallback((v: View) => setView(v), []);
+
+  const replacementToken = new URLSearchParams(window.location.search).get('remplacement');
+  if (replacementToken) {
+    return (
+      <div className="App">
+        <PublicReplacementPage token={replacementToken} />
+      </div>
+    );
+  }
 
   const handleLogout = (): void => {
     logout();

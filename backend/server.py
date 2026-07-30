@@ -2322,6 +2322,37 @@ async def choose_replacement_offer(request_id: str, payload: ChooseOfferIn, prin
     await db.replacement_offers.update_one({"id": offer["id"]}, {"$set": {"status": "chosen"}})
     await db.replacement_offers.update_many(
         {"request_id": request_id, "id": {"$ne": offer["id"]}}, {"$set": {"status": "declined"}})
+    api_key = os.environ.get("RESEND_API_KEY", "")
+    if api_key:
+        resend.api_key = api_key
+        sender = await get_sender()
+        slot0 = req["slots"][0]["date"] if req.get("slots") else ""
+        chosen_html = (
+            "<div style='font-family:Arial,sans-serif;max-width:640px;margin:0 auto;color:#0f172a'>"
+            "<h2 style='color:#059669'>LuminaHR — Offre retenue</h2>"
+            f"<p>Bonne nouvelle ! Votre candidat(e) <strong>{offer['candidate_name']}</strong> a été retenu(e) "
+            f"pour le remplacement de <strong>{req['role']}</strong> ({slot0}) au taux de {offer['hourly_rate']} $/h.</p>"
+            "<p>La pharmacie vous contactera pour finaliser les détails.</p></div>")
+        declined_html = (
+            "<div style='font-family:Arial,sans-serif;max-width:640px;margin:0 auto;color:#0f172a'>"
+            "<h2 style='color:#059669'>LuminaHR — Demande comblée</h2>"
+            f"<p>La demande de remplacement de <strong>{req['role']}</strong> ({slot0}) a été comblée par une autre offre.</p>"
+            "<p>Merci pour votre proposition — au plaisir de collaborer pour les prochains besoins.</p></div>")
+        all_offers = await db.replacement_offers.find({"request_id": request_id}, {"_id": 0}).to_list(200)
+        notified: set = set()
+        for o in all_offers:
+            to_email = o.get("agency_email")
+            if not to_email or to_email in notified:
+                continue
+            notified.add(to_email)
+            is_chosen = to_email == offer["agency_email"]
+            try:
+                await asyncio.to_thread(resend.Emails.send, {
+                    "from": sender, "to": [to_email],
+                    "subject": ("Offre retenue — " if is_chosen else "Demande comblée — ") + f"{req['role']} ({slot0})",
+                    "html": chosen_html if is_chosen else declined_html})
+            except Exception as exc:
+                logger.error(f"Courriel décision agence {to_email} échoué : {exc}")
     await log_audit(principal["email"], principal["role"], "CHOIX_REMPLACANT", "remplacement", request_id,
                     f"{offer['candidate_name']} ({offer['agency_name']}) retenu(e) à {offer['hourly_rate']} $/h "
                     f"pour {len(req['slots'])} plage(s)", pid)

@@ -34,3 +34,11 @@ export const EVAL_STATUS_META: Record<EvaluationStatus, { label: string; cls: st
 };
 
 export const RATING_LABELS = ['Insuffisant', 'À améliorer', 'Satisfaisant', 'Très bon', 'Exceptionnel'];
+
+export const MULTIPLIER_GRID: { range: string; mult: string }[] = [
+  { range: '90 % et +', mult: '× 1,2' },
+  { range: '75 – 89 %', mult: '× 1,0' },
+  { range: '60 – 74 %', mult: '× 0,7' },
+  { range: '45 – 59 %', mult: '× 0,4' },
+  { range: 'Moins de 45 %', mult: 'aucune augmentation' },
+];
