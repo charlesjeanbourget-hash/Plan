@@ -2356,7 +2356,7 @@ async def choose_replacement_offer(request_id: str, payload: ChooseOfferIn, prin
     await log_audit(principal["email"], principal["role"], "CHOIX_REMPLACANT", "remplacement", request_id,
                     f"{offer['candidate_name']} ({offer['agency_name']}) retenu(e) à {offer['hourly_rate']} $/h "
                     f"pour {len(req['slots'])} plage(s)", pid)
-    return {"request": {**req, "status": "filled", "chosen_offer_id": offer["id"]}, "offer": offer}
+    return {"request": {**req, "status": "filled", "chosen_offer_id": offer["id"]}, "offer": {**offer, "status": "chosen"}}
 
 
 @api_router.delete("/replacements/requests/{request_id}")
