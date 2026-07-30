@@ -2192,6 +2192,114 @@ async def evaluation_reminders_job():
     logger.info(f"Relances auto-évaluations quotidiennes : {sent} envoyée(s)")
 
 
+# ---------------------- Tâches par quart de travail ----------------------
+
+class ShiftTaskIn(BaseModel):
+    date: str
+    shift: str = "Jour"
+    title: str
+    description: str = ""
+    assignee_employee_id: str = ""
+    assignee_name: str = ""
+
+
+class TaskCopyWeekIn(BaseModel):
+    from_start: str
+    to_start: str
+
+
+@api_router.get("/tasks")
+async def list_tasks(start: str = Query(...), end: str = Query(...), user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or ""
+    query: dict = {"pharmacy_id": pid, "date": {"$gte": start, "$lte": end}}
+    if user["role"] not in ("admin", "superadmin"):
+        eid = user.get("employee_id") or ""
+        query["$or"] = [{"assignee_employee_id": eid}, {"assignee_employee_id": ""}]
+    return await db.shift_tasks.find(query, {"_id": 0}).sort([("date", 1), ("created_at", 1)]).to_list(500)
+
+
+@api_router.post("/tasks")
+async def create_task(payload: ShiftTaskIn, principal: dict = Depends(get_principal)):
+    if not payload.title.strip():
+        raise HTTPException(status_code=400, detail="Le titre de la tâche est requis.")
+    doc = {
+        "id": str(uuid.uuid4()),
+        "pharmacy_id": principal["pharmacy_id"] or "ph1",
+        "date": payload.date,
+        "shift": payload.shift,
+        "title": payload.title.strip(),
+        "description": payload.description.strip(),
+        "assignee_employee_id": payload.assignee_employee_id,
+        "assignee_name": payload.assignee_name,
+        "done": False,
+        "done_by": "",
+        "done_at": None,
+        "created_by": principal["email"],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.shift_tasks.insert_one(doc)
+    doc.pop("_id", None)
+    await log_audit(principal["email"], principal["role"], "CREATION_TACHE", "tâche", doc["id"],
+                    f"Tâche « {doc['title']} » ({doc['date']}, quart {doc['shift']})", doc["pharmacy_id"])
+    return doc
+
+
+@api_router.post("/tasks/copy-week")
+async def copy_week_tasks(payload: TaskCopyWeekIn, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    from_start = datetime.fromisoformat(payload.from_start).date()
+    from_end = from_start + timedelta(days=6)
+    to_start = datetime.fromisoformat(payload.to_start).date()
+    delta = (to_start - from_start).days
+    docs = await db.shift_tasks.find(
+        {"pharmacy_id": pid, "date": {"$gte": from_start.isoformat(), "$lte": from_end.isoformat()}},
+        {"_id": 0}).to_list(500)
+    created = 0
+    for d in docs:
+        new_date = (datetime.fromisoformat(d["date"]).date() + timedelta(days=delta)).isoformat()
+        exists = await db.shift_tasks.find_one(
+            {"pharmacy_id": pid, "date": new_date, "shift": d["shift"], "title": d["title"]})
+        if exists:
+            continue
+        await db.shift_tasks.insert_one({
+            **d, "id": str(uuid.uuid4()), "date": new_date, "done": False, "done_by": "", "done_at": None,
+            "created_by": principal["email"], "created_at": datetime.now(timezone.utc).isoformat()})
+        created += 1
+    await log_audit(principal["email"], principal["role"], "DUPLICATION_TACHES", "tâche", payload.to_start,
+                    f"{created} tâche(s) copiée(s) de la semaine du {payload.from_start}", pid)
+    return {"created": created}
+
+
+@api_router.post("/tasks/{task_id}/toggle")
+async def toggle_task(task_id: str, user: dict = Depends(get_current_user)):
+    doc = await db.shift_tasks.find_one({"id": task_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Tâche introuvable.")
+    if user["role"] not in ("admin", "superadmin"):
+        eid = user.get("employee_id") or ""
+        if doc["assignee_employee_id"] not in ("", eid):
+            raise HTTPException(status_code=403, detail="Cette tâche est assignée à un autre employé.")
+    new_done = not doc["done"]
+    update = {
+        "done": new_done,
+        "done_by": (user.get("name") or user["email"]) if new_done else "",
+        "done_at": datetime.now(timezone.utc).isoformat() if new_done else None,
+    }
+    await db.shift_tasks.update_one({"id": task_id}, {"$set": update})
+    return {**doc, **update}
+
+
+@api_router.delete("/tasks/{task_id}")
+async def delete_task(task_id: str, principal: dict = Depends(get_principal)):
+    doc = await db.shift_tasks.find_one({"id": task_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Tâche introuvable.")
+    await db.shift_tasks.delete_one({"id": task_id})
+    await log_audit(principal["email"], principal["role"], "SUPPRESSION_TACHE", "tâche", task_id,
+                    f"Tâche « {doc['title']} » supprimée", doc["pharmacy_id"])
+    return {"status": "supprimée"}
+
+
 # ==================== Remplaçants : agences, demandes, offres ====================
 
 class AgencyIn(BaseModel):

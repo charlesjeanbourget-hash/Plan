@@ -1,10 +1,35 @@
 import { View } from '@/types';
 import { BrandLogo } from '@/components/BrandLogo';
-import { Users, Briefcase, Building2, ArrowRight, CalendarClock, Wallet, TrendingUp, ShieldCheck } from 'lucide-react';
+import {
+  Users, Briefcase, Building2, ArrowRight, CalendarClock, Wallet, TrendingUp, ShieldCheck,
+  Timer, ListChecks, RefreshCw, GraduationCap, TreePalm, ClipboardCheck, Sparkles, CheckCircle2,
+} from 'lucide-react';
 
 interface Props {
   onNavigate: (view: View) => void;
 }
+
+const FEATURES = [
+  { icon: CalendarClock, title: 'Horaires intelligents', text: 'L\'IA propose l\'horaire selon les disponibilités et les rôles — double approbation gestionnaire et employé.', cls: 'text-emerald-600', bg: 'bg-emerald-50' },
+  { icon: Timer, title: 'Punch & feuilles de temps', text: 'Borne à NIP avec confirmation d\'identité, temps supplémentaire calculé, alertes de punch oublié, export CSV pour la paie.', cls: 'text-bronze-600', bg: 'bg-bronze-100' },
+  { icon: Wallet, title: 'Paie & relevés PDF', text: 'Salaires, déductions et cumulatifs annuels générés automatiquement — relevés PDF à votre image.', cls: 'text-emerald-600', bg: 'bg-emerald-50' },
+  { icon: ListChecks, title: 'Tâches par quart', text: 'Distribuez les tâches de la semaine par quart de travail — l\'équipe coche, vous suivez la progression en direct.', cls: 'text-bronze-600', bg: 'bg-bronze-100' },
+  { icon: RefreshCw, title: 'Remplacements & agences', text: 'Un courriel automatique aux agences avec lien public : elles proposent, vous comparez les offres et choisissez.', cls: 'text-emerald-600', bg: 'bg-emerald-50' },
+  { icon: TrendingUp, title: 'Évaluations & salaires', text: 'Évaluations structurées, auto-évaluations et suggestion d\'augmentation calculée sur votre BAIIA.', cls: 'text-bronze-600', bg: 'bg-bronze-100' },
+  { icon: GraduationCap, title: 'Formations IA & certificats', text: 'Déposez un PDF ou un texte : l\'IA crée la formation par secteur, l\'examen et le certificat de réussite.', cls: 'text-emerald-600', bg: 'bg-emerald-50' },
+  { icon: ShieldCheck, title: 'Licences pro & Loi 25', text: 'Coffre-fort numérique des licences professionnelles avec rappels automatiques 30 jours avant l\'échéance.', cls: 'text-bronze-600', bg: 'bg-bronze-100' },
+  { icon: Briefcase, title: 'Recrutement & carrières', text: 'Portail carrières public, suivi des candidatures et intégration des nouvelles recrues en quelques clics.', cls: 'text-emerald-600', bg: 'bg-emerald-50' },
+  { icon: TreePalm, title: 'Vacances & congés', text: 'Demandes, approbations et calendrier d\'équipe centralisés — fini les conflits d\'horaire de dernière minute.', cls: 'text-bronze-600', bg: 'bg-bronze-100' },
+  { icon: ClipboardCheck, title: 'Onboarding & contrats', text: 'Listes d\'intégration automatiques, contrats et avantages sociaux réunis dans le dossier de chaque employé.', cls: 'text-emerald-600', bg: 'bg-emerald-50' },
+  { icon: Sparkles, title: 'Assistant IA & rappels', text: 'Un assistant qui répond à votre équipe, des notifications et des courriels automatiques pour ne rien échapper.', cls: 'text-bronze-600', bg: 'bg-bronze-100' },
+];
+
+const TIME_BULLETS = [
+  'Les horaires, rappels, relances et examens de formation se préparent tout seuls',
+  'Les remplacements se règlent par courriel automatique — sans appels à répétition',
+  'La paie se calcule à partir des punchs réels, temps supplémentaire inclus',
+  'Chaque tâche du quart est distribuée, suivie et cochée sans supervision constante',
+];
 
 export default function LandingPage({ onNavigate }: Props): JSX.Element {
   return (
@@ -32,14 +57,15 @@ export default function LandingPage({ onNavigate }: Props): JSX.Element {
       </header>
 
       <section className="relative overflow-hidden bg-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-14 md:py-28 grid grid-cols-1 md:grid-cols-12 gap-10 md:gap-12 items-center">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-14 md:py-24 grid grid-cols-1 md:grid-cols-12 gap-10 md:gap-12 items-center">
           <div className="md:col-span-7 animate-fade-up">
             <p className="text-xs uppercase tracking-[0.2em] text-bronze-700 font-bold mb-5">SIRH conçu pour les pharmacies</p>
             <h1 className="font-heading text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-slate-900 leading-[1.05]">
-              La gestion RH de votre pharmacie, <span className="text-emerald-600">simplifiée.</span>
+              Moins de paperasse. Plus de temps pour <span className="text-emerald-600">ce qui rapporte.</span>
             </h1>
             <p className="mt-6 text-slate-600 text-base md:text-lg max-w-xl">
-              Horaires, paie, recrutement, remplacements et dossiers employés — tout ce dont votre officine a besoin, dans une seule plateforme pensée pour le rythme du comptoir.
+              Arrière Plan automatise toute l'administration RH de votre officine — horaires, paie, tâches, remplacements,
+              formations — pour redonner à votre équipe du temps de qualité au comptoir, en consultation et sur les services rémunérateurs.
             </p>
             <div className="mt-8 flex flex-wrap gap-4">
               <button
@@ -63,19 +89,95 @@ export default function LandingPage({ onNavigate }: Props): JSX.Element {
               <img
                 src="https://images.pexels.com/photos/19471013/pexels-photo-19471013.jpeg?auto=compress&cs=tinysrgb&w=900"
                 alt="Pharmacienne dans une pharmacie moderne"
-                className="w-full h-[420px] object-cover"
+                className="w-full h-[380px] md:h-[420px] object-cover"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-slate-900/50 to-transparent" />
               <div className="absolute bottom-5 left-5 right-5 text-white">
-                <p className="font-heading font-bold text-lg">+ de 200 pharmacies nous font confiance</p>
-                <p className="text-sm text-white/80">Partout au Québec et au Canada</p>
+                <p className="font-heading font-bold text-lg">Votre équipe au bon endroit, au bon moment</p>
+                <p className="text-sm text-white/80">Pensé pour le rythme des pharmacies du Québec</p>
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 pb-16 sm:pb-24">
+      <section className="bg-slate-50 border-y border-slate-200" data-testid="roi-section">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-14 sm:py-16 grid grid-cols-1 md:grid-cols-3 gap-6">
+          {[
+            { big: 'Des heures récupérées', small: 'chaque semaine : horaires, rappels, examens et relevés se préparent automatiquement.' },
+            { big: 'Zéro oubli', small: 'licences, formations, punchs et tâches de quart — tout est rappelé et tracé pour vous.' },
+            { big: 'Plus de valeur par heure', small: 'votre équipe se consacre aux ordonnances, aux conseils et aux services facturables.' },
+          ].map((s) => (
+            <div key={s.big} className="rounded-2xl bg-white border border-slate-200 p-8 hover:border-bronze-300 hover:-translate-y-1 transition-all">
+              <p className="font-heading text-2xl font-extrabold text-slate-900 mb-2">{s.big}</p>
+              <p className="text-sm text-slate-500">{s.small}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 py-16 sm:py-24" data-testid="features-section">
+        <span className="block w-12 h-1 rounded-full bg-gradient-to-r from-emerald-500 to-bronze-500 mb-4" />
+        <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-10">
+          <h2 className="font-heading text-2xl sm:text-3xl font-extrabold text-slate-900 max-w-xl">
+            Tout ce qu'Arrière Plan fait pour votre pharmacie
+          </h2>
+          <p className="text-sm text-slate-500 max-w-md">
+            Un seul outil qui remplace les tableurs, les groupes de textos, les feuilles de punch papier et les rappels manuels.
+          </p>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6" data-testid="features-grid">
+          {FEATURES.map((f) => (
+            <div key={f.title} className="rounded-xl bg-white border border-slate-200 p-6 hover:-translate-y-1 hover:border-bronze-300 hover:shadow-md transition-all">
+              <div className={`w-11 h-11 rounded-xl ${f.bg} flex items-center justify-center mb-4`}>
+                <f.icon className={`w-5 h-5 ${f.cls}`} />
+              </div>
+              <h3 className="font-heading font-bold text-slate-900 text-base mb-1.5">{f.title}</h3>
+              <p className="text-sm text-slate-500">{f.text}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="bg-slate-50 border-y border-slate-200" data-testid="time-value-section">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-16 sm:py-20 grid grid-cols-1 lg:grid-cols-2 gap-10 items-center">
+          <div>
+            <span className="block w-12 h-1 rounded-full bg-gradient-to-r from-emerald-500 to-bronze-500 mb-4" />
+            <h2 className="font-heading text-2xl sm:text-3xl font-extrabold text-slate-900 mb-4">
+              Votre temps vaut plus que l'administration
+            </h2>
+            <p className="text-slate-600 mb-6 max-w-lg">
+              Chaque heure passée à bâtir un horaire, courir après un remplaçant ou recompter des feuilles de temps
+              est une heure perdue pour vos patients — et pour votre chiffre d'affaires.
+            </p>
+            <ul className="space-y-3">
+              {TIME_BULLETS.map((b) => (
+                <li key={b} className="flex items-start gap-3 text-sm text-slate-700">
+                  <CheckCircle2 className="w-5 h-5 text-bronze-600 shrink-0 mt-0.5" /> {b}
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className="rounded-2xl bg-emerald-600 p-8 sm:p-10 text-white">
+            <p className="font-heading text-xl sm:text-2xl font-extrabold mb-3">
+              « Déléguez l'arrière-plan de votre pharmacie — gardez le devant de la scène. »
+            </p>
+            <p className="text-emerald-50 text-sm mb-8">
+              Pendant que la plateforme coordonne l'équipe en coulisses, vous facturez des services,
+              conseillez vos patients et développez votre officine.
+            </p>
+            <button
+              data-testid="time-value-cta"
+              onClick={() => onNavigate('login')}
+              className="px-7 py-3 rounded-full bg-white text-emerald-700 font-semibold text-sm hover:bg-emerald-50 transition-colors inline-flex items-center gap-2"
+            >
+              Commencer maintenant <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 py-16 sm:py-24">
         <span className="block w-12 h-1 rounded-full bg-gradient-to-r from-emerald-500 to-bronze-500 mb-4" />
         <p className="text-xs uppercase tracking-[0.2em] text-slate-500 font-bold mb-8">Choisissez votre espace</p>
         <div className="grid grid-cols-1 md:grid-cols-12 gap-8">
@@ -89,7 +191,7 @@ export default function LandingPage({ onNavigate }: Props): JSX.Element {
             </div>
             <h2 className="font-heading text-lg font-bold text-slate-900 mb-2">Espace Employés & Gestion</h2>
             <p className="text-slate-500 text-sm mb-6">
-              Connectez-vous pour gérer les horaires, la paie, les dossiers et l'ensemble de vos opérations RH.
+              Connectez-vous pour gérer les horaires, la paie, les tâches, les dossiers et l'ensemble de vos opérations RH.
             </p>
             <span className="inline-flex items-center gap-2 text-emerald-700 text-sm font-semibold group-hover:gap-3 transition-[gap]">
               Se connecter <ArrowRight className="w-4 h-4" />
@@ -99,7 +201,7 @@ export default function LandingPage({ onNavigate }: Props): JSX.Element {
           <button
             data-testid="portal-card-careers"
             onClick={() => onNavigate('careers')}
-            className="md:col-span-3 group text-left rounded-2xl bg-white border border-slate-200 p-10 hover:border-bronze-400 hover:-translate-y-1 shadow-sm hover:shadow-md transition-all"
+            className="md:col-span-3 group text-left rounded-2xl bg-white border border-slate-200 p-6 sm:p-10 hover:border-bronze-400 hover:-translate-y-1 shadow-sm hover:shadow-md transition-all"
           >
             <div className="w-12 h-12 rounded-xl bg-bronze-100 flex items-center justify-center mb-6">
               <Briefcase className="w-6 h-6 text-bronze-700" />
@@ -128,30 +230,9 @@ export default function LandingPage({ onNavigate }: Props): JSX.Element {
         </div>
       </section>
 
-      <section className="bg-slate-50 border-y border-slate-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-14 sm:py-20">
-          <span className="block w-12 h-1 rounded-full bg-gradient-to-r from-emerald-500 to-bronze-500 mb-4" />
-          <h2 className="font-heading text-lg font-bold text-slate-900 mb-10">Tout votre SIRH, module par module</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
-            {[
-              { icon: CalendarClock, title: 'Horaires intelligents', text: 'Planifiez les quarts du comptoir et du laboratoire en quelques clics.', cls: 'text-emerald-600' },
-              { icon: Wallet, title: 'Paie sans friction', text: 'Heures, temps supplémentaire et déductions calculés automatiquement.', cls: 'text-bronze-600' },
-              { icon: TrendingUp, title: 'Performance & rétention', text: 'Évaluations structurées et suggestions salariales basées sur le BAIIA.', cls: 'text-emerald-600' },
-              { icon: ShieldCheck, title: 'Conformité assurée', text: 'Dossiers, contrats et onboarding conformes aux normes du travail.', cls: 'text-bronze-600' },
-            ].map((f) => (
-              <div key={f.title} className="rounded-xl bg-white border border-slate-200 p-6 hover:-translate-y-1 hover:border-bronze-300 transition-all">
-                <f.icon className={`w-6 h-6 mb-4 ${f.cls}`} />
-                <h3 className="font-heading font-bold text-slate-900 text-base mb-1.5">{f.title}</h3>
-                <p className="text-sm text-slate-500">{f.text}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <footer className="max-w-7xl mx-auto px-4 sm:px-6 py-10 flex flex-col sm:flex-row items-center justify-between gap-4 bg-white">
+      <footer className="max-w-7xl mx-auto px-4 sm:px-6 py-10 flex flex-col sm:flex-row items-center justify-between gap-4 bg-white border-t border-slate-100">
         <p className="text-sm text-slate-500">© 2026 Arrière Plan — Le SIRH des pharmacies.</p>
-        <div className="flex gap-6 text-sm text-slate-500">
+        <div className="flex flex-wrap justify-center gap-4 sm:gap-6 text-sm text-slate-500">
           <button data-testid="footer-careers-link" onClick={() => onNavigate('careers')} className="hover:text-bronze-700 transition-colors">Carrières</button>
           <button data-testid="footer-agency-link" onClick={() => onNavigate('agency')} className="hover:text-bronze-700 transition-colors">Agences</button>
           <button data-testid="footer-punch-link" onClick={() => onNavigate('punch')} className="hover:text-bronze-700 transition-colors">Borne de punch</button>

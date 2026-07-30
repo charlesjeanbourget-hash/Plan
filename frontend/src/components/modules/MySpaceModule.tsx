@@ -133,7 +133,7 @@ export default function MySpaceModule(): JSX.Element {
                   size="sm"
                   variant="outline"
                   className="rounded-full text-xs"
-                  onClick={() => { downloadPayStub(me, p, pharmacy?.name ?? 'Arrière Plan', state.payrollEntries); toast.success('Relevé PDF téléchargé (avec cumulatifs annuels).'); }}
+                  onClick={() => { void downloadPayStub(me, p, pharmacy?.name ?? 'Arrière Plan', state.payrollEntries); toast.success('Relevé PDF téléchargé (avec cumulatifs annuels).'); }}
                 >
                   <Download className="w-3.5 h-3.5 mr-1" /> PDF
                 </Button>

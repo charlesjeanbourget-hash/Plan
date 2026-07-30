@@ -1,4 +1,5 @@
 import { jsPDF } from 'jspdf';
+import { getLogoDataUrl } from '@/lib/logoData';
 
 export interface CertificateData {
   employeeName: string;
@@ -12,7 +13,7 @@ export interface CertificateData {
 const slug = (s: string): string =>
   s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
-export const downloadCertificate = (d: CertificateData): void => {
+export const downloadCertificate = async (d: CertificateData): Promise<void> => {
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const cx = 148.5;
 
@@ -25,15 +26,20 @@ export const downloadCertificate = (d: CertificateData): void => {
   doc.setDrawColor(195, 96, 48);
   doc.rect(14, 14, 269, 182);
 
-  doc.setTextColor(5, 150, 105);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(15);
-  doc.text('Arrière Plan', cx, 34, { align: 'center' });
+  try {
+    const logoData = await getLogoDataUrl();
+    doc.addImage(logoData, 'JPEG', cx - 17, 17, 34, 18.5);
+  } catch {
+    doc.setTextColor(5, 150, 105);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(15);
+    doc.text('Arrière Plan', cx, 30, { align: 'center' });
+  }
   if (d.pharmacyName) {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(10);
     doc.setTextColor(100, 116, 139);
-    doc.text(d.pharmacyName, cx, 41, { align: 'center' });
+    doc.text(d.pharmacyName, cx, 42, { align: 'center' });
   }
 
   doc.setTextColor(15, 23, 42);

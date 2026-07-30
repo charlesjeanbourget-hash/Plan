@@ -107,7 +107,7 @@ export default function PayrollModule(): JSX.Element {
                         size="sm"
                         variant="outline"
                         className="rounded-full text-xs"
-                        onClick={() => { downloadPayStub(emp, p, state.pharmacies[0]?.name ?? 'Arrière Plan', state.payrollEntries); toast.success('Relevé PDF téléchargé (avec cumulatifs annuels).'); }}
+                        onClick={() => { void downloadPayStub(emp, p, state.pharmacies[0]?.name ?? 'Arrière Plan', state.payrollEntries); toast.success('Relevé PDF téléchargé (avec cumulatifs annuels).'); }}
                       >
                         <Download className="w-3.5 h-3.5 mr-1" /> PDF
                       </Button>

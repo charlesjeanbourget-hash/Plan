@@ -1,15 +1,16 @@
 import { jsPDF } from 'jspdf';
 import { Employee, PayrollEntry } from '@/types';
+import { getLogoDataUrl } from '@/lib/logoData';
 
 const money = (n: number): string =>
   n.toLocaleString('fr-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' $';
 
-export const downloadPayStub = (
+export const downloadPayStub = async (
   employee: Employee,
   entry: PayrollEntry,
   pharmacyName: string,
   allEntries: PayrollEntry[] = []
-): void => {
+): Promise<void> => {
   const ytd = (allEntries.length > 0 ? allEntries : [entry]).filter(
     (e) => e.employeeId === employee.id && e.periodStart <= entry.periodStart
   );
@@ -23,14 +24,21 @@ export const downloadPayStub = (
     doc.line(20, y, 190, y);
   };
 
-  doc.setFillColor(5, 150, 105);
-  doc.rect(0, 0, 210, 28, 'F');
-  doc.setFillColor(195, 96, 48);
-  doc.rect(0, 28, 210, 1.6, 'F');
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(18);
+  try {
+    const logoData = await getLogoDataUrl();
+    doc.addImage(logoData, 'JPEG', 20, 5, 34, 18.5);
+  } catch {
+    doc.setTextColor(5, 150, 105);
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Arrière Plan', 20, 16);
+  }
+  doc.setTextColor(5, 150, 105);
+  doc.setFontSize(17);
   doc.setFont('helvetica', 'bold');
-  doc.text('Arrière Plan — Relevé de paie', 20, 18);
+  doc.text('Relevé de paie', 190, 17, { align: 'right' });
+  doc.setFillColor(195, 96, 48);
+  doc.rect(0, 28, 210, 1.2, 'F');
 
   doc.setTextColor(15, 23, 42);
   doc.setFontSize(11);

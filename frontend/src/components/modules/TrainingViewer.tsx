@@ -29,7 +29,7 @@ export default function TrainingViewer({ training, onBack }: Props): JSX.Element
   const pharmacyName = state.pharmacies.find((p) => p.id === currentUser?.pharmacyId)?.name;
 
   const makeCertificate = (score: number, dateStr: string): void => {
-    downloadCertificate({
+    void downloadCertificate({
       employeeName: currentUser?.name ?? '',
       trainingTitle: training.title,
       score,

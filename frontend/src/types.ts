@@ -4,6 +4,7 @@ export type View = 'landing' | 'login' | 'careers' | 'agency' | 'dashboard' | 'p
 
 export type ModuleKey =
   | 'dashboard'
+  | 'tasks'
   | 'myspace'
   | 'employees'
   | 'licenses'
@@ -446,6 +447,22 @@ export interface Punch {
 
 export interface OpenPunch extends Punch {
   elapsed_hours: number;
+}
+
+export interface ShiftTask {
+  id: string;
+  pharmacy_id: string;
+  date: string;
+  shift: string;
+  title: string;
+  description: string;
+  assignee_employee_id: string;
+  assignee_name: string;
+  done: boolean;
+  done_by: string;
+  done_at: string | null;
+  created_by: string;
+  created_at: string;
 }
 
 export interface PunchSummaryRow {

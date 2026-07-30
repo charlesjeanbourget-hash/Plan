@@ -10,6 +10,12 @@ import { Toaster } from '@/components/ui/sonner';
 const rootEl = document.getElementById('root');
 if (!rootEl) throw new Error('Élément root introuvable');
 
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => undefined);
+  });
+}
+
 ReactDOM.createRoot(rootEl).render(
   <React.StrictMode>
     <ErrorBoundary>

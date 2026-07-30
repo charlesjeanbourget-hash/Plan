@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, TrendingUp } from 'lucide-react';
+import { Plus, TrendingUp, Trophy } from 'lucide-react';
 import { toast } from 'sonner';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -73,6 +73,15 @@ export default function PerformanceModule(): JSX.Element {
     }
   };
 
+  const latestByEmployee = new Map<string, Evaluation>();
+  evaluations.forEach((ev) => {
+    if (!latestByEmployee.has(ev.employee_id)) latestByEmployee.set(ev.employee_id, ev);
+  });
+  const ranking = [...latestByEmployee.values()].sort(
+    (a, b) => (b.suggestion?.performance_score ?? -1) - (a.suggestion?.performance_score ?? -1)
+  );
+  const MEDALS = ['text-bronze-500', 'text-slate-400', 'text-bronze-800'];
+
   return (
     <div data-testid="performance-module">
       <ModuleHeader
@@ -84,6 +93,65 @@ export default function PerformanceModule(): JSX.Element {
           </Button>
         }
       />
+
+      {ranking.length > 0 && (
+        <div className="bg-white rounded-xl border border-slate-200 p-6 mb-8" data-testid="team-comparison-panel">
+          <h2 className="font-heading text-base font-bold text-slate-900 mb-1 inline-flex items-center gap-2">
+            <Trophy className="w-4 h-4 text-bronze-600" /> Comparatif d'équipe
+          </h2>
+          <p className="text-xs text-slate-500 mb-4">Dernière évaluation de chaque employé — repérez vos meilleurs éléments en un coup d'œil.</p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[760px]" data-testid="team-comparison-table">
+              <thead>
+                <tr className="text-left text-xs uppercase tracking-wider text-slate-400 border-b border-slate-200">
+                  <th className="p-3">Rang</th>
+                  <th className="p-3">Employé(e)</th>
+                  <th className="p-3 text-right">Employeur</th>
+                  <th className="p-3 text-right">Auto-éval</th>
+                  <th className="p-3 text-right">Score global</th>
+                  <th className="p-3 text-right">Augmentation suggérée</th>
+                  <th className="p-3">Statut</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ranking.map((ev, idx) => {
+                  const meta = EVAL_STATUS_META[ev.status];
+                  const ranked = !!ev.suggestion;
+                  return (
+                    <tr key={ev.employee_id} data-testid={`team-row-${ev.employee_id}`} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60 transition-colors">
+                      <td className="p-3">
+                        {ranked ? (
+                          <span className="inline-flex items-center gap-1.5 font-bold text-slate-800">
+                            {idx < 3 && <Trophy className={`w-4 h-4 ${MEDALS[idx]}`} />} {idx + 1}
+                          </span>
+                        ) : (
+                          <span className="text-slate-300">—</span>
+                        )}
+                      </td>
+                      <td className="p-3 font-semibold text-slate-800">{ev.employee_name}</td>
+                      <td className="p-3 text-right">{ev.admin_eval ? `${ev.admin_eval.score} %` : <span className="text-slate-300">—</span>}</td>
+                      <td className="p-3 text-right">{ev.self_eval ? `${ev.self_eval.score} %` : <span className="text-slate-300">—</span>}</td>
+                      <td className="p-3 text-right">
+                        {ev.suggestion
+                          ? <span className={`font-bold ${ev.suggestion.performance_score >= 90 ? 'text-emerald-700' : ev.suggestion.performance_score >= 60 ? 'text-slate-800' : 'text-red-600'}`}>{ev.suggestion.performance_score} %</span>
+                          : <span className="text-slate-300">en cours</span>}
+                      </td>
+                      <td className="p-3 text-right">
+                        {ev.suggestion
+                          ? <span className="font-semibold text-bronze-700">+{ev.suggestion.suggested_increase_pct} % → {money(ev.suggestion.suggested_rate)}/h</span>
+                          : <span className="text-slate-300">—</span>}
+                      </td>
+                      <td className="p-3">
+                        <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap ${meta.cls}`}>{meta.label}</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {evaluations.length === 0 ? (
         <EmptyState text="Aucune évaluation. Lancez-en une : vous remplissez le questionnaire employeur, l'employé complète son auto-évaluation, puis Arrière Plan suggère l'augmentation selon le BAIIA." />
