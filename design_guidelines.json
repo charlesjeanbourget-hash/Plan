@@ -1,0 +1,75 @@
+{
+  "theme": "Light theme preferred for Health/HR context, with Dark Mode support",
+  "archetype": "Organic & Earthy (Trust, Growth, Calm) optimized for Pharmacy SaaS",
+  "typography": {
+    "headings": "Manrope (Professional, highly legible, modern)",
+    "body": "Figtree (Clean, excellent for dense data in dashboards)",
+    "rules": "H1 max text-5xl to text-6xl. Use tracking-tight for headings >32px. Use tracking-[0.2em] uppercase for overlines and small labels. Never use Inter for headings."
+  },
+  "colors": {
+    "primary": "#10B981", 
+    "secondary": "#0F172A",
+    "background": "#F8FAFC",
+    "surface": "#FFFFFF",
+    "accent": "#F97316",
+    "rules": "No pure black (#000000) or pure gray. Always tint grays with cool (blue) or warm (orange) undertones. Ensure 4.5:1 contrast for normal text."
+  },
+  "visual_enhancers": {
+    "surfaces": "Neumorphism (Tactile) for dashboard cards: flat background, sharp 1px border (border-slate-200), no shadow on default, subtle lift on hover.",
+    "glassmorphism": "Use backdrop-blur-xl bg-white/70 for sticky headers. DO NOT use completely transparent backgrounds where content scrolls underneath.",
+    "borders": "Grid borders (The 'Technical' Look) for dense data tables to expose the skeleton."
+  },
+  "component_name": {
+    "marketing": "Native HTML + Tailwind for asymmetrical layouts. Avoid rigid Shadcn wrappers for landing pages.",
+    "dashboard": "Shadcn UI (Tables, Calendars, Dialogs, Select, Dropdowns). Go cardless or use max 8px radius.",
+    "chat_widget": "Floating bottom-right ChatWidget. Must use Glassmorphism to feel premium.",
+    "forms": "Strictly use Shadcn Form elements. No native <input> or <select>."
+  },
+  "grids": {
+    "marketing_landing": "The 'Tetris' Grid (grid-cols-1 md:grid-cols-12, gap-8 to gap-12). Force asymmetry for the 3 main action cards.",
+    "dashboard": "High Density Grid (grid-cols-1 md:grid-cols-4, gap-4 or gap-6). North Star metric top-left. Subgrid for alignment."
+  },
+  "layouts": {
+    "general": "Optical alignment over geometrical. Mobile-first responsive grids.",
+    "spacing": "Generous spacing philosophy (p-6, p-8, p-12). Dashboard needs high density but clear hierarchy."
+  },
+  "motion": {
+    "rules": "Micro-interactions on all hover/active states. Staggered entrance animations for lists.",
+    "technical": "Use specific transition properties (e.g., transition-colors, transition-transform). NEVER use 'transition: all'."
+  },
+  "accessibility": {
+    "contrast": "Text over images MUST use overlays (max bg-black/50) or text shadows to pass APCA/WCAG.",
+    "testing": "All interactive and key informational elements MUST include a `data-testid` attribute (e.g., data-testid='login-submit-button').",
+    "focus": "High contrast focus states required (focus:ring-2 focus:ring-emerald-500)."
+  },
+  "media": {
+    "hero_overlay": "For hero images, use bg-black/30 to bg-black/50 or gradients to ensure text readability without killing the image."
+  },
+  "3d_libraries": {
+    "recommendation": "Not highly recommended for a medical HR dashboard, but Framer Motion can be used for smooth page transitions and ChatWidget interactions. Recharts for HR data visualization."
+  },
+  "image_urls": {
+    "landing_hero": {
+      "url": "https://images.pexels.com/photos/19471013/pexels-photo-19471013.jpeg",
+      "description": "Female pharmacist in a lab coat in a modern pharmacy. Use as the main hero background on the landing page."
+    },
+    "career_portal": {
+      "url": "https://images.unsplash.com/photo-1580281657529-557a6abb6387",
+      "description": "Pharmacy team professionals. Use in the 'Portail Carrières' public portal to showcase culture."
+    },
+    "agency_portal": {
+      "url": "https://images.unsplash.com/photo-1780190338428-832775a117b2",
+      "description": "Abstract medical pattern. Use as a subtle textured background for the Login or 'Portail Agence' auth pages."
+    }
+  },
+  "instructions_to_main_agent": [
+    "Interface MUST be 100% in French as requested by the user.",
+    "Use .js/.jsx files exclusively (no .tsx), but follow standard React component patterns.",
+    "Build the Landing Page with 3 distinct action cards: Espace Employés, Portail Carrières, Portail Agence.",
+    "Implement a robust Admin Sidebar with 13 specific modules: Tableau de bord, Horaires, Recrutement, Paie, Dossiers Employés, Remplacements, Vacances, Performance, Onboarding, Contrats, Avantages sociaux, FAQ, Superadmin.",
+    "Integrate a floating ChatWidget IA (assistant).",
+    "Use sonner for toast notifications.",
+    "NEVER use generic AI emojis (🤖, 💡). Use professional Lucide icons."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": "Avoid 'AI slop' aesthetic. DO NOT center align the app container (.App { text-align: center; }). Create depth through layered design elements with z-index hierarchy. Ensure custom micro-interactions on every clickable element. Use 2-3x more spacing than feels comfortable. DO NOT use complete transparent backgrounds in headers or dropdowns if content scrolls behind them. Always add data-testid to interactive elements. Prioritize using pre-existing components from src/components/ui."
+}
