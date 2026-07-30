@@ -17,6 +17,7 @@ export type ModuleKey =
   | 'contracts'
   | 'benefits'
   | 'faq'
+  | 'training'
   | 'superadmin';
 
 export interface User {
@@ -303,6 +304,89 @@ export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+}
+
+export type TrainingStatus = 'processing' | 'draft' | 'published' | 'error';
+
+export interface TrainingSection {
+  id: string;
+  sector: string;
+  title: string;
+  content: string;
+  key_points: string[];
+}
+
+export interface ExamQuestion {
+  id: string;
+  question: string;
+  options: string[];
+  correct_index?: number;
+  explanation?: string;
+}
+
+export interface Training {
+  id: string;
+  pharmacy_id: string;
+  title: string;
+  status: TrainingStatus;
+  error?: string | null;
+  source_filename: string;
+  source_size: number;
+  sections: TrainingSection[];
+  exam: ExamQuestion[];
+  passing_score: number;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  published_at?: string | null;
+  my_attempts?: number;
+  my_best_score?: number | null;
+  my_passed?: boolean;
+}
+
+export interface AttemptQuestionResult {
+  question_id: string;
+  your_answer: number;
+  correct: boolean;
+  correct_index: number;
+  explanation: string;
+}
+
+export interface AttemptResult {
+  score: number;
+  passed: boolean;
+  correct_count: number;
+  total: number;
+  passing_score: number;
+  results: AttemptQuestionResult[];
+}
+
+export interface TrainingAttempt {
+  id: string;
+  training_id: string;
+  pharmacy_id: string;
+  user_id: string;
+  user_email: string;
+  user_name: string;
+  score: number;
+  passed: boolean;
+  correct_count: number;
+  total: number;
+  completed_at: string;
+}
+
+export interface OverviewPharmacy {
+  pharmacy_id: string;
+  accounts: { total: number; admins: number; employees: number; suspended: number };
+  licenses: { total: number; expiring_60: number; expiring_30: number; expired: number };
+  trainings: { total: number; published: number };
+  report_enabled: boolean;
+}
+
+export interface EmailSettings {
+  sender_email: string;
+  sender_name: string;
+  default_sender?: string;
 }
 
 export interface HRState {

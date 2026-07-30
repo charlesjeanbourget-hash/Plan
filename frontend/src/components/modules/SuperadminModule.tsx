@@ -4,6 +4,7 @@ import { useAuth } from '@/context/AuthContext';
 import { PharmacyPlan } from '@/types';
 import { ModuleHeader, StatCard } from '@/components/modules/shared';
 import { SuperadminUsers } from '@/components/modules/SuperadminUsers';
+import { SuperadminOverview } from '@/components/modules/SuperadminOverview';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -96,6 +97,8 @@ export default function SuperadminModule(): JSX.Element {
         <StatCard label="Employés gérés" value={String(totalEmployees)} icon={Users} hint="Tous comptes confondus" />
         <StatCard label="Comptes actifs" value={`${Math.round((activeCount / Math.max(state.pharmacies.length, 1)) * 100)} %`} icon={ShieldCheck} />
       </div>
+
+      <SuperadminOverview />
 
       <SuperadminUsers />
 

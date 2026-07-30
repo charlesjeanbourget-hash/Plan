@@ -9,7 +9,7 @@ import { toast } from 'sonner';
 import {
   LayoutDashboard, Users, CalendarClock, Briefcase, Wallet, RefreshCw, TreePalm,
   TrendingUp, ClipboardCheck, FileText, HeartHandshake, HelpCircle, ShieldCheck,
-  LogOut, Pill, Menu, X, LucideIcon, BadgeCheck, UserRound, KeyRound, Eye, EyeOff,
+  LogOut, Pill, Menu, X, LucideIcon, BadgeCheck, UserRound, KeyRound, Eye, EyeOff, GraduationCap,
 } from 'lucide-react';
 
 interface Props {
@@ -36,13 +36,14 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'vacations', label: 'Vacances', icon: TreePalm },
   { key: 'performance', label: 'Performance', icon: TrendingUp },
   { key: 'onboarding', label: 'Onboarding', icon: ClipboardCheck },
+  { key: 'training', label: 'Formations', icon: GraduationCap },
   { key: 'contracts', label: 'Contrats', icon: FileText },
   { key: 'benefits', label: 'Avantages sociaux', icon: HeartHandshake },
   { key: 'faq', label: 'FAQ', icon: HelpCircle },
   { key: 'superadmin', label: 'Superadmin', icon: ShieldCheck },
 ];
 
-const EMPLOYEE_MODULES: ModuleKey[] = ['dashboard', 'myspace', 'scheduling', 'vacations', 'benefits', 'faq'];
+const EMPLOYEE_MODULES: ModuleKey[] = ['dashboard', 'myspace', 'scheduling', 'vacations', 'training', 'benefits', 'faq'];
 
 export default function Sidebar({ active, onSelect, onLogout }: Props): JSX.Element {
   const { currentUser, changePassword } = useAuth();

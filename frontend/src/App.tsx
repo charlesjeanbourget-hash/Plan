@@ -23,6 +23,8 @@ import FAQModule from '@/components/modules/FAQModule';
 import SuperadminModule from '@/components/modules/SuperadminModule';
 import LicensesModule from '@/components/modules/LicensesModule';
 import MySpaceModule from '@/components/modules/MySpaceModule';
+import TrainingModule from '@/components/modules/TrainingModule';
+import { NotificationBell } from '@/components/NotificationBell';
 
 const MODULES: Record<ModuleKey, () => JSX.Element> = {
   dashboard: DashboardModule,
@@ -39,6 +41,7 @@ const MODULES: Record<ModuleKey, () => JSX.Element> = {
   contracts: ContractsModule,
   benefits: BenefitsModule,
   faq: FAQModule,
+  training: TrainingModule,
   superadmin: SuperadminModule,
 };
 
@@ -60,6 +63,7 @@ function App(): JSX.Element {
     return (
       <div className="App flex min-h-screen bg-slate-50" data-testid="dashboard-layout">
         <Sidebar active={activeModule} onSelect={setActiveModule} onLogout={handleLogout} />
+        <NotificationBell onNavigate={setActiveModule} />
         <main className="flex-1 min-w-0 lg:ml-64 p-6 md:p-10">
           <ActiveModule />
         </main>

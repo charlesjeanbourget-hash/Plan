@@ -4,12 +4,14 @@ from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
+import io
 import json
 import logging
 import uuid
 import asyncio
 import secrets
 import requests
+from pypdf import PdfReader
 import resend
 import bcrypt
 import jwt
@@ -507,7 +509,7 @@ async def send_report_email(setting: dict):
     resend.api_key = api_key
     items = await compute_report({"pharmacy_id": setting["pharmacy_id"]})
     params = {
-        "from": SENDER_EMAIL,
+        "from": await get_sender(),
         "to": [setting["admin_email"]],
         "subject": f"LuminaHR — Rapport mensuel des licences — {setting.get('pharmacy_name', '')}",
         "html": report_html(setting.get("pharmacy_name", ""), items),
@@ -735,6 +737,392 @@ async def list_audit_logs(pharmacy_id: Optional[str] = Query(None), limit: int =
     return docs
 
 
+# ==================== Paramètres courriel (expéditeur configurable) ====================
+
+DEFAULT_SENDER = f"LuminaHR <{SENDER_EMAIL}>" if SENDER_EMAIL and "<" not in SENDER_EMAIL else (SENDER_EMAIL or "LuminaHR <onboarding@resend.dev>")
+
+
+async def get_sender() -> str:
+    doc = await db.email_settings.find_one({"id": "global"}, {"_id": 0})
+    if doc and doc.get("sender_email"):
+        return f"{doc.get('sender_name') or 'LuminaHR'} <{doc['sender_email']}>"
+    return DEFAULT_SENDER
+
+
+class EmailSettingsIn(BaseModel):
+    sender_email: str
+    sender_name: str = "LuminaHR"
+
+
+@api_router.get("/email-settings")
+async def get_email_settings(principal: dict = Depends(get_principal)):
+    doc = await db.email_settings.find_one({"id": "global"}, {"_id": 0})
+    base = doc or {"id": "global", "sender_email": "", "sender_name": "LuminaHR"}
+    return {**base, "default_sender": DEFAULT_SENDER}
+
+
+@api_router.post("/email-settings")
+async def save_email_settings(payload: EmailSettingsIn, su: dict = Depends(require_superadmin)):
+    doc = {"id": "global", "sender_email": payload.sender_email.strip(),
+           "sender_name": payload.sender_name.strip() or "LuminaHR"}
+    await db.email_settings.update_one({"id": "global"}, {"$set": doc}, upsert=True)
+    await log_audit(su["email"], su["role"], "MODIFICATION_EXPEDITEUR", "courriel", "global",
+                    f"Expéditeur : {doc['sender_name']} <{doc['sender_email'] or 'défaut'}>")
+    return doc
+
+
+# ==================== Tableau de bord global superadmin ====================
+
+@api_router.get("/superadmin/overview")
+async def superadmin_overview(su: dict = Depends(require_superadmin)):
+    users = await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(5000)
+    licenses = await db.licenses.find({"is_deleted": False}, {"_id": 0, "pharmacy_id": 1, "expiry_date": 1}).to_list(10000)
+    trainings = await db.trainings.find({}, {"_id": 0, "pharmacy_id": 1, "status": 1}).to_list(5000)
+    settings = await db.report_settings.find({}, {"_id": 0}).to_list(1000)
+    today = date.today()
+    pharmacies: dict = {}
+
+    def bucket(pid):
+        key = pid or "—"
+        if key not in pharmacies:
+            pharmacies[key] = {
+                "pharmacy_id": key,
+                "accounts": {"total": 0, "admins": 0, "employees": 0, "suspended": 0},
+                "licenses": {"total": 0, "expiring_60": 0, "expiring_30": 0, "expired": 0},
+                "trainings": {"total": 0, "published": 0},
+                "report_enabled": False,
+            }
+        return pharmacies[key]
+
+    superadmins = 0
+    for u in users:
+        if u["role"] == "superadmin":
+            superadmins += 1
+            continue
+        b = bucket(u.get("pharmacy_id"))
+        b["accounts"]["total"] += 1
+        b["accounts"]["admins" if u["role"] == "admin" else "employees"] += 1
+        if u.get("suspended"):
+            b["accounts"]["suspended"] += 1
+    for lic in licenses:
+        b = bucket(lic.get("pharmacy_id"))
+        b["licenses"]["total"] += 1
+        try:
+            days = (date.fromisoformat(lic["expiry_date"]) - today).days
+        except (ValueError, KeyError):
+            continue
+        if days < 0:
+            b["licenses"]["expired"] += 1
+        elif days <= 30:
+            b["licenses"]["expiring_30"] += 1
+        elif days <= 60:
+            b["licenses"]["expiring_60"] += 1
+    for t in trainings:
+        b = bucket(t.get("pharmacy_id"))
+        b["trainings"]["total"] += 1
+        if t.get("status") == "published":
+            b["trainings"]["published"] += 1
+    for s in settings:
+        if s.get("enabled"):
+            bucket(s.get("pharmacy_id"))["report_enabled"] = True
+    return {"superadmins": superadmins,
+            "pharmacies": sorted(pharmacies.values(), key=lambda p: p["pharmacy_id"]),
+            "generated_at": datetime.now(timezone.utc).isoformat()}
+
+
+# ==================== Formations générées par IA ====================
+
+TRAINING_MAX_SIZE = 15 * 1024 * 1024
+TRAINING_SYSTEM = (
+    "Tu es un expert en formation du personnel de pharmacie au Québec. À partir du document de formation fourni, "
+    "tu produis un parcours de formation structuré PAR SECTEUR d'activité de la pharmacie "
+    "(par exemple : ouverture, fermeture, laboratoire / comptage des pilules, nettoyage et hygiène, "
+    "service à la clientèle, caisse, savoir-être, conformité aux règlements et procédures — "
+    "adapte les secteurs au contenu réel du document). "
+    "Puis tu génères un examen final à choix multiples couvrant l'ensemble des sections.\n\n"
+    "Tu réponds UNIQUEMENT avec un objet JSON valide, sans texte avant ni après, au format exact :\n"
+    "{\n"
+    '  "sections": [\n'
+    '    {"sector": "Nom du secteur", "title": "Titre de la section", '
+    '"content": "Contenu pédagogique clair en français (150 à 350 mots), avec des listes à puces préfixées par \\"• \\".", '
+    '"key_points": ["point clé 1", "point clé 2"]}\n'
+    "  ],\n"
+    '  "exam": [\n'
+    '    {"question": "Question en français ?", "options": ["choix A", "choix B", "choix C", "choix D"], '
+    '"correct_index": 0, "explanation": "Brève explication de la bonne réponse."}\n'
+    "  ]\n"
+    "}\n\n"
+    "Contraintes : 4 à 10 sections; 10 à 15 questions d'examen; exactement 4 options par question; "
+    "une seule bonne réponse par question (correct_index entre 0 et 3); tout en français."
+)
+
+
+def training_public(doc: dict, include_answers: bool) -> dict:
+    d = {k: v for k, v in doc.items() if k not in ("_id", "storage_path")}
+    if not include_answers:
+        d["exam"] = [{"id": q["id"], "question": q["question"], "options": q["options"]}
+                     for q in d.get("exam") or []]
+    return d
+
+
+def extract_pdf_text(data: bytes) -> str:
+    reader = PdfReader(io.BytesIO(data))
+    return "\n".join((page.extract_text() or "") for page in reader.pages)
+
+
+def parse_llm_json(raw: str) -> dict:
+    start, end = raw.find("{"), raw.rfind("}")
+    if start == -1 or end == -1:
+        raise ValueError("Réponse IA sans JSON exploitable")
+    return json.loads(raw[start:end + 1])
+
+
+async def generate_training_content(training_id: str, pharmacy_id: str, text: str):
+    try:
+        llm = LlmChat(
+            api_key=os.environ['EMERGENT_LLM_KEY'],
+            session_id=f"training-{training_id}",
+            system_message=TRAINING_SYSTEM,
+        ).with_model("openai", "gpt-5.4")
+        resp = await llm.send_message(UserMessage(
+            text=f"Voici le contenu extrait du document de formation de la pharmacie :\n\n{text[:120000]}"))
+        raw = resp if isinstance(resp, str) else getattr(resp, "content", None) or str(resp)
+        data = parse_llm_json(raw)
+        sections, exam = [], []
+        for s in data.get("sections", []):
+            if not s.get("title") or not s.get("content"):
+                continue
+            sections.append({"id": str(uuid.uuid4()), "sector": str(s.get("sector") or "Général"),
+                             "title": str(s["title"]), "content": str(s["content"]),
+                             "key_points": [str(k) for k in (s.get("key_points") or [])][:8]})
+        for q in data.get("exam", []):
+            opts = [str(o) for o in (q.get("options") or [])]
+            ci = q.get("correct_index")
+            if not q.get("question") or len(opts) < 2 or not isinstance(ci, int) or not (0 <= ci < len(opts)):
+                continue
+            exam.append({"id": str(uuid.uuid4()), "question": str(q["question"]), "options": opts,
+                         "correct_index": ci, "explanation": str(q.get("explanation") or "")})
+        if not sections or not exam:
+            raise ValueError("Génération IA incomplète (sections ou examen manquants)")
+        await db.trainings.update_one({"id": training_id}, {"$set": {
+            "status": "draft", "sections": sections, "exam": exam, "error": None,
+            "updated_at": datetime.now(timezone.utc).isoformat()}})
+        await log_audit("système", "system", "GENERATION_FORMATION", "formation", training_id,
+                        f"{len(sections)} section(s) et {len(exam)} question(s) générées par IA", pharmacy_id)
+    except Exception as exc:
+        logger.error(f"Génération formation {training_id} échouée : {exc}")
+        await db.trainings.update_one({"id": training_id}, {"$set": {
+            "status": "error", "error": str(exc), "updated_at": datetime.now(timezone.utc).isoformat()}})
+
+
+@api_router.post("/trainings/upload")
+async def upload_training(title: str = Form(...), pharmacy_id: str = Form(""),
+                          file: UploadFile = File(...), principal: dict = Depends(get_principal)):
+    pid = pharmacy_id if (principal["role"] == "superadmin" and pharmacy_id) else principal["pharmacy_id"]
+    if not pid:
+        raise HTTPException(status_code=400, detail="pharmacy_id requis.")
+    if file.content_type != "application/pdf":
+        raise HTTPException(status_code=400, detail="Format non autorisé : déposez un dossier de formation en PDF.")
+    data = await file.read()
+    if len(data) > TRAINING_MAX_SIZE:
+        raise HTTPException(status_code=400, detail="Fichier trop volumineux (maximum 15 Mo).")
+    try:
+        text = await asyncio.to_thread(extract_pdf_text, data)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Impossible de lire ce PDF.")
+    if len(text.strip()) < 200:
+        raise HTTPException(status_code=400, detail="Ce PDF ne contient pas assez de texte lisible (document numérisé en image ?).")
+    path = f"{APP_NAME}/formations/{pid}/{uuid.uuid4()}.pdf"
+    result = await asyncio.to_thread(put_object, path, data, "application/pdf")
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "id": str(uuid.uuid4()), "pharmacy_id": pid, "title": title.strip(),
+        "status": "processing", "error": None,
+        "source_filename": file.filename, "source_size": len(data), "storage_path": result["path"],
+        "sections": [], "exam": [], "passing_score": 80,
+        "created_by": principal["email"], "created_at": now, "updated_at": now, "published_at": None,
+    }
+    await db.trainings.insert_one(doc)
+    await log_audit(principal["email"], principal["role"], "CREATION_FORMATION", "formation", doc["id"],
+                    f"Formation « {doc['title']} » créée à partir de {file.filename}", pid)
+    asyncio.create_task(generate_training_content(doc["id"], pid, text))
+    return training_public(doc, True)
+
+
+@api_router.get("/trainings")
+async def list_trainings(pharmacy_id: Optional[str] = Query(None), user: dict = Depends(get_current_user)):
+    if user["role"] == "superadmin":
+        query: dict = {"pharmacy_id": pharmacy_id} if pharmacy_id else {}
+    elif user["role"] == "admin":
+        if not user.get("pharmacy_id"):
+            raise HTTPException(status_code=403, detail="Aucune pharmacie associée à ce compte.")
+        query = {"pharmacy_id": user["pharmacy_id"]}
+    else:
+        query = {"pharmacy_id": user.get("pharmacy_id") or "", "status": "published"}
+    docs = await db.trainings.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
+    include_answers = user["role"] in ("admin", "superadmin")
+    out = []
+    for d in docs:
+        item = training_public(d, include_answers)
+        if user["role"] == "employee":
+            attempts = await db.training_attempts.find(
+                {"training_id": d["id"], "user_id": user["id"]}, {"_id": 0, "score": 1, "passed": 1}).to_list(200)
+            item["my_attempts"] = len(attempts)
+            item["my_best_score"] = max((a["score"] for a in attempts), default=None)
+            item["my_passed"] = any(a["passed"] for a in attempts)
+        out.append(item)
+    return out
+
+
+async def get_training_or_404(training_id: str, user: dict) -> dict:
+    doc = await db.trainings.find_one({"id": training_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Formation introuvable.")
+    if user["role"] != "superadmin" and (user.get("pharmacy_id") or "") != doc["pharmacy_id"]:
+        raise HTTPException(status_code=404, detail="Formation introuvable.")
+    if user["role"] == "employee" and doc["status"] != "published":
+        raise HTTPException(status_code=404, detail="Formation introuvable.")
+    return doc
+
+
+@api_router.get("/trainings/{training_id}")
+async def get_training(training_id: str, user: dict = Depends(get_current_user)):
+    doc = await get_training_or_404(training_id, user)
+    return training_public(doc, user["role"] in ("admin", "superadmin"))
+
+
+class TrainingSectionIn(BaseModel):
+    id: Optional[str] = None
+    sector: str
+    title: str
+    content: str
+    key_points: list[str] = []
+
+
+class ExamQuestionIn(BaseModel):
+    id: Optional[str] = None
+    question: str
+    options: list[str]
+    correct_index: int
+    explanation: str = ""
+
+
+class TrainingUpdateIn(BaseModel):
+    title: Optional[str] = None
+    sections: Optional[list[TrainingSectionIn]] = None
+    exam: Optional[list[ExamQuestionIn]] = None
+    passing_score: Optional[int] = None
+    status: Optional[str] = None
+
+
+@api_router.put("/trainings/{training_id}")
+async def update_training(training_id: str, payload: TrainingUpdateIn, principal: dict = Depends(get_principal)):
+    user = {"role": principal["role"], "pharmacy_id": principal["pharmacy_id"]}
+    doc = await get_training_or_404(training_id, user)
+    patch: dict = {"updated_at": datetime.now(timezone.utc).isoformat()}
+    if payload.title is not None:
+        patch["title"] = payload.title.strip()
+    if payload.passing_score is not None:
+        if not (0 < payload.passing_score <= 100):
+            raise HTTPException(status_code=400, detail="Note de passage invalide (1 à 100).")
+        patch["passing_score"] = payload.passing_score
+    if payload.sections is not None:
+        patch["sections"] = [{"id": s.id or str(uuid.uuid4()), "sector": s.sector, "title": s.title,
+                              "content": s.content, "key_points": s.key_points} for s in payload.sections]
+    if payload.exam is not None:
+        for q in payload.exam:
+            if len(q.options) < 2 or not (0 <= q.correct_index < len(q.options)):
+                raise HTTPException(status_code=400, detail="Question d'examen invalide.")
+        patch["exam"] = [{"id": q.id or str(uuid.uuid4()), "question": q.question, "options": q.options,
+                          "correct_index": q.correct_index, "explanation": q.explanation} for q in payload.exam]
+    if payload.status is not None:
+        if payload.status not in ("draft", "published"):
+            raise HTTPException(status_code=400, detail="Statut invalide.")
+        if doc["status"] in ("processing",):
+            raise HTTPException(status_code=400, detail="La formation est encore en préparation par l'IA.")
+        patch["status"] = payload.status
+        if payload.status == "published":
+            if not (patch.get("sections") or doc.get("sections")) or not (patch.get("exam") or doc.get("exam")):
+                raise HTTPException(status_code=400, detail="Impossible de publier sans sections ni examen.")
+            patch["published_at"] = datetime.now(timezone.utc).isoformat()
+            patch["error"] = None
+    await db.trainings.update_one({"id": training_id}, {"$set": patch})
+    action = "PUBLICATION_FORMATION" if payload.status == "published" else "MODIFICATION_FORMATION"
+    await log_audit(principal["email"], principal["role"], action, "formation", training_id,
+                    f"Formation « {patch.get('title', doc['title']) }» — champs : {', '.join(k for k in patch if k != 'updated_at')}",
+                    doc["pharmacy_id"])
+    return training_public({**doc, **patch}, True)
+
+
+@api_router.delete("/trainings/{training_id}")
+async def delete_training(training_id: str, principal: dict = Depends(get_principal)):
+    user = {"role": principal["role"], "pharmacy_id": principal["pharmacy_id"]}
+    doc = await get_training_or_404(training_id, user)
+    await db.trainings.delete_one({"id": training_id})
+    await db.training_attempts.delete_many({"training_id": training_id})
+    await log_audit(principal["email"], principal["role"], "SUPPRESSION_FORMATION", "formation", training_id,
+                    f"Formation « {doc['title']} » et ses résultats supprimés", doc["pharmacy_id"])
+    return {"status": "supprimée"}
+
+
+@api_router.get("/trainings/{training_id}/source")
+async def get_training_source(training_id: str, principal: dict = Depends(get_principal)):
+    user = {"role": principal["role"], "pharmacy_id": principal["pharmacy_id"]}
+    doc = await get_training_or_404(training_id, user)
+    full = await db.trainings.find_one({"id": training_id}, {"_id": 0, "storage_path": 1})
+    if not full or not full.get("storage_path"):
+        raise HTTPException(status_code=404, detail="Document source introuvable.")
+    content, ctype = await asyncio.to_thread(get_object, full["storage_path"])
+    return Response(content=content, media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="{doc.get("source_filename") or "formation.pdf"}"'})
+
+
+class AttemptIn(BaseModel):
+    answers: list[int]
+
+
+@api_router.post("/trainings/{training_id}/attempts")
+async def submit_attempt(training_id: str, payload: AttemptIn, user: dict = Depends(get_current_user)):
+    doc = await get_training_or_404(training_id, user)
+    exam = doc.get("exam") or []
+    if not exam:
+        raise HTTPException(status_code=400, detail="Cette formation n'a pas encore d'examen.")
+    if len(payload.answers) != len(exam):
+        raise HTTPException(status_code=400, detail="Veuillez répondre à toutes les questions.")
+    correct = sum(1 for a, q in zip(payload.answers, exam) if a == q["correct_index"])
+    score = round(correct / len(exam) * 100)
+    passing = doc.get("passing_score", 80)
+    passed = score >= passing
+    attempt = {
+        "id": str(uuid.uuid4()), "training_id": training_id, "pharmacy_id": doc["pharmacy_id"],
+        "user_id": user["id"], "user_email": user["email"], "user_name": user["name"],
+        "answers": payload.answers, "score": score, "passed": passed,
+        "correct_count": correct, "total": len(exam),
+        "completed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.training_attempts.insert_one(attempt)
+    await log_audit(user["email"], user["role"], "TENTATIVE_EXAMEN", "formation", training_id,
+                    f"Examen « {doc['title']} » : {score} % ({'réussi' if passed else 'échoué'})", doc["pharmacy_id"])
+    return {
+        "score": score, "passed": passed, "correct_count": correct, "total": len(exam),
+        "passing_score": passing,
+        "results": [{"question_id": q["id"], "your_answer": a, "correct": a == q["correct_index"],
+                     "correct_index": q["correct_index"], "explanation": q.get("explanation", "")}
+                    for a, q in zip(payload.answers, exam)],
+    }
+
+
+@api_router.get("/trainings/{training_id}/attempts")
+async def list_attempts(training_id: str, user: dict = Depends(get_current_user)):
+    doc = await get_training_or_404(training_id, user)
+    if user["role"] in ("admin", "superadmin"):
+        query: dict = {"training_id": training_id}
+    else:
+        query = {"training_id": training_id, "user_id": user["id"]}
+    docs = await db.training_attempts.find(query, {"_id": 0, "answers": 0}).sort("completed_at", -1).to_list(1000)
+    return docs
+
+
 scheduler = AsyncIOScheduler(timezone="America/Montreal")
 
 
@@ -759,6 +1147,7 @@ async def send_license_reminders() -> int:
         logger.warning("Rappels licences : RESEND_API_KEY manquante, envoi ignoré.")
         return 0
     resend.api_key = api_key
+    sender = await get_sender()
     docs = await db.licenses.find({"is_deleted": False}).to_list(2000)
     today = date.today()
     sent = 0
@@ -773,7 +1162,7 @@ async def send_license_reminders() -> int:
             continue
         try:
             params = {
-                "from": SENDER_EMAIL,
+                "from": sender,
                 "to": [doc["employee_email"]],
                 "subject": f"Rappel — votre licence {doc['license_number']} expire dans {days} jour(s)",
                 "html": reminder_html(doc, days),

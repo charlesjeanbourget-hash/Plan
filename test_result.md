@@ -128,3 +128,42 @@ frontend:
 agent_communication:
   - agent: "main"
     message: "Iteration 4 code écrit + fix import Branch dans HRContext.tsx (tsc OK). Smoke test backend OK (login superadmin, GET /api/admin/users → 5 users, POST reminders/run → sent:0). Besoin de régression complète."
+
+## Iteration 5 (main agent) — 4 nouveaux volets a tester
+user_problem_statement: "1) Expediteur courriel configurable (Resend domaine plus tard), 2) Cloche de notifications (conges, echanges de quarts, licences expirantes), 3) Tableau superadmin global par pharmacie, 4) Module Formation par IA: admin depose un PDF, l'IA decoupe par secteur + genere examen QCM, note de passage 80%, reprises illimitees, revision admin avant publication."
+backend:
+  - task: "Formations IA: upload PDF -> generation gpt-5.4 -> draft/publish/attempts (/api/trainings*)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Teste par curl E2E: upload PDF reel -> 6 sections + 14 questions generees, publication, examen employe (100%, passed), reponses cachees pour employes, attempts admin."
+  - task: "GET /api/superadmin/overview"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+  - task: "GET/POST /api/email-settings (expediteur configurable)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+frontend:
+  - task: "Module Formations (TrainingModule/TrainingEditor/TrainingViewer)"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/components/modules/TrainingModule.tsx"
+    needs_retesting: true
+  - task: "Cloche NotificationBell (admin: conges/swaps/licences; employe: statuts + formations)"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/components/NotificationBell.tsx"
+    needs_retesting: true
+  - task: "SuperadminOverview + panneau expediteur courriel"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/components/modules/SuperadminOverview.tsx"
+    needs_retesting: true
+agent_communication:
+  - agent: "main"
+    message: "Backend teste par curl (tous verts). Frontend smoke test OK (module Formations + cloche visibles). Une formation demo 'Formation d'integration Proxim' (id 5d2a444d-08bc-4e47-adbd-0db5a64d1e28) est publiee avec une tentative de Julie a 100%. tsc --noEmit propre."
