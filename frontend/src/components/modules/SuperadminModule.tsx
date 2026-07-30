@@ -1,14 +1,16 @@
 import { useState, FormEvent } from 'react';
 import { useHR } from '@/context/HRContext';
+import { useAuth } from '@/context/AuthContext';
 import { PharmacyPlan } from '@/types';
 import { ModuleHeader, StatCard } from '@/components/modules/shared';
+import { SuperadminUsers } from '@/components/modules/SuperadminUsers';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { Building2, Users, ShieldCheck, Plus, RotateCcw } from 'lucide-react';
+import { Building2, Users, ShieldCheck, Plus, RotateCcw, MapPin, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 const PLAN_STYLES: Record<PharmacyPlan, string> = {
@@ -18,15 +20,47 @@ const PLAN_STYLES: Record<PharmacyPlan, string> = {
 };
 
 export default function SuperadminModule(): JSX.Element {
-  const { state, addPharmacy, updatePharmacy, resetData } = useHR();
+  const { state, addPharmacy, updatePharmacy, resetData, addBranch, deleteBranch } = useHR();
+  const { currentUser } = useAuth();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [name, setName] = useState('');
   const [city, setCity] = useState('');
   const [ownerName, setOwnerName] = useState('');
   const [plan, setPlan] = useState<PharmacyPlan>('Essentiel');
+  const [branchOpen, setBranchOpen] = useState(false);
+  const [branchName, setBranchName] = useState('');
+  const [branchAddress, setBranchAddress] = useState('');
+  const [branchPharmacyId, setBranchPharmacyId] = useState(state.pharmacies[0]?.id ?? '');
 
   const activeCount = state.pharmacies.filter((p) => p.active).length;
   const totalEmployees = state.pharmacies.reduce((s, p) => s + p.employeeCount, 0);
+
+  if (currentUser?.role !== 'superadmin') {
+    return (
+      <div data-testid="superadmin-access-denied" className="bg-white rounded-xl border border-slate-200 p-12 text-center">
+        <ShieldCheck className="w-10 h-10 text-slate-300 mx-auto mb-4" />
+        <p className="text-slate-600 font-semibold">Module réservé aux superadministrateurs.</p>
+      </div>
+    );
+  }
+
+  const handleAddBranch = (e: FormEvent<HTMLFormElement>): void => {
+    e.preventDefault();
+    addBranch({ pharmacyId: branchPharmacyId, name: branchName, address: branchAddress });
+    toast.success('Succursale ajoutée.');
+    setBranchOpen(false);
+    setBranchName(''); setBranchAddress('');
+  };
+
+  const handleDeleteBranch = (id: string): void => {
+    const assigned = state.employees.filter((e) => e.branchId === id).length;
+    if (assigned > 0) {
+      toast.error(`Impossible : ${assigned} employé(s) rattaché(s) à cette succursale.`);
+      return;
+    }
+    deleteBranch(id);
+    toast.success('Succursale supprimée.');
+  };
 
   const handleAdd = (e: FormEvent<HTMLFormElement>): void => {
     e.preventDefault();
@@ -62,6 +96,8 @@ export default function SuperadminModule(): JSX.Element {
         <StatCard label="Employés gérés" value={String(totalEmployees)} icon={Users} hint="Tous comptes confondus" />
         <StatCard label="Comptes actifs" value={`${Math.round((activeCount / Math.max(state.pharmacies.length, 1)) * 100)} %`} icon={ShieldCheck} />
       </div>
+
+      <SuperadminUsers />
 
       <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
         <table className="w-full text-sm min-w-[800px]">
@@ -100,6 +136,71 @@ export default function SuperadminModule(): JSX.Element {
           </tbody>
         </table>
       </div>
+
+      <div className="bg-white rounded-xl border border-slate-200 p-7 mt-10" data-testid="branches-panel">
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="font-heading text-base font-bold text-slate-900 inline-flex items-center gap-2">
+            <MapPin className="w-4 h-4 text-emerald-600" /> Succursales
+          </h2>
+          <Button data-testid="add-branch-button" size="sm" onClick={() => setBranchOpen(true)} className="rounded-full bg-emerald-600 hover:bg-emerald-700 text-xs">
+            <Plus className="w-3.5 h-3.5 mr-1" /> Nouvelle succursale
+          </Button>
+        </div>
+        <div className="space-y-3">
+          {state.branches.map((b) => {
+            const assigned = state.employees.filter((e) => e.branchId === b.id).length;
+            return (
+              <div key={b.id} data-testid={`branch-row-${b.id}`} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg border border-slate-200 px-4 py-3">
+                <div>
+                  <p className="text-sm font-semibold text-slate-800">{b.name}</p>
+                  <p className="text-xs text-slate-500">
+                    {state.pharmacies.find((p) => p.id === b.pharmacyId)?.name ?? '—'} · {b.address || 'Adresse non renseignée'} · {assigned} employé(s)
+                  </p>
+                </div>
+                <Button
+                  data-testid={`delete-branch-${b.id}`}
+                  size="sm" variant="outline"
+                  className="rounded-full text-xs text-red-600 border-red-200 hover:bg-red-50 shrink-0"
+                  onClick={() => handleDeleteBranch(b.id)}
+                >
+                  <Trash2 className="w-3.5 h-3.5 mr-1" /> Supprimer
+                </Button>
+              </div>
+            );
+          })}
+          {state.branches.length === 0 && <p className="text-sm text-slate-500">Aucune succursale.</p>}
+        </div>
+      </div>
+
+      <Dialog open={branchOpen} onOpenChange={setBranchOpen}>
+        <DialogContent data-testid="add-branch-dialog">
+          <DialogHeader>
+            <DialogTitle className="font-heading">Nouvelle succursale</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleAddBranch} className="space-y-4">
+            <div className="space-y-2">
+              <Label>Pharmacie</Label>
+              <Select value={branchPharmacyId} onValueChange={setBranchPharmacyId}>
+                <SelectTrigger data-testid="branch-pharmacy-select"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {state.pharmacies.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Nom de la succursale</Label>
+              <Input data-testid="branch-name-input" value={branchName} onChange={(e) => setBranchName(e.target.value)} required />
+            </div>
+            <div className="space-y-2">
+              <Label>Adresse</Label>
+              <Input data-testid="branch-address-input" value={branchAddress} onChange={(e) => setBranchAddress(e.target.value)} />
+            </div>
+            <Button data-testid="branch-submit-button" type="submit" className="w-full rounded-full bg-emerald-600 hover:bg-emerald-700">
+              Ajouter la succursale
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent data-testid="add-pharmacy-dialog">

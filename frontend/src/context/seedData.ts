@@ -80,9 +80,14 @@ export const SEED_STATE: HRState = {
     { id: 'r2', date: d(2), startTime: '12:00', endTime: '20:00', position: 'ATP', reason: 'Absence maladie', status: 'Proposée', agencyProposal: 'Agence PharmaStaff — candidat disponible, 32 $/h' },
   ],
   payrollEntries: [
-    { id: 'p1', employeeId: 'e1', period: 'Période courante', hoursWorked: 80, overtimeHours: 2, grossPay: 5146, deductions: 1698.18, netPay: 3447.82, status: 'Validée' },
-    { id: 'p2', employeeId: 'e2', period: 'Période courante', hoursWorked: 70, overtimeHours: 0, grossPay: 1855, deductions: 556.5, netPay: 1298.5, status: 'En préparation' },
-    { id: 'p3', employeeId: 'e3', period: 'Période courante', hoursWorked: 60, overtimeHours: 0, grossPay: 1440, deductions: 403.2, netPay: 1036.8, status: 'En préparation' },
+    { id: 'p1', employeeId: 'e1', period: 'Période 13 — 15 au 28 juin 2026', periodStart: '2026-06-15', periodEnd: '2026-06-28', hoursWorked: 80, overtimeHours: 2, grossPay: 5146, deductions: 1698.18, netPay: 3447.82, status: 'Validée' },
+    { id: 'p2', employeeId: 'e2', period: 'Période 13 — 15 au 28 juin 2026', periodStart: '2026-06-15', periodEnd: '2026-06-28', hoursWorked: 70, overtimeHours: 0, grossPay: 1855, deductions: 556.5, netPay: 1298.5, status: 'En préparation' },
+    { id: 'p3', employeeId: 'e3', period: 'Période 13 — 15 au 28 juin 2026', periodStart: '2026-06-15', periodEnd: '2026-06-28', hoursWorked: 60, overtimeHours: 0, grossPay: 1440, deductions: 403.2, netPay: 1036.8, status: 'En préparation' },
+    { id: 'p4', employeeId: 'e1', period: 'Période 12 — 1er au 14 juin 2026', periodStart: '2026-06-01', periodEnd: '2026-06-14', hoursWorked: 80, overtimeHours: 0, grossPay: 4960, deductions: 1636.8, netPay: 3323.2, status: 'Payée' },
+    { id: 'p5', employeeId: 'e2', period: 'Période 12 — 1er au 14 juin 2026', periodStart: '2026-06-01', periodEnd: '2026-06-14', hoursWorked: 72, overtimeHours: 2, grossPay: 1934.5, deductions: 580.35, netPay: 1354.15, status: 'Payée' },
+    { id: 'p6', employeeId: 'e3', period: 'Période 12 — 1er au 14 juin 2026', periodStart: '2026-06-01', periodEnd: '2026-06-14', hoursWorked: 58, overtimeHours: 0, grossPay: 1392, deductions: 389.76, netPay: 1002.24, status: 'Payée' },
+    { id: 'p7', employeeId: 'e1', period: 'Période 11 — 18 au 31 mai 2026', periodStart: '2026-05-18', periodEnd: '2026-05-31', hoursWorked: 78, overtimeHours: 0, grossPay: 4836, deductions: 1595.88, netPay: 3240.12, status: 'Payée' },
+    { id: 'p8', employeeId: 'e2', period: 'Période 11 — 18 au 31 mai 2026', periodStart: '2026-05-18', periodEnd: '2026-05-31', hoursWorked: 70, overtimeHours: 0, grossPay: 1855, deductions: 556.5, netPay: 1298.5, status: 'Payée' },
   ],
   performanceReviews: [
     { id: 'pr1', employeeId: 'e2', date: d(-40), reviewer: 'Dr. Sophie Lavoie', score: 4.5, strengths: 'Excellente relation client, rigueur au laboratoire.', improvements: 'Déléguer davantage lors des périodes de pointe.', goals: 'Obtenir la certification en préparations stériles.' },

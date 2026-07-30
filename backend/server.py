@@ -8,6 +8,7 @@ import json
 import logging
 import uuid
 import asyncio
+import secrets
 import requests
 import resend
 import bcrypt
@@ -135,6 +136,8 @@ def user_public(doc: dict) -> dict:
         "pharmacy_id": doc.get("pharmacy_id"),
         "employee_id": doc.get("employee_id"),
         "is_temporary_password": doc.get("is_temporary_password", False),
+        "suspended": doc.get("suspended", False),
+        "created_at": doc.get("created_at", ""),
     }
 
 
@@ -175,6 +178,8 @@ async def get_current_user(request: Request) -> dict:
     user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=401, detail="Utilisateur introuvable.")
+    if user.get("suspended"):
+        raise HTTPException(status_code=403, detail="Compte suspendu. Contactez votre superadministrateur.")
     return user
 
 
@@ -199,6 +204,8 @@ async def auth_login(payload: LoginIn, request: Request):
             raise HTTPException(status_code=429, detail="Trop de tentatives échouées. Réessayez dans 15 minutes.",
                                 headers={"Retry-After": str(LOCKOUT_MINUTES * 60)})
         raise HTTPException(status_code=401, detail="Courriel ou mot de passe invalide.")
+    if user.get("suspended"):
+        raise HTTPException(status_code=403, detail="Compte suspendu. Contactez votre superadministrateur.")
     await db.login_attempts.delete_one({"identifier": identifier})
     return {"access_token": create_access_token(user), "user": user_public(user)}
 
@@ -254,6 +261,112 @@ async def seed_users():
             })
     await db.users.create_index("email", unique=True)
     await db.login_attempts.create_index("identifier")
+
+
+# ==================== Gestion des comptes (superadmin) ====================
+
+async def require_superadmin(user: dict = Depends(get_current_user)) -> dict:
+    if user["role"] != "superadmin":
+        raise HTTPException(status_code=403, detail="Réservé au superadministrateur.")
+    return user
+
+
+def gen_temp_password() -> str:
+    return "Lumina-" + secrets.token_urlsafe(6)
+
+
+class UserCreateIn(BaseModel):
+    email: str
+    name: str
+    role: str
+    pharmacy_id: Optional[str] = None
+    employee_id: Optional[str] = None
+
+
+class UserUpdateIn(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = None
+    pharmacy_id: Optional[str] = None
+    suspended: Optional[bool] = None
+
+
+@api_router.get("/admin/users")
+async def admin_list_users(su: dict = Depends(require_superadmin)):
+    docs = await db.users.find({}, {"_id": 0, "password_hash": 0}).sort("created_at", 1).to_list(1000)
+    return [user_public({**d, "password_hash": ""}) for d in docs]
+
+
+@api_router.post("/admin/users")
+async def admin_create_user(payload: UserCreateIn, su: dict = Depends(require_superadmin)):
+    email = payload.email.strip().lower()
+    if payload.role not in ("admin", "employee", "superadmin"):
+        raise HTTPException(status_code=400, detail="Rôle invalide.")
+    if await db.users.find_one({"email": email}):
+        raise HTTPException(status_code=400, detail="Un compte existe déjà avec ce courriel.")
+    temp = gen_temp_password()
+    doc = {
+        "id": str(uuid.uuid4()),
+        "email": email,
+        "password_hash": hash_password(temp),
+        "name": payload.name,
+        "role": payload.role,
+        "pharmacy_id": payload.pharmacy_id,
+        "employee_id": payload.employee_id,
+        "is_temporary_password": True,
+        "suspended": False,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.users.insert_one(doc)
+    await log_audit(su["email"], su["role"], "CREATION_COMPTE", "utilisateur", doc["id"],
+                    f"Compte {payload.role} créé pour {email}", payload.pharmacy_id or "")
+    return {"user": user_public(doc), "temporary_password": temp}
+
+
+@api_router.put("/admin/users/{user_id}")
+async def admin_update_user(user_id: str, payload: UserUpdateIn, su: dict = Depends(require_superadmin)):
+    target = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="Compte introuvable.")
+    if user_id == su["id"] and payload.suspended:
+        raise HTTPException(status_code=400, detail="Impossible de suspendre votre propre compte.")
+    patch = payload.model_dump(exclude_none=True)
+    if patch.get("role") and patch["role"] not in ("admin", "employee", "superadmin"):
+        raise HTTPException(status_code=400, detail="Rôle invalide.")
+    if patch:
+        await db.users.update_one({"id": user_id}, {"$set": patch})
+    action = "SUSPENSION_COMPTE" if payload.suspended is True else (
+        "REACTIVATION_COMPTE" if payload.suspended is False else "MODIFICATION_COMPTE")
+    await log_audit(su["email"], su["role"], action, "utilisateur", user_id,
+                    f"Compte {target['email']} — champs : {', '.join(patch.keys()) or 'aucun'}",
+                    target.get("pharmacy_id") or "")
+    return user_public({**target, **patch})
+
+
+@api_router.post("/admin/users/{user_id}/reset-password")
+async def admin_reset_password(user_id: str, su: dict = Depends(require_superadmin)):
+    target = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="Compte introuvable.")
+    temp = gen_temp_password()
+    await db.users.update_one({"id": user_id}, {"$set": {"password_hash": hash_password(temp), "is_temporary_password": True}})
+    await db.login_attempts.delete_one({"identifier": target["email"]})
+    await log_audit(su["email"], su["role"], "REINITIALISATION_MDP", "utilisateur", user_id,
+                    f"Mot de passe temporaire généré pour {target['email']} (support à distance)",
+                    target.get("pharmacy_id") or "")
+    return {"temporary_password": temp, "email": target["email"]}
+
+
+@api_router.delete("/admin/users/{user_id}")
+async def admin_delete_user(user_id: str, su: dict = Depends(require_superadmin)):
+    if user_id == su["id"]:
+        raise HTTPException(status_code=400, detail="Impossible de supprimer votre propre compte.")
+    target = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="Compte introuvable.")
+    await db.users.delete_one({"id": user_id})
+    await log_audit(su["email"], su["role"], "SUPPRESSION_COMPTE", "utilisateur", user_id,
+                    f"Compte {target['email']} supprimé définitivement", target.get("pharmacy_id") or "")
+    return {"status": "supprimé"}
 
 
 # ==================== Licences professionnelles — conforme Loi 25 ====================
@@ -497,6 +610,7 @@ async def upload_certificate(pharmacy_id: str, file: UploadFile) -> dict:
 async def create_license(
     employee_id: str = Form(...),
     employee_name: str = Form(...),
+    employee_email: str = Form(""),
     position: str = Form(""),
     branch_id: str = Form(""),
     license_number: str = Form(...),
@@ -513,11 +627,13 @@ async def create_license(
         "id": str(uuid.uuid4()),
         "employee_id": employee_id,
         "employee_name": employee_name,
+        "employee_email": employee_email,
         "position": position,
         "pharmacy_id": pid,
         "branch_id": branch_id,
         "license_number": license_number,
         "expiry_date": expiry_date,
+        "reminder_sent_for": None,
         "storage_path": None,
         "certificate_filename": None,
         "certificate_content_type": None,
@@ -540,6 +656,7 @@ async def update_license(
     license_number: str = Form(...),
     expiry_date: str = Form(...),
     branch_id: str = Form(""),
+    employee_email: str = Form(""),
     file: Optional[UploadFile] = File(None),
     principal: dict = Depends(get_principal),
 ):
@@ -549,8 +666,12 @@ async def update_license(
         raise HTTPException(status_code=404, detail="Licence introuvable.")
     patch = {"license_number": license_number, "expiry_date": expiry_date,
              "updated_at": datetime.now(timezone.utc).isoformat()}
+    if expiry_date != doc.get("expiry_date"):
+        patch["reminder_sent_for"] = None
     if branch_id:
         patch["branch_id"] = branch_id
+    if employee_email:
+        patch["employee_email"] = employee_email
     if file is not None and file.filename:
         patch.update(await upload_certificate(doc["pharmacy_id"], file))
     await db.licenses.update_one({"id": license_id}, {"$set": patch})
@@ -615,6 +736,71 @@ async def list_audit_logs(pharmacy_id: Optional[str] = Query(None), limit: int =
 scheduler = AsyncIOScheduler(timezone="America/Montreal")
 
 
+def reminder_html(doc: dict, days: int) -> str:
+    return (
+        "<div style='font-family:Arial,sans-serif;max-width:640px;margin:0 auto;color:#0f172a'>"
+        "<h2 style='color:#059669'>LuminaHR — Rappel de renouvellement</h2>"
+        f"<p>Bonjour {doc['employee_name']},</p>"
+        f"<p>Votre licence professionnelle <strong>{doc['license_number']}</strong> "
+        f"expire le <strong>{doc['expiry_date']}</strong> — dans <strong>{days} jour(s)</strong>.</p>"
+        "<p>Veuillez entamer votre démarche de renouvellement dès maintenant et transmettre "
+        "votre nouveau certificat à votre gestionnaire.</p>"
+        "<p style='font-size:12px;color:#94a3b8;margin-top:24px'>Rappel automatique envoyé par LuminaHR "
+        "30 jours avant l'échéance. Données traitées selon la Loi 25 (Québec).</p>"
+        "</div>"
+    )
+
+
+async def send_license_reminders() -> int:
+    api_key = os.environ.get("RESEND_API_KEY", "")
+    if not api_key:
+        logger.warning("Rappels licences : RESEND_API_KEY manquante, envoi ignoré.")
+        return 0
+    resend.api_key = api_key
+    docs = await db.licenses.find({"is_deleted": False}).to_list(2000)
+    today = date.today()
+    sent = 0
+    for doc in docs:
+        try:
+            days = (date.fromisoformat(doc["expiry_date"]) - today).days
+        except (ValueError, KeyError):
+            continue
+        if not (0 <= days <= 30):
+            continue
+        if doc.get("reminder_sent_for") == doc["expiry_date"] or not doc.get("employee_email"):
+            continue
+        try:
+            params = {
+                "from": SENDER_EMAIL,
+                "to": [doc["employee_email"]],
+                "subject": f"Rappel — votre licence {doc['license_number']} expire dans {days} jour(s)",
+                "html": reminder_html(doc, days),
+            }
+            await asyncio.to_thread(resend.Emails.send, params)
+            await db.licenses.update_one({"id": doc["id"]}, {"$set": {"reminder_sent_for": doc["expiry_date"]}})
+            await log_audit("système", "system", "RAPPEL_LICENCE_ENVOYE", "licence", doc["id"],
+                            f"Rappel envoyé à {doc['employee_email']} ({days} jour(s) restant(s))", doc["pharmacy_id"])
+            sent += 1
+        except Exception as exc:
+            logger.error(f"Rappel licence {doc['id']} échoué : {exc}")
+            await log_audit("système", "system", "RAPPEL_LICENCE_ECHEC", "licence", doc["id"],
+                            f"Échec du rappel à {doc.get('employee_email', '?')} : {exc}", doc.get("pharmacy_id", ""))
+    return sent
+
+
+@api_router.post("/licenses/reminders/run")
+async def run_license_reminders(principal: dict = Depends(get_principal)):
+    sent = await send_license_reminders()
+    await log_audit(principal["email"], principal["role"], "RAPPELS_DECLENCHES", "licence", "rappels",
+                    f"{sent} rappel(s) envoyé(s) manuellement", principal.get("pharmacy_id", ""))
+    return {"sent": sent}
+
+
+async def license_reminders_job():
+    sent = await send_license_reminders()
+    logger.info(f"Rappels licences quotidiens : {sent} envoyé(s)")
+
+
 async def monthly_reports_job():
     settings = await db.report_settings.find({"enabled": True}, {"_id": 0}).to_list(1000)
     logger.info(f"Rapport mensuel : {len(settings)} pharmacie(s) à traiter")
@@ -637,6 +823,7 @@ async def startup_tasks():
         logger.error(f"Init object storage échoué : {exc}")
     await seed_users()
     scheduler.add_job(monthly_reports_job, CronTrigger(day=1, hour=8, minute=0))
+    scheduler.add_job(license_reminders_job, CronTrigger(hour=8, minute=30))
     scheduler.start()
 
 

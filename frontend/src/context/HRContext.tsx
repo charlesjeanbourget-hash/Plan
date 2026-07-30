@@ -6,7 +6,7 @@ import {
 } from '@/types';
 import { SEED_STATE } from '@/context/seedData';
 
-const STATE_KEY = 'luminahr_state_v2';
+const STATE_KEY = 'luminahr_state_v3';
 
 export const uid = (): string => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 
@@ -44,6 +44,8 @@ interface HRContextValue {
   addFAQ: (f: Omit<FAQItem, 'id'>) => void;
   addPharmacy: (p: Omit<Pharmacy, 'id'>) => void;
   updatePharmacy: (id: string, patch: Partial<Pharmacy>) => void;
+  addBranch: (b: Omit<Branch, 'id'>) => void;
+  deleteBranch: (id: string) => void;
   resetData: () => void;
 }
 
@@ -138,6 +140,8 @@ export const HRProvider = ({ children }: { children: ReactNode }) => {
     addPharmacy: (p) => patchList('pharmacies', (items) => [...items, { ...p, id: uid() }]),
     updatePharmacy: (id, patch) =>
       patchList('pharmacies', (items) => items.map((i) => (i.id === id ? { ...i, ...patch } : i))),
+    addBranch: (b) => patchList('branches', (items) => [...items, { ...b, id: uid() }]),
+    deleteBranch: (id) => patchList('branches', (items) => items.filter((i) => i.id !== id)),
     resetData: () => {
       localStorage.setItem(STATE_KEY, JSON.stringify(SEED_STATE));
       setState(SEED_STATE);

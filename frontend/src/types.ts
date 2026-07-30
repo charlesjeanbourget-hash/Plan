@@ -160,6 +160,8 @@ export interface PayrollEntry {
   id: string;
   employeeId: string;
   period: string;
+  periodStart: string;
+  periodEnd: string;
   hoursWorked: number;
   overtimeHours: number;
   grossPay: number;
@@ -249,6 +251,7 @@ export interface License {
   id: string;
   employee_id: string;
   employee_name: string;
+  employee_email: string | null;
   position: string;
   pharmacy_id: string;
   branch_id: string;
@@ -282,6 +285,18 @@ export interface ReportSettings {
   pharmacy_name: string;
   admin_email: string;
   enabled: boolean;
+}
+
+export interface ManagedUser {
+  id: string;
+  email: string;
+  name: string;
+  role: Role;
+  pharmacy_id: string | null;
+  employee_id: string | null;
+  is_temporary_password: boolean;
+  suspended: boolean;
+  created_at: string;
 }
 
 export interface ChatMessage {

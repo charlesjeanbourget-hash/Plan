@@ -17,7 +17,13 @@ export default function PayrollModule(): JSX.Element {
   const { state, getEmployee, setPayrollStatus } = useHR();
   const [branchFilter, setBranchFilter] = useState('all');
 
+  const periods = Array.from(
+    new Map(state.payrollEntries.map((p) => [p.period, p.periodStart])).entries()
+  ).sort((a, b) => b[1].localeCompare(a[1]));
+  const [periodFilter, setPeriodFilter] = useState<string>(periods[0]?.[0] ?? '');
+
   const visibleEntries = state.payrollEntries.filter((p) => {
+    if (periodFilter && p.period !== periodFilter) return false;
     if (branchFilter === 'all') return true;
     return getEmployee(p.employeeId)?.branchId === branchFilter;
   });
@@ -28,8 +34,16 @@ export default function PayrollModule(): JSX.Element {
 
   return (
     <div data-testid="payroll-module">
-      <ModuleHeader title="Paie" subtitle="Suivi de la période de paie courante." />
-      <div className="mb-6">
+      <ModuleHeader title="Paie" subtitle="Historique des périodes de paie avec cumulatifs annuels." />
+      <div className="mb-6 flex flex-wrap gap-3">
+        <Select value={periodFilter} onValueChange={setPeriodFilter}>
+          <SelectTrigger data-testid="payroll-period-filter" className="w-72">
+            <SelectValue placeholder="Période de paie" />
+          </SelectTrigger>
+          <SelectContent>
+            {periods.map(([label]) => <SelectItem key={label} value={label}>{label}</SelectItem>)}
+          </SelectContent>
+        </Select>
         <Select value={branchFilter} onValueChange={setBranchFilter}>
           <SelectTrigger data-testid="payroll-branch-filter" className="w-64">
             <SelectValue placeholder="Toutes les succursales" />
@@ -91,7 +105,7 @@ export default function PayrollModule(): JSX.Element {
                         size="sm"
                         variant="outline"
                         className="rounded-full text-xs"
-                        onClick={() => { downloadPayStub(emp, p, state.pharmacies[0]?.name ?? 'LuminaHR'); toast.success('Relevé PDF téléchargé.'); }}
+                        onClick={() => { downloadPayStub(emp, p, state.pharmacies[0]?.name ?? 'LuminaHR', state.payrollEntries); toast.success('Relevé PDF téléchargé (avec cumulatifs annuels).'); }}
                       >
                         <Download className="w-3.5 h-3.5 mr-1" /> PDF
                       </Button>

@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
-import { ShieldCheck, FileUp, Eye, Trash2, Mail, Send, ScrollText } from 'lucide-react';
+import { ShieldCheck, FileUp, Eye, Trash2, Mail, Send, ScrollText, BellRing } from 'lucide-react';
 import { toast } from 'sonner';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -111,6 +111,7 @@ export default function LicensesModule(): JSX.Element {
       form.append('license_number', licenseNumber);
       form.append('expiry_date', expiryDate);
       form.append('branch_id', editTarget.branchId);
+      form.append('employee_email', editTarget.email);
       if (file) form.append('file', file);
       if (existing) {
         await axios.put(`${API}/licenses/${existing.id}`, form, { headers });
@@ -181,6 +182,16 @@ export default function LicensesModule(): JSX.Element {
       toast.error(detail ?? "Échec de l'envoi du rapport.");
     } finally {
       setSending(false);
+    }
+  };
+
+  const sendReminders = async (): Promise<void> => {
+    try {
+      const res = await axios.post<{ sent: number }>(`${API}/licenses/reminders/run`, {}, { headers });
+      toast.success(`${res.data.sent} rappel(s) de renouvellement envoyé(s) aux employés.`);
+    } catch (err) {
+      const detail = axios.isAxiosError(err) ? (err.response?.data as { detail?: string })?.detail : undefined;
+      toast.error(detail ?? "Échec de l'envoi des rappels.");
     }
   };
 
@@ -329,14 +340,20 @@ export default function LicensesModule(): JSX.Element {
                 <span className="text-sm text-slate-600">Envoi automatique {settings.enabled ? 'activé' : 'désactivé'}</span>
               </div>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button data-testid="save-report-settings-button" onClick={() => void saveSettings()} className="rounded-full bg-emerald-600 hover:bg-emerald-700">
                 <Mail className="w-4 h-4 mr-1" /> Enregistrer
               </Button>
               <Button data-testid="send-report-now-button" variant="outline" className="rounded-full" disabled={sending} onClick={() => void sendNow()}>
                 <Send className="w-4 h-4 mr-1" /> {sending ? 'Envoi…' : 'Envoyer maintenant'}
               </Button>
+              <Button data-testid="send-reminders-button" variant="outline" className="rounded-full" onClick={() => void sendReminders()}>
+                <BellRing className="w-4 h-4 mr-1" /> Rappels employés (30 j)
+              </Button>
             </div>
+            <p className="text-xs text-slate-400">
+              Rappels automatiques : chaque employé reçoit un courriel 30 jours avant l'expiration de sa licence (vérification quotidienne à 8 h 30).
+            </p>
           </div>
         </div>
       </div>

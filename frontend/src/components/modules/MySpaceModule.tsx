@@ -40,7 +40,9 @@ export default function MySpaceModule(): JSX.Element {
 
   const today = new Date().toISOString().slice(0, 10);
   const myShifts = state.shifts.filter((s) => s.employeeId === me.id && s.date >= today).sort((a, b) => a.date.localeCompare(b.date));
-  const myPays = state.payrollEntries.filter((p) => p.employeeId === me.id);
+  const myPays = state.payrollEntries
+    .filter((p) => p.employeeId === me.id)
+    .sort((a, b) => b.periodStart.localeCompare(a.periodStart));
   const myLeaves = state.leaveRequests.filter((l) => l.employeeId === me.id);
   const mySwaps = state.shiftSwaps.filter((s) => s.requesterId === me.id);
   const colleagues = state.employees.filter((e) => e.id !== me.id && e.status === 'Actif');
@@ -123,7 +125,7 @@ export default function MySpaceModule(): JSX.Element {
                   size="sm"
                   variant="outline"
                   className="rounded-full text-xs"
-                  onClick={() => { downloadPayStub(me, p, pharmacy?.name ?? 'LuminaHR'); toast.success('Relevé PDF téléchargé.'); }}
+                  onClick={() => { downloadPayStub(me, p, pharmacy?.name ?? 'LuminaHR', state.payrollEntries); toast.success('Relevé PDF téléchargé (avec cumulatifs annuels).'); }}
                 >
                   <Download className="w-3.5 h-3.5 mr-1" /> PDF
                 </Button>

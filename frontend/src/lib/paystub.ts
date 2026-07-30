@@ -4,7 +4,19 @@ import { Employee, PayrollEntry } from '@/types';
 const money = (n: number): string =>
   n.toLocaleString('fr-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' $';
 
-export const downloadPayStub = (employee: Employee, entry: PayrollEntry, pharmacyName: string): void => {
+export const downloadPayStub = (
+  employee: Employee,
+  entry: PayrollEntry,
+  pharmacyName: string,
+  allEntries: PayrollEntry[] = []
+): void => {
+  const ytd = (allEntries.length > 0 ? allEntries : [entry]).filter(
+    (e) => e.employeeId === employee.id && e.periodStart <= entry.periodStart
+  );
+  const ytdHours = ytd.reduce((s, e) => s + e.hoursWorked, 0);
+  const ytdGross = ytd.reduce((s, e) => s + e.grossPay, 0);
+  const ytdDeductions = ytd.reduce((s, e) => s + e.deductions, 0);
+  const ytdNet = ytd.reduce((s, e) => s + e.netPay, 0);
   const doc = new jsPDF();
   const line = (y: number): void => {
     doc.setDrawColor(226, 232, 240);
@@ -76,10 +88,30 @@ export const downloadPayStub = (employee: Employee, entry: PayrollEntry, pharmac
   doc.text('SALAIRE NET', 25, y + 23);
   doc.text(money(entry.netPay), 185, y + 23, { align: 'right' });
 
+  doc.setTextColor(15, 23, 42);
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'bold');
+  doc.text(`Cumulatifs annuels (${entry.periodStart.slice(0, 4)})`, 20, y + 42);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(10);
+  const cumuls: Array<[string, string]> = [
+    ['Heures cumulées', `${ytdHours} h`],
+    ['Salaire brut cumulé', money(ytdGross)],
+    ['Déductions cumulées', money(ytdDeductions)],
+    ['Salaire net cumulé', money(ytdNet)],
+  ];
+  let cy = y + 50;
+  cumuls.forEach(([label, value]) => {
+    doc.text(label, 25, cy);
+    doc.text(value, 190, cy, { align: 'right' });
+    cy += 7;
+  });
+  line(cy);
+
   doc.setFontSize(8);
   doc.setTextColor(148, 163, 184);
   doc.setFont('helvetica', 'normal');
-  doc.text('Document généré par LuminaHR. Les montants de déductions sont répartis à titre indicatif.', 20, y + 40);
+  doc.text(`Document généré par LuminaHR. Cumulatifs calculés sur ${ytd.length} période(s) de paie. Déductions réparties à titre indicatif.`, 20, cy + 8);
 
   doc.save(`releve-paie-${employee.lastName.toLowerCase()}-${entry.period.replace(/\s+/g, '-').toLowerCase()}.pdf`);
 };

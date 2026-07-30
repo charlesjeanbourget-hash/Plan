@@ -68,7 +68,9 @@ export default function Sidebar({ active, onSelect, onLogout }: Props): JSX.Elem
 
   const items = NAV_ITEMS.filter((item) => {
     if (currentUser?.role === 'employee') return EMPLOYEE_MODULES.includes(item.key);
-    return item.key !== 'myspace';
+    if (item.key === 'myspace') return false;
+    if (item.key === 'superadmin') return currentUser?.role === 'superadmin';
+    return true;
   });
 
   const content = (
