@@ -35,9 +35,17 @@ Développer « LuminaHR », un SIRH complet conçu pour les pharmacies. SPA Reac
 admin@luminahr.ca/admin123 · julie@luminahr.ca/employe123 · super@luminahr.ca/super123 · code agence AGENCE2024
 
 ## Backlog priorisé
-- **P0** : —
-- **P1** : Vue « Mon espace » employé enrichie (mes quarts, mes paies), export PDF des relevés de paie, calendrier visuel des vacances
-- **P2** : Notifications internes, échange de quarts entre employés, multi-pharmacie réel pour le superadmin (données par pharmacie), mode sombre, DialogDescription pour l'accessibilité Radix
+- **P0** : Fournir RESEND_API_KEY (resend.com) pour activer l'envoi réel des rapports mensuels
+- **P1** : Vue succursale généralisée (filtres dans Horaires/Paie), notifications internes, mode sombre
+- **P2** : Multi-pharmacie réel pour superadmin (données par pharmacie), échange de quarts entre employés sans gestionnaire, DialogDescription accessibilité Radix
+
+## Itération 2 (30 juin 2026) — testée à 100% (iteration_2.json : backend 14/14, frontend 14/14)
+- **Licences professionnelles (Loi 25)** : backend FastAPI + MongoDB + Object Store Emergent. Accès admin/superadmin via headers (X-User-Email/X-User-Role/X-Pharmacy-Id), 403 sinon. Isolation par pharmacie (admin ph1 ne voit pas ph2). Upload certificats PDF/images (max 10 Mo) dans le coffre sécurisé, consultation via blob. Journal d'audit invisible (chaque consultation/modification loggée : CONSULTATION_LISTE, CREATION, MODIFICATION, CONSULTATION_CERTIFICAT, DROIT_A_L_OUBLI, ENVOI_RAPPORT…) visible uniquement par superadmin. Droit à l'oubli : destruction définitive licences+documents + retrait optionnel des dossiers RH. Rapport mensuel auto (APScheduler, 1er du mois 8h heure de Montréal) par Resend — RESEND_API_KEY vide → erreur 400 explicite, à fournir par l'utilisateur. Paramètres destinataire/activation par pharmacie.
+- **Multi-comptes** : 2 superadmins (jeffmenard78@hotmail.com/jeff2026, charles-jbourget@hotmail.com/charles2026), admin lié à sa pharmacie (pharmacyId), succursales (br1 Centre-Ville, br2 Plateau), employés rattachés à une succursale, filtre succursale dans Licences. localStorage v2.
+- **Mon espace** (employés) : mes quarts, mes relevés de paie (PDF), mes congés + demande, mes échanges de quarts + proposition.
+- **Calendrier Vacances** : grille mensuelle des congés approuvés avec navigation mois et chips colorés par employé.
+- **Relevés PDF** : jsPDF format québécois (brut, impôts féd./prov., RRQ, AE, RQAP, net) dans Paie (admin) et Mon espace.
+- **Échange de quarts** : demande employé → panneau dans Horaires → approbation 1 clic réassigne le quart partout (interconnexion HRContext).
 
 ## Notes techniques
 - Ne jamais recréer `jsconfig.json` (conflit CRA avec tsconfig.json)

@@ -236,8 +236,10 @@ def report_html(pharmacy_name: str, items: list) -> str:
 
 
 async def send_report_email(setting: dict):
-    if not RESEND_API_KEY:
+    api_key = os.environ.get("RESEND_API_KEY", "")
+    if not api_key:
         raise RuntimeError("RESEND_API_KEY manquante dans backend/.env")
+    resend.api_key = api_key
     items = await compute_report({"pharmacy_id": setting["pharmacy_id"]})
     params = {
         "from": SENDER_EMAIL,
@@ -281,7 +283,7 @@ async def send_license_report_now(payload: ReportSendIn, principal: dict = Depen
     setting = await db.report_settings.find_one({"pharmacy_id": pid}, {"_id": 0})
     if not setting or not setting.get("admin_email"):
         raise HTTPException(status_code=400, detail="Configurez d'abord le courriel destinataire du rapport.")
-    if not RESEND_API_KEY:
+    if not os.environ.get("RESEND_API_KEY", ""):
         raise HTTPException(status_code=400, detail="Clé API Resend manquante. Ajoutez RESEND_API_KEY dans backend/.env pour activer l'envoi de courriels.")
     try:
         await send_report_email(setting)
@@ -471,6 +473,9 @@ async def monthly_reports_job():
             await send_report_email(s)
         except Exception as exc:
             logger.error(f"Rapport mensuel échoué pour {s.get('pharmacy_id')}: {exc}")
+            await log_audit("système", "system", "ENVOI_RAPPORT_ECHEC", "rapport", s.get("pharmacy_id", ""),
+                            f"Échec de l'envoi du rapport mensuel à {s.get('admin_email', '?')} : {exc}",
+                            s.get("pharmacy_id", ""))
 
 
 @app.on_event("startup")
