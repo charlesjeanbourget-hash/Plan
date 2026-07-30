@@ -61,6 +61,7 @@ admin@luminahr.ca/admin123 · julie@luminahr.ca/employe123 · super@luminahr.ca/
 - Fix : import `Branch` manquant dans HRContext.tsx (tsc --noEmit propre).
 - Mots de passe temporaires superadmin communiqués à l'utilisateur.
 - Bouton œil (afficher/masquer) sur les champs mot de passe : page de connexion + dialogue « Changer mon mot de passe » (30 juin 2026).
+- Fix login copier-coller (30 juin 2026, iteration_6.json — backend 30/30, frontend 100%) : trim des espaces autour du courriel et du mot de passe au login et au changement de mot de passe (backend + frontend). Cause du « mot de passe ne marche pas » signalé pour charlesjeanbourget@gmail.com : espace collé avec le mot de passe — les identifiants Lumina-Owner!5127 fonctionnent, vérifié E2E.
 
 ## Backlog technique (suggestions revue de code, non bloquant)
 - Throttle sur POST /api/licenses/reminders/run (1 exécution/min) et plafond de reprises Resend en cas d'échec transitoire (éviter renvois en boucle).
