@@ -1,0 +1,43 @@
+{
+  "summary": "Iteration 3 end-to-end tests: JWT auth (login, /auth/me, bearer, brute force lockout, change-password with restore), Licences with Bearer, License alert banner, branch filters (scheduling/payroll/employees), temp password amber badge, session persistence. Backend: 17/17 pytest passed. Frontend: 12/12 UI flows verified (bad password error message, admin login, session reload persistence, admin no amber badge, license alert banner visible with count, scheduling branch filter reduces to Karim (Plateau), payroll branch filter shows single row Karim Benali with brut 1 440,00 $ (non-breaking space), employees branch filter works, password dialog rejects wrong current with 'Mot de passe actuel incorrect.' error, logout returns to landing, superadmin (jeff) login shows amber pulse badge on sidebar-password-button, superadmin sees audit-trail-panel populated). Julie (employee) login shows myspace and no licenses link (non-regression). CRITICAL SECURITY BUG: brute-force lockout is bypassed via the public URL because request.client.host rotates across k8s ingress upstream IPs (10.208.151.74/75/...), so the identifier 'ip:email' never accumulates 5 fails; verified 7 consecutive bad logins via public URL all return 401 (never 429). Works correctly on localhost:8001 (127.0.0.1 identifier).",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/auth/login (brute-force protection)",
+        "issue": "Brute force lockout uses identifier = f'{request.client.host}:{email}'. Behind the k8s ingress, request.client.host is the upstream proxy IP which rotates per request, so 5 consecutive failed logins on the same email from the same real client never trigger the 15-minute 429 lockout. Reproduced with 7 consecutive bad logins via the public URL → always 401. Fix: use email-only identifier (with optional CIDR from X-Forwarded-For's leftmost value), and rely on Mongo TTL/periodic cleanup instead of per-IP bucketing.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Change brute-force lockout identifier from 'ip:email' to 'email' (or leftmost X-Forwarded-For + email) so protection works behind the k8s ingress in production. Current code path server.py:184-197 makes the 429 branch unreachable via the public URL."
+  ],
+  "critical_code_review_comments": [
+    "server.py:184 — brute force identifier uses request.client.host which returns the ingress upstream IP behind kubernetes. This IP rotates so lockout never triggers via the public URL (verified). Read the leftmost X-Forwarded-For or drop the IP part.",
+    "server.py:191-197 — on the 5th failed attempt, update['count']=0 is set together with locked_until; that means the 5th call still returns 401 (not 429). Only the 6th attempt sees the lockout. Consider also raising 429 on the 5th attempt for clarity, and add a Retry-After header.",
+    "server.py:262 — resend.api_key = RESEND_API_KEY is captured once at import time; if the .env value changes, existing worker would need a restart. Move to inside send_report_email().",
+    "AuthContext.tsx:70-77 — /auth/me revalidation on mount silently signs the user out on any error (including transient network 5xx). Consider retrying once before setAuth(null) to avoid random logouts."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/iteration_3.json",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "success_rate": {"backend": "100% (17/17)", "frontend": "100% (12/12 UI flows)"},
+  "seed_data_creation": "Backend Mongo: temporary TEST_ licences and login_attempts created; TEST-UI-999 licence from previous iteration deleted at teardown; julie's password was changed to a temp value and RESTORED to 'employe123' at end of TestChangePassword. login_attempts collection contains fictitious lockme_*@test.ca entries (harmless — 15-min TTL by locked_until).",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "admin@luminahr.ca/admin123 (ph1), julie@luminahr.ca/employe123 (restored), jeffmenard78@hotmail.com/Lumina-Jeff!2941 (superadmin, temporary). Bearer tokens via POST /api/auth/login.",
+  "context_for_next_testing_agent": "1) Public URL brute-force test WILL fail (401 instead of 429) — reproduced via 7 consecutive failed logins. Only localhost:8001 triggers 429. Test is split into two: test_brute_force_lockout_localhost (positive) + test_brute_force_ineffective_behind_ingress (documents the bug — will start failing once fixed, update it then). 2) The Sidebar password dialog does NOT have a visible close button in the DOM (Radix default X icon); once opened, dismiss via Escape or navigate. 3) LicensesModule edit dialog: the save button uses data-testid=save-report-settings-button for the report-settings panel (not the license edit form) — the license edit submit is a plain button:has-text('Enregistrer') inside [data-testid='license-dialog']. Prefer opening the licence edit modal via API instead of UI for speed. 4) After login the sidebar shows Mot de passe with an amber pulse dot for superadmin (is_temporary_password=true). 5) /api/auth/me is called on mount from AuthContext for session persistence — check network 200 to confirm token roundtrip. 6) The banner test only needs any licence with expiry ≤60 days to appear; create via POST /api/licenses (multipart form). 7) Payroll totals use non-breaking space U+00A0 ('1\u00a0440,00 $'); search with \\s or \\u00a0 regex.",
+  "rca_of_the_issue": "Brute-force lockout bug: FastAPI's request.client.host reflects the *immediate* TCP peer, which behind the emergent kubernetes ingress is one of several rotating upstream proxy IPs (observed: 10.208.151.74, 10.208.151.75, and others). The lockout key is f'{ip}:{email}', so each attempt lands in a different Mongo document and the count never reaches LOCKOUT_ATTEMPTS=5. Mitigation: parse the leftmost X-Forwarded-For header, or key the lockout on email alone (accept a small risk of shared-lockout DoS on a legitimate user in exchange for real BF protection). Alternatively add a small per-email counter alongside the per-IP one."
+}

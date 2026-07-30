@@ -1,3 +1,4 @@
+import { useState, FormEvent } from 'react';
 import { useHR } from '@/context/HRContext';
 import { PayrollStatus } from '@/types';
 import { ModuleHeader, StatCard, StatusBadge } from '@/components/modules/shared';
@@ -14,14 +15,31 @@ const money = (n: number): string =>
 
 export default function PayrollModule(): JSX.Element {
   const { state, getEmployee, setPayrollStatus } = useHR();
+  const [branchFilter, setBranchFilter] = useState('all');
 
-  const totalGross = state.payrollEntries.reduce((s, p) => s + p.grossPay, 0);
-  const totalDeductions = state.payrollEntries.reduce((s, p) => s + p.deductions, 0);
-  const totalNet = state.payrollEntries.reduce((s, p) => s + p.netPay, 0);
+  const visibleEntries = state.payrollEntries.filter((p) => {
+    if (branchFilter === 'all') return true;
+    return getEmployee(p.employeeId)?.branchId === branchFilter;
+  });
+
+  const totalGross = visibleEntries.reduce((s, p) => s + p.grossPay, 0);
+  const totalDeductions = visibleEntries.reduce((s, p) => s + p.deductions, 0);
+  const totalNet = visibleEntries.reduce((s, p) => s + p.netPay, 0);
 
   return (
     <div data-testid="payroll-module">
       <ModuleHeader title="Paie" subtitle="Suivi de la période de paie courante." />
+      <div className="mb-6">
+        <Select value={branchFilter} onValueChange={setBranchFilter}>
+          <SelectTrigger data-testid="payroll-branch-filter" className="w-64">
+            <SelectValue placeholder="Toutes les succursales" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Toutes les succursales</SelectItem>
+            {state.branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-10">
         <StatCard label="Salaire brut total" value={money(totalGross)} icon={Wallet} />
         <StatCard label="Déductions totales" value={money(totalDeductions)} icon={TrendingDown} hint="Impôts, RRQ, AE, RQAP" />
@@ -43,7 +61,7 @@ export default function PayrollModule(): JSX.Element {
             </tr>
           </thead>
           <tbody>
-            {state.payrollEntries.map((p) => {
+            {visibleEntries.map((p) => {
               const emp = getEmployee(p.employeeId);
               return (
                 <tr key={p.id} data-testid={`payroll-row-${p.id}`} className="border-b border-slate-100 last:border-0">

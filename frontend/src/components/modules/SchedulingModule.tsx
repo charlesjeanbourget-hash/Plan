@@ -27,6 +27,7 @@ export default function SchedulingModule(): JSX.Element {
   const { currentUser } = useAuth();
   const isAdmin = currentUser?.role !== 'employee';
   const [weekOffset, setWeekOffset] = useState(0);
+  const [branchFilter, setBranchFilter] = useState('all');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [employeeId, setEmployeeId] = useState(state.employees[0]?.id ?? '');
   const [date, setDate] = useState(iso(new Date()));
@@ -124,6 +125,17 @@ export default function SchedulingModule(): JSX.Element {
             Cette semaine
           </button>
         )}
+        <div className="ml-auto">
+          <Select value={branchFilter} onValueChange={setBranchFilter}>
+            <SelectTrigger data-testid="scheduling-branch-filter" className="w-56">
+              <SelectValue placeholder="Toutes les succursales" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Toutes les succursales</SelectItem>
+              {state.branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       <div className="overflow-x-auto bg-white rounded-xl border border-slate-200">
@@ -139,7 +151,7 @@ export default function SchedulingModule(): JSX.Element {
             </tr>
           </thead>
           <tbody>
-            {state.employees.map((emp) => (
+            {state.employees.filter((e) => branchFilter === 'all' || e.branchId === branchFilter).map((emp) => (
               <tr key={emp.id}>
                 <td className="p-4 border-b border-r border-slate-200 align-top">
                   <p className="font-semibold text-slate-800">{emp.firstName} {emp.lastName}</p>

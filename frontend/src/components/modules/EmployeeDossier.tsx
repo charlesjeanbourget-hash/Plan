@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 export default function EmployeeDossier(): JSX.Element {
   const { state, addEmployee, deleteEmployee, updateEmployee } = useHR();
   const [selectedId, setSelectedId] = useState<string | null>(state.employees[0]?.id ?? null);
+  const [branchFilter, setBranchFilter] = useState('all');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -65,7 +66,16 @@ export default function EmployeeDossier(): JSX.Element {
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="space-y-2">
-            {state.employees.map((emp) => (
+            <Select value={branchFilter} onValueChange={setBranchFilter}>
+              <SelectTrigger data-testid="employees-branch-filter" className="w-full mb-2">
+                <SelectValue placeholder="Toutes les succursales" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Toutes les succursales</SelectItem>
+                {state.branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            {state.employees.filter((e) => branchFilter === 'all' || e.branchId === branchFilter).map((emp) => (
               <button
                 key={emp.id}
                 data-testid={`employee-list-item-${emp.id}`}

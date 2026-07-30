@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, File, UploadFile, Form, Header, HTTPException, Query, Depends
+from fastapi import FastAPI, APIRouter, File, UploadFile, Form, Header, HTTPException, Query, Depends, Request
 from fastapi.responses import StreamingResponse, Response
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -10,10 +10,12 @@ import uuid
 import asyncio
 import requests
 import resend
+import bcrypt
+import jwt
 from typing import Optional
 from pathlib import Path
 from pydantic import BaseModel
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone, date, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from emergentintegrations.llm.chat import LlmChat, UserMessage, TextDelta, StreamDone
@@ -102,6 +104,155 @@ async def chat_endpoint(req: ChatRequest):
     )
 
 
+# ==================== Authentification JWT ====================
+
+JWT_ALGORITHM = "HS256"
+LOCKOUT_ATTEMPTS = 5
+LOCKOUT_MINUTES = 15
+
+
+def get_jwt_secret() -> str:
+    return os.environ["JWT_SECRET"]
+
+
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def verify_password(plain: str, hashed: str) -> bool:
+    try:
+        return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+    except ValueError:
+        return False
+
+
+def user_public(doc: dict) -> dict:
+    return {
+        "id": doc["id"],
+        "email": doc["email"],
+        "name": doc["name"],
+        "role": doc["role"],
+        "pharmacy_id": doc.get("pharmacy_id"),
+        "employee_id": doc.get("employee_id"),
+        "is_temporary_password": doc.get("is_temporary_password", False),
+    }
+
+
+def create_access_token(user: dict) -> str:
+    payload = {
+        "sub": user["id"],
+        "email": user["email"],
+        "role": user["role"],
+        "exp": datetime.now(timezone.utc) + timedelta(days=7),
+        "type": "access",
+    }
+    return jwt.encode(payload, get_jwt_secret(), algorithm=JWT_ALGORITHM)
+
+
+class LoginIn(BaseModel):
+    email: str
+    password: str
+
+
+class ChangePasswordIn(BaseModel):
+    current_password: str
+    new_password: str
+
+
+async def get_current_user(request: Request) -> dict:
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header[7:] if auth_header.startswith("Bearer ") else None
+    if not token:
+        raise HTTPException(status_code=401, detail="Non authentifié.")
+    try:
+        payload = jwt.decode(token, get_jwt_secret(), algorithms=[JWT_ALGORITHM])
+        if payload.get("type") != "access":
+            raise HTTPException(status_code=401, detail="Type de jeton invalide.")
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Session expirée, veuillez vous reconnecter.")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Jeton invalide.")
+    user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=401, detail="Utilisateur introuvable.")
+    return user
+
+
+@api_router.post("/auth/login")
+async def auth_login(payload: LoginIn, request: Request):
+    email = payload.email.strip().lower()
+    ip = request.client.host if request.client else "unknown"
+    identifier = f"{ip}:{email}"
+    now = datetime.now(timezone.utc)
+    attempt = await db.login_attempts.find_one({"identifier": identifier}, {"_id": 0})
+    if attempt and attempt.get("locked_until") and datetime.fromisoformat(attempt["locked_until"]) > now:
+        raise HTTPException(status_code=429, detail="Trop de tentatives échouées. Réessayez dans 15 minutes.")
+    user = await db.users.find_one({"email": email}, {"_id": 0})
+    if not user or not verify_password(payload.password, user["password_hash"]):
+        count = (attempt.get("count", 0) + 1) if attempt else 1
+        update = {"identifier": identifier, "count": count, "updated_at": now.isoformat()}
+        if count >= LOCKOUT_ATTEMPTS:
+            update["locked_until"] = (now + timedelta(minutes=LOCKOUT_MINUTES)).isoformat()
+            update["count"] = 0
+        await db.login_attempts.update_one({"identifier": identifier}, {"$set": update}, upsert=True)
+        raise HTTPException(status_code=401, detail="Courriel ou mot de passe invalide.")
+    await db.login_attempts.delete_one({"identifier": identifier})
+    return {"access_token": create_access_token(user), "user": user_public(user)}
+
+
+@api_router.get("/auth/me")
+async def auth_me(user: dict = Depends(get_current_user)):
+    return user_public(user)
+
+
+@api_router.post("/auth/change-password")
+async def auth_change_password(payload: ChangePasswordIn, user: dict = Depends(get_current_user)):
+    if not verify_password(payload.current_password, user["password_hash"]):
+        raise HTTPException(status_code=400, detail="Mot de passe actuel incorrect.")
+    if len(payload.new_password) < 8:
+        raise HTTPException(status_code=400, detail="Le nouveau mot de passe doit contenir au moins 8 caractères.")
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {"password_hash": hash_password(payload.new_password), "is_temporary_password": False}},
+    )
+    await log_audit(user["email"], user["role"], "CHANGEMENT_MOT_DE_PASSE", "utilisateur", user["id"],
+                    "Mot de passe modifié par l'utilisateur", user.get("pharmacy_id") or "")
+    return {"status": "modifié"}
+
+
+AUTH_SEED_USERS = [
+    {"email": "admin@luminahr.ca", "password": "admin123", "name": "Dr. Sophie Lavoie", "role": "admin",
+     "pharmacy_id": "ph1", "employee_id": "e1", "temp": False},
+    {"email": "julie@luminahr.ca", "password": "employe123", "name": "Julie Gagnon", "role": "employee",
+     "pharmacy_id": "ph1", "employee_id": "e2", "temp": False},
+    {"email": "jeffmenard78@hotmail.com", "password": "Lumina-Jeff!2941", "name": "Jeff Ménard",
+     "role": "superadmin", "temp": True},
+    {"email": "charles-jbourget@hotmail.com", "password": "Lumina-Charles!7358", "name": "Charles-J. Bourget",
+     "role": "superadmin", "temp": True},
+    {"email": "charlesjeanbourget@gmail.com", "password": "Lumina-Owner!5127", "name": "Charles Jean-Bourget",
+     "role": "superadmin", "temp": True},
+]
+
+
+async def seed_users():
+    for su in AUTH_SEED_USERS:
+        existing = await db.users.find_one({"email": su["email"]})
+        if existing is None:
+            await db.users.insert_one({
+                "id": str(uuid.uuid4()),
+                "email": su["email"],
+                "password_hash": hash_password(su["password"]),
+                "name": su["name"],
+                "role": su["role"],
+                "pharmacy_id": su.get("pharmacy_id"),
+                "employee_id": su.get("employee_id"),
+                "is_temporary_password": su["temp"],
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+    await db.users.create_index("email", unique=True)
+    await db.login_attempts.create_index("identifier")
+
+
 # ==================== Licences professionnelles — conforme Loi 25 ====================
 
 STORAGE_URL = "https://integrations.emergentagent.com/objstore/api/v1/storage"
@@ -148,14 +299,10 @@ ALLOWED_CERT_TYPES = {"application/pdf", "image/png", "image/jpeg", "image/webp"
 MAX_CERT_SIZE = 10 * 1024 * 1024
 
 
-async def get_principal(
-    x_user_email: Optional[str] = Header(None),
-    x_user_role: Optional[str] = Header(None),
-    x_pharmacy_id: Optional[str] = Header(None),
-):
-    if not x_user_email or x_user_role not in ("admin", "superadmin"):
+async def get_principal(user: dict = Depends(get_current_user)):
+    if user["role"] not in ("admin", "superadmin"):
         raise HTTPException(status_code=403, detail="Accès refusé : réservé aux administrateurs (Loi 25).")
-    return {"email": x_user_email, "role": x_user_role, "pharmacy_id": x_pharmacy_id or ""}
+    return {"email": user["email"], "role": user["role"], "pharmacy_id": user.get("pharmacy_id") or ""}
 
 
 def license_scope(principal: dict, pharmacy_id: Optional[str] = None) -> dict:
@@ -485,6 +632,7 @@ async def startup_tasks():
         logger.info("Object storage initialisé")
     except Exception as exc:
         logger.error(f"Init object storage échoué : {exc}")
+    await seed_users()
     scheduler.add_job(monthly_reports_job, CronTrigger(day=1, hour=8, minute=0))
     scheduler.start()
 

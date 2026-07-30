@@ -1,10 +1,15 @@
-import { useState } from 'react';
+import { useState, FormEvent } from 'react';
 import { ModuleKey } from '@/types';
 import { useAuth } from '@/context/AuthContext';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
 import {
   LayoutDashboard, Users, CalendarClock, Briefcase, Wallet, RefreshCw, TreePalm,
   TrendingUp, ClipboardCheck, FileText, HeartHandshake, HelpCircle, ShieldCheck,
-  LogOut, Pill, Menu, X, LucideIcon, BadgeCheck, UserRound,
+  LogOut, Pill, Menu, X, LucideIcon, BadgeCheck, UserRound, KeyRound,
 } from 'lucide-react';
 
 interface Props {
@@ -40,8 +45,26 @@ const NAV_ITEMS: NavItem[] = [
 const EMPLOYEE_MODULES: ModuleKey[] = ['dashboard', 'myspace', 'scheduling', 'vacations', 'benefits', 'faq'];
 
 export default function Sidebar({ active, onSelect, onLogout }: Props): JSX.Element {
-  const { currentUser } = useAuth();
+  const { currentUser, changePassword } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [pwdOpen, setPwdOpen] = useState(false);
+  const [currentPwd, setCurrentPwd] = useState('');
+  const [newPwd, setNewPwd] = useState('');
+  const [pwdError, setPwdError] = useState('');
+
+  const submitPassword = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
+    e.preventDefault();
+    setPwdError('');
+    const err = await changePassword(currentPwd, newPwd);
+    if (err) {
+      setPwdError(err);
+    } else {
+      toast.success('Mot de passe modifié avec succès.');
+      setPwdOpen(false);
+      setCurrentPwd('');
+      setNewPwd('');
+    }
+  };
 
   const items = NAV_ITEMS.filter((item) => {
     if (currentUser?.role === 'employee') return EMPLOYEE_MODULES.includes(item.key);
@@ -82,6 +105,16 @@ export default function Sidebar({ active, onSelect, onLogout }: Props): JSX.Elem
           {currentUser?.role === 'admin' ? 'Gestionnaire' : currentUser?.role === 'superadmin' ? 'Superadmin' : 'Employé(e)'}
         </p>
         <button
+          data-testid="sidebar-password-button"
+          onClick={() => setPwdOpen(true)}
+          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+        >
+          <KeyRound className="w-4 h-4" /> Mot de passe
+          {currentUser?.isTemporaryPassword && (
+            <span className="ml-auto w-2 h-2 rounded-full bg-amber-400 animate-pulse" title="Mot de passe temporaire" />
+          )}
+        </button>
+        <button
           data-testid="sidebar-logout-button"
           onClick={onLogout}
           className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
@@ -108,6 +141,32 @@ export default function Sidebar({ active, onSelect, onLogout }: Props): JSX.Elem
           <div className="flex-1 bg-slate-900/50" onClick={() => setMobileOpen(false)} />
         </div>
       )}
+      <Dialog open={pwdOpen} onOpenChange={setPwdOpen}>
+        <DialogContent data-testid="password-dialog">
+          <DialogHeader>
+            <DialogTitle className="font-heading">Changer mon mot de passe</DialogTitle>
+          </DialogHeader>
+          {currentUser?.isTemporaryPassword && (
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
+              Votre mot de passe actuel est temporaire. Veuillez le remplacer par un mot de passe personnel.
+            </p>
+          )}
+          <form onSubmit={(e) => void submitPassword(e)} className="space-y-4">
+            <div className="space-y-2">
+              <Label>Mot de passe actuel</Label>
+              <Input data-testid="current-password-input" type="password" value={currentPwd} onChange={(e) => setCurrentPwd(e.target.value)} required />
+            </div>
+            <div className="space-y-2">
+              <Label>Nouveau mot de passe (min. 8 caractères)</Label>
+              <Input data-testid="new-password-input" type="password" value={newPwd} onChange={(e) => setNewPwd(e.target.value)} minLength={8} required />
+            </div>
+            {pwdError && <p data-testid="password-error" className="text-sm text-red-600">{pwdError}</p>}
+            <Button data-testid="password-submit-button" type="submit" className="w-full rounded-full bg-emerald-600 hover:bg-emerald-700">
+              Modifier le mot de passe
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

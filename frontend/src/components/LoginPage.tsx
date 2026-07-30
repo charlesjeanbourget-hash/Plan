@@ -17,14 +17,19 @@ export default function LoginPage({ onNavigate, onSuccess }: Props): JSX.Element
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e: FormEvent<HTMLFormElement>): void => {
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
-    if (login(email, password)) {
+    setLoading(true);
+    setError('');
+    const err = await login(email, password);
+    setLoading(false);
+    if (err) {
+      setError(err);
+    } else {
       toast.success('Connexion réussie. Bienvenue !');
       onSuccess();
-    } else {
-      setError('Courriel ou mot de passe invalide.');
     }
   };
 
@@ -48,7 +53,7 @@ export default function LoginPage({ onNavigate, onSuccess }: Props): JSX.Element
           </div>
           <h1 className="font-heading text-2xl font-bold text-slate-900 mb-1">Espace Employés & Gestion</h1>
           <p className="text-sm text-slate-500 mb-8">Connectez-vous à votre compte.</p>
-          <form onSubmit={handleSubmit} className="space-y-5">
+          <form onSubmit={(e) => void handleSubmit(e)} className="space-y-5">
             <div className="space-y-2">
               <Label htmlFor="email">Courriel</Label>
               <Input
@@ -76,8 +81,8 @@ export default function LoginPage({ onNavigate, onSuccess }: Props): JSX.Element
             {error && (
               <p data-testid="login-error-message" className="text-sm text-red-600">{error}</p>
             )}
-            <Button data-testid="login-submit-button" type="submit" className="w-full rounded-full bg-emerald-600 hover:bg-emerald-700">
-              Se connecter
+            <Button data-testid="login-submit-button" type="submit" disabled={loading} className="w-full rounded-full bg-emerald-600 hover:bg-emerald-700">
+              {loading ? 'Connexion…' : 'Se connecter'}
             </Button>
           </form>
           <div className="mt-8 rounded-lg bg-slate-50 border border-slate-200 p-4 text-xs text-slate-500 space-y-1">

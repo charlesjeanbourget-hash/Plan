@@ -33,16 +33,12 @@ const STATUS_STYLE: Record<string, string> = {
 
 export default function LicensesModule(): JSX.Element {
   const { state, deleteEmployee } = useHR();
-  const { currentUser } = useAuth();
+  const { currentUser, token } = useAuth();
   const isSuperadmin = currentUser?.role === 'superadmin';
   const pharmacyId = currentUser?.pharmacyId ?? (isSuperadmin ? 'ph1' : '');
   const pharmacy = state.pharmacies.find((p) => p.id === pharmacyId);
 
-  const headers = {
-    'X-User-Email': currentUser?.email ?? '',
-    'X-User-Role': currentUser?.role ?? '',
-    'X-Pharmacy-Id': currentUser?.pharmacyId ?? '',
-  };
+  const headers = { Authorization: `Bearer ${token ?? ''}` };
 
   const [licenses, setLicenses] = useState<License[]>([]);
   const [reportItems, setReportItems] = useState<LicenseReportItem[]>([]);

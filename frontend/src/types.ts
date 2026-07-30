@@ -23,10 +23,10 @@ export interface User {
   id: string;
   name: string;
   email: string;
-  password: string;
   role: Role;
   employeeId?: string;
   pharmacyId?: string;
+  isTemporaryPassword?: boolean;
 }
 
 export type Position =

@@ -1,17 +1,10 @@
-import { HRState, User } from '@/types';
+import { HRState } from '@/types';
 
 const d = (offset: number): string => {
   const dt = new Date();
   dt.setDate(dt.getDate() + offset);
   return dt.toISOString().slice(0, 10);
 };
-
-export const SEED_USERS: User[] = [
-  { id: 'u1', name: 'Dr. Sophie Lavoie', email: 'admin@luminahr.ca', password: 'admin123', role: 'admin', employeeId: 'e1', pharmacyId: 'ph1' },
-  { id: 'u2', name: 'Julie Gagnon', email: 'julie@luminahr.ca', password: 'employe123', role: 'employee', employeeId: 'e2', pharmacyId: 'ph1' },
-  { id: 'u3', name: 'Jeff Ménard', email: 'jeffmenard78@hotmail.com', password: 'jeff2026', role: 'superadmin' },
-  { id: 'u4', name: 'Charles-J. Bourget', email: 'charles-jbourget@hotmail.com', password: 'charles2026', role: 'superadmin' },
-];
 
 export const SEED_STATE: HRState = {
   branches: [

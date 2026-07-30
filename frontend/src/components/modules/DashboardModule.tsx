@@ -1,11 +1,26 @@
+import { useState, useEffect } from 'react';
+import axios from 'axios';
 import { useHR } from '@/context/HRContext';
 import { useAuth } from '@/context/AuthContext';
 import { ModuleHeader, StatCard, StatusBadge } from '@/components/modules/shared';
-import { Users, CalendarClock, Briefcase, TreePalm } from 'lucide-react';
+import { Users, CalendarClock, Briefcase, TreePalm, BadgeAlert } from 'lucide-react';
+
+const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 export default function DashboardModule(): JSX.Element {
   const { state, getEmployee } = useHR();
-  const { currentUser } = useAuth();
+  const { currentUser, token } = useAuth();
+  const [expiringCount, setExpiringCount] = useState(0);
+
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'superadmin';
+
+  useEffect(() => {
+    if (!isAdmin || !token) return;
+    axios
+      .get<{ items: unknown[] }>(`${API}/licenses/report`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((res) => setExpiringCount(res.data.items.length))
+      .catch(() => setExpiringCount(0));
+  }, [isAdmin, token]);
 
   const today = new Date().toISOString().slice(0, 10);
   const activeEmployees = state.employees.filter((e) => e.status === 'Actif').length;
@@ -20,6 +35,23 @@ export default function DashboardModule(): JSX.Element {
         title={`Bonjour, ${currentUser?.name ?? ''}`}
         subtitle="Voici l'état de votre pharmacie aujourd'hui."
       />
+      {isAdmin && expiringCount > 0 && (
+        <div data-testid="license-alert-banner" className="mb-8 flex items-center gap-4 rounded-xl border border-amber-300 bg-amber-50 px-5 py-4">
+          <div className="relative">
+            <BadgeAlert className="w-6 h-6 text-amber-600" />
+            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
+          </div>
+          <div className="flex-1">
+            <p className="text-sm font-bold text-amber-900">
+              {expiringCount} licence{expiringCount > 1 ? 's' : ''} professionnelle{expiringCount > 1 ? 's' : ''} arrive{expiringCount > 1 ? 'nt' : ''} à échéance dans les 60 prochains jours
+            </p>
+            <p className="text-xs text-amber-700">Consultez le module « Licences pro. » pour les détails et le renouvellement.</p>
+          </div>
+          <span data-testid="license-alert-count" className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-amber-600 text-white text-sm font-bold">
+            {expiringCount}
+          </span>
+        </div>
+      )}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-10">
         <StatCard label="Employés actifs" value={String(activeEmployees)} icon={Users} hint={`${state.employees.length} au total`} />
         <StatCard label="Quarts aujourd'hui" value={String(todayShifts.length)} icon={CalendarClock} hint="Comptoir et laboratoire" />
