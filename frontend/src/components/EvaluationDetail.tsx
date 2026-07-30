@@ -197,29 +197,29 @@ export default function EvaluationDetail({ evaluation: ev, onBack, onChanged }: 
       </div>
 
       {ev.suggestion && (
-        <div className="bg-emerald-950 rounded-xl p-7 mb-6 text-white" data-testid="suggestion-card">
-          <h2 className="font-heading text-base font-bold inline-flex items-center gap-2 mb-4">
-            <Sparkles className="w-4 h-4 text-amber-400" /> Suggestion salariale (basée sur le BAIIA)
+        <div className="bg-white rounded-xl border border-slate-200 border-t-4 border-t-bronze-500 p-7 mb-6" data-testid="suggestion-card">
+          <h2 className="font-heading text-base font-bold text-slate-900 inline-flex items-center gap-2 mb-4">
+            <Sparkles className="w-4 h-4 text-bronze-600" /> Suggestion salariale (basée sur le BAIIA)
           </h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
             <div>
-              <p className="text-xs uppercase tracking-[0.15em] text-emerald-300 font-semibold">Score global</p>
-              <p className="font-heading text-2xl font-extrabold" data-testid="suggestion-score">{ev.suggestion.performance_score} %</p>
-              <p className="text-[11px] text-emerald-200/70">70 % employeur + 30 % auto</p>
+              <p className="text-xs uppercase tracking-[0.15em] text-slate-500 font-semibold">Score global</p>
+              <p className="font-heading text-2xl font-extrabold text-slate-900" data-testid="suggestion-score">{ev.suggestion.performance_score} %</p>
+              <p className="text-[11px] text-slate-400">70 % employeur + 30 % auto</p>
             </div>
             <div>
-              <p className="text-xs uppercase tracking-[0.15em] text-emerald-300 font-semibold">Multiplicateur</p>
-              <p className="font-heading text-2xl font-extrabold" data-testid="suggestion-multiplier">× {ev.suggestion.multiplier}</p>
+              <p className="text-xs uppercase tracking-[0.15em] text-slate-500 font-semibold">Multiplicateur</p>
+              <p className="font-heading text-2xl font-extrabold text-slate-900" data-testid="suggestion-multiplier">× {ev.suggestion.multiplier}</p>
             </div>
             <div>
-              <p className="text-xs uppercase tracking-[0.15em] text-emerald-300 font-semibold">Augmentation</p>
-              <p className="font-heading text-2xl font-extrabold text-amber-400" data-testid="suggestion-increase">+{ev.suggestion.suggested_increase_pct} %</p>
-              <p className="text-[11px] text-emerald-200/70">{ev.baiia_increase_pct} % BAIIA × {ev.suggestion.multiplier}</p>
+              <p className="text-xs uppercase tracking-[0.15em] text-slate-500 font-semibold">Augmentation</p>
+              <p className="font-heading text-2xl font-extrabold text-bronze-700" data-testid="suggestion-increase">+{ev.suggestion.suggested_increase_pct} %</p>
+              <p className="text-[11px] text-slate-400">{ev.baiia_increase_pct} % BAIIA × {ev.suggestion.multiplier}</p>
             </div>
             <div>
-              <p className="text-xs uppercase tracking-[0.15em] text-emerald-300 font-semibold">Taux suggéré</p>
-              <p className="font-heading text-2xl font-extrabold text-amber-400" data-testid="suggestion-rate">{money(ev.suggestion.suggested_rate)}/h</p>
-              <p className="text-[11px] text-emerald-200/70">actuel : {money(ev.current_rate)}/h</p>
+              <p className="text-xs uppercase tracking-[0.15em] text-slate-500 font-semibold">Taux suggéré</p>
+              <p className="font-heading text-2xl font-extrabold text-bronze-700" data-testid="suggestion-rate">{money(ev.suggestion.suggested_rate)}/h</p>
+              <p className="text-[11px] text-slate-400">actuel : {money(ev.current_rate)}/h</p>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">

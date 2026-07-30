@@ -35,7 +35,7 @@ app = FastAPI()
 api_router = APIRouter(prefix="/api")
 
 SYSTEM_MESSAGE = (
-    "Tu es Lumina, l'assistante IA de LuminaHR, un système de gestion des ressources humaines (SIRH) "
+    "Tu es Lumina, l'assistante IA d'Arrière Plan, un système de gestion des ressources humaines (SIRH) "
     "conçu pour les pharmacies. Tu aides les gestionnaires et employés de pharmacie avec : la gestion des horaires "
     "et quarts de travail, le recrutement, la paie, les vacances et congés, les remplacements, la performance, "
     "l'onboarding, les contrats et les avantages sociaux. Tu connais les normes du travail au Québec et au Canada. "
@@ -50,7 +50,7 @@ class ChatRequest(BaseModel):
 
 @api_router.get("/")
 async def root():
-    return {"message": "LuminaHR API"}
+    return {"message": "Arrière Plan API"}
 
 
 @api_router.post("/chat")
@@ -494,10 +494,10 @@ def report_html(pharmacy_name: str, items: list) -> str:
         body = "<p>Aucune licence n'arrive à échéance dans les 60 prochains jours. Tout est en règle.</p>"
     return (
         "<div style='font-family:Arial,sans-serif;max-width:640px;margin:0 auto;color:#0f172a'>"
-        f"<h2 style='color:#059669'>LuminaHR — Rapport mensuel des licences</h2>"
+        f"<h2 style='color:#059669'>Arrière Plan — Rapport mensuel des licences</h2>"
         f"<p style='color:#64748b'>{pharmacy_name}</p>"
         f"{body}"
-        "<p style='font-size:12px;color:#94a3b8;margin-top:24px'>Rapport généré automatiquement le 1er du mois par LuminaHR, "
+        "<p style='font-size:12px;color:#94a3b8;margin-top:24px'>Rapport généré automatiquement le 1er du mois par Arrière Plan, "
         "conformément à vos paramètres. Données traitées selon la Loi 25 (Québec).</p>"
         "</div>"
     )
@@ -512,7 +512,7 @@ async def send_report_email(setting: dict):
     params = {
         "from": await get_sender(),
         "to": [setting["admin_email"]],
-        "subject": f"LuminaHR — Rapport mensuel des licences — {setting.get('pharmacy_name', '')}",
+        "subject": f"Arrière Plan — Rapport mensuel des licences — {setting.get('pharmacy_name', '')}",
         "html": report_html(setting.get("pharmacy_name", ""), items),
     }
     result = await asyncio.to_thread(resend.Emails.send, params)
@@ -740,32 +740,32 @@ async def list_audit_logs(pharmacy_id: Optional[str] = Query(None), limit: int =
 
 # ==================== Paramètres courriel (expéditeur configurable) ====================
 
-DEFAULT_SENDER = f"LuminaHR <{SENDER_EMAIL}>" if SENDER_EMAIL and "<" not in SENDER_EMAIL else (SENDER_EMAIL or "LuminaHR <onboarding@resend.dev>")
+DEFAULT_SENDER = f"Arrière Plan <{SENDER_EMAIL}>" if SENDER_EMAIL and "<" not in SENDER_EMAIL else (SENDER_EMAIL or "Arrière Plan <onboarding@resend.dev>")
 
 
 async def get_sender() -> str:
     doc = await db.email_settings.find_one({"id": "global"}, {"_id": 0})
     if doc and doc.get("sender_email"):
-        return f"{doc.get('sender_name') or 'LuminaHR'} <{doc['sender_email']}>"
+        return f"{doc.get('sender_name') or 'Arrière Plan'} <{doc['sender_email']}>"
     return DEFAULT_SENDER
 
 
 class EmailSettingsIn(BaseModel):
     sender_email: str
-    sender_name: str = "LuminaHR"
+    sender_name: str = "Arrière Plan"
 
 
 @api_router.get("/email-settings")
 async def get_email_settings(principal: dict = Depends(get_principal)):
     doc = await db.email_settings.find_one({"id": "global"}, {"_id": 0})
-    base = doc or {"id": "global", "sender_email": "", "sender_name": "LuminaHR"}
+    base = doc or {"id": "global", "sender_email": "", "sender_name": "Arrière Plan"}
     return {**base, "default_sender": DEFAULT_SENDER}
 
 
 @api_router.post("/email-settings")
 async def save_email_settings(payload: EmailSettingsIn, su: dict = Depends(require_superadmin)):
     doc = {"id": "global", "sender_email": payload.sender_email.strip(),
-           "sender_name": payload.sender_name.strip() or "LuminaHR"}
+           "sender_name": payload.sender_name.strip() or "Arrière Plan"}
     await db.email_settings.update_one({"id": "global"}, {"$set": doc}, upsert=True)
     await log_audit(su["email"], su["role"], "MODIFICATION_EXPEDITEUR", "courriel", "global",
                     f"Expéditeur : {doc['sender_name']} <{doc['sender_email'] or 'défaut'}>")
@@ -1242,11 +1242,11 @@ def training_reminder_html(name: str, title: str, due_date: str, days: int) -> s
                    f"il vous reste <strong>{days} jour(s)</strong>")
     return (
         "<div style='font-family:Arial,sans-serif;max-width:640px;margin:0 auto;color:#0f172a'>"
-        "<h2 style='color:#059669'>LuminaHR — Relance de formation</h2>"
+        "<h2 style='color:#059669'>Arrière Plan — Relance de formation</h2>"
         f"<p>Bonjour {name},</p>"
         f"<p>Votre formation <strong>« {title} »</strong> {urgence}.</p>"
-        "<p>Connectez-vous à LuminaHR, consultez le contenu par secteur puis complétez l'examen final.</p>"
-        "<p style='font-size:12px;color:#94a3b8;margin-top:24px'>Relance automatique envoyée par LuminaHR.</p>"
+        "<p>Connectez-vous à Arrière Plan, consultez le contenu par secteur puis complétez l'examen final.</p>"
+        "<p style='font-size:12px;color:#94a3b8;margin-top:24px'>Relance automatique envoyée par Arrière Plan.</p>"
         "</div>"
     )
 
@@ -2129,6 +2129,69 @@ async def delete_evaluation(evaluation_id: str, principal: dict = Depends(get_pr
     return {"status": "supprimée"}
 
 
+def eval_reminder_html(doc: dict, days: int) -> str:
+    return (
+        "<div style='font-family:Arial,sans-serif;max-width:640px;margin:0 auto;color:#0f172a'>"
+        "<h2 style='color:#059669'>Arrière Plan — Auto-évaluation en attente</h2>"
+        f"<p>Bonjour {doc['employee_name']},</p>"
+        f"<p>Votre évaluation de performance a été lancée il y a <strong>{days} jour(s)</strong> et votre "
+        "auto-évaluation n'est pas encore complétée.</p>"
+        "<p>Connectez-vous à Arrière Plan, ouvrez « Mon espace » puis complétez votre auto-évaluation — "
+        "elle compte pour 30 % de votre score global.</p>"
+        "<p style='font-size:12px;color:#94a3b8;margin-top:24px'>Relance automatique envoyée par Arrière Plan.</p>"
+        "</div>")
+
+
+EVAL_REMINDER_DAYS = 3
+
+
+async def send_evaluation_reminders() -> int:
+    api_key = os.environ.get("RESEND_API_KEY", "")
+    if not api_key:
+        logger.warning("Relances auto-évaluations : RESEND_API_KEY manquante, envoi ignoré.")
+        return 0
+    resend.api_key = api_key
+    sender = await get_sender()
+    now = datetime.now(timezone.utc)
+    docs = await db.evaluations.find({"self_eval": None, "status": "en_cours"}).to_list(1000)
+    sent = 0
+    for doc in docs:
+        days = (now - datetime.fromisoformat(doc["created_at"])).days
+        if days < EVAL_REMINDER_DAYS:
+            continue
+        last = doc.get("self_reminder_at")
+        if last and (now - datetime.fromisoformat(last)).days < EVAL_REMINDER_DAYS:
+            continue
+        user = await db.users.find_one({"employee_id": doc["employee_id"], "pharmacy_id": doc["pharmacy_id"]}, {"_id": 0})
+        if not user or not user.get("email"):
+            continue
+        try:
+            await asyncio.to_thread(resend.Emails.send, {
+                "from": sender, "to": [user["email"]],
+                "subject": f"Rappel — votre auto-évaluation est en attente depuis {days} jour(s)",
+                "html": eval_reminder_html(doc, days)})
+            await db.evaluations.update_one({"id": doc["id"]}, {"$set": {"self_reminder_at": now.isoformat()}})
+            await log_audit("système", "system", "RAPPEL_AUTOEVALUATION", "évaluation", doc["id"],
+                            f"Relance envoyée à {user['email']} ({days} jour(s) d'attente)", doc["pharmacy_id"])
+            sent += 1
+        except Exception as exc:
+            logger.error(f"Relance auto-évaluation {doc['id']} échouée : {exc}")
+    return sent
+
+
+@api_router.post("/evaluations/reminders/run")
+async def run_evaluation_reminders(principal: dict = Depends(get_principal)):
+    sent = await send_evaluation_reminders()
+    await log_audit(principal["email"], principal["role"], "RAPPELS_AUTOEVAL", "évaluation", "rappels",
+                    f"{sent} relance(s) d'auto-évaluation envoyée(s) manuellement", principal["pharmacy_id"] or "ph1")
+    return {"sent": sent}
+
+
+async def evaluation_reminders_job():
+    sent = await send_evaluation_reminders()
+    logger.info(f"Relances auto-évaluations quotidiennes : {sent} envoyée(s)")
+
+
 # ==================== Remplaçants : agences, demandes, offres ====================
 
 class AgencyIn(BaseModel):
@@ -2185,7 +2248,7 @@ def replacement_email_html(pharmacy_name: str, role: str, slots: list, notes: st
     slot_lines = "".join(f"<li><strong>{s['date']}</strong> de {s['start']} à {s['end']}</li>" for s in slots)
     return (
         "<div style='font-family:Arial,sans-serif;max-width:640px;margin:0 auto;color:#0f172a'>"
-        "<h2 style='color:#059669'>LuminaHR — Demande de remplacement</h2>"
+        "<h2 style='color:#059669'>Arrière Plan — Demande de remplacement</h2>"
         f"<p><strong>{pharmacy_name}</strong> recherche un(e) <strong>{role}</strong> (urgence : {urgency}).</p>"
         f"<ul>{slot_lines}</ul>"
         + (f"<p>Précisions : {notes}</p>" if notes else "")
@@ -2223,7 +2286,7 @@ async def create_replacement_request(payload: ReplacementRequestIn, principal: d
     if api_key and agencies:
         resend.api_key = api_key
         sender = await get_sender()
-        pharmacy_name = "Pharmacie LuminaHR"
+        pharmacy_name = "Pharmacie Arrière Plan"
         html = replacement_email_html(pharmacy_name, payload.role, doc["slots"], doc["notes"], doc["urgency"], link)
         for ag in agencies:
             try:
@@ -2247,6 +2310,11 @@ async def list_replacement_requests(principal: dict = Depends(get_principal)):
     docs = await db.replacement_requests.find({"pharmacy_id": pid}, {"_id": 0, "token": 0}).sort("created_at", -1).to_list(200)
     for d in docs:
         d["offers_count"] = await db.replacement_offers.count_documents({"request_id": d["id"]})
+        d["chosen_offer"] = None
+        if d.get("chosen_offer_id"):
+            d["chosen_offer"] = await db.replacement_offers.find_one(
+                {"id": d["chosen_offer_id"]},
+                {"_id": 0, "candidate_name": 1, "agency_name": 1, "hourly_rate": 1})
     return docs
 
 
@@ -2329,13 +2397,13 @@ async def choose_replacement_offer(request_id: str, payload: ChooseOfferIn, prin
         slot0 = req["slots"][0]["date"] if req.get("slots") else ""
         chosen_html = (
             "<div style='font-family:Arial,sans-serif;max-width:640px;margin:0 auto;color:#0f172a'>"
-            "<h2 style='color:#059669'>LuminaHR — Offre retenue</h2>"
+            "<h2 style='color:#059669'>Arrière Plan — Offre retenue</h2>"
             f"<p>Bonne nouvelle ! Votre candidat(e) <strong>{offer['candidate_name']}</strong> a été retenu(e) "
             f"pour le remplacement de <strong>{req['role']}</strong> ({slot0}) au taux de {offer['hourly_rate']} $/h.</p>"
             "<p>La pharmacie vous contactera pour finaliser les détails.</p></div>")
         declined_html = (
             "<div style='font-family:Arial,sans-serif;max-width:640px;margin:0 auto;color:#0f172a'>"
-            "<h2 style='color:#059669'>LuminaHR — Demande comblée</h2>"
+            "<h2 style='color:#059669'>Arrière Plan — Demande comblée</h2>"
             f"<p>La demande de remplacement de <strong>{req['role']}</strong> ({slot0}) a été comblée par une autre offre.</p>"
             "<p>Merci pour votre proposition — au plaisir de collaborer pour les prochains besoins.</p></div>")
         all_offers = await db.replacement_offers.find({"request_id": request_id}, {"_id": 0}).to_list(200)
@@ -2378,13 +2446,13 @@ scheduler = AsyncIOScheduler(timezone="America/Montreal")
 def reminder_html(doc: dict, days: int) -> str:
     return (
         "<div style='font-family:Arial,sans-serif;max-width:640px;margin:0 auto;color:#0f172a'>"
-        "<h2 style='color:#059669'>LuminaHR — Rappel de renouvellement</h2>"
+        "<h2 style='color:#059669'>Arrière Plan — Rappel de renouvellement</h2>"
         f"<p>Bonjour {doc['employee_name']},</p>"
         f"<p>Votre licence professionnelle <strong>{doc['license_number']}</strong> "
         f"expire le <strong>{doc['expiry_date']}</strong> — dans <strong>{days} jour(s)</strong>.</p>"
         "<p>Veuillez entamer votre démarche de renouvellement dès maintenant et transmettre "
         "votre nouveau certificat à votre gestionnaire.</p>"
-        "<p style='font-size:12px;color:#94a3b8;margin-top:24px'>Rappel automatique envoyé par LuminaHR "
+        "<p style='font-size:12px;color:#94a3b8;margin-top:24px'>Rappel automatique envoyé par Arrière Plan "
         "30 jours avant l'échéance. Données traitées selon la Loi 25 (Québec).</p>"
         "</div>"
     )
@@ -2465,6 +2533,7 @@ async def startup_tasks():
     scheduler.add_job(monthly_reports_job, CronTrigger(day=1, hour=8, minute=0))
     scheduler.add_job(license_reminders_job, CronTrigger(hour=8, minute=30))
     scheduler.add_job(training_reminders_job, CronTrigger(hour=8, minute=45))
+    scheduler.add_job(evaluation_reminders_job, CronTrigger(hour=9, minute=0))
     scheduler.start()
 
 

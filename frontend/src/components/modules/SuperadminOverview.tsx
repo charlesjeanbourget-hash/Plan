@@ -18,7 +18,7 @@ export const SuperadminOverview = (): JSX.Element => {
   const headers = { Authorization: `Bearer ${token ?? ''}` };
   const [pharmacies, setPharmacies] = useState<OverviewPharmacy[]>([]);
   const [senderEmail, setSenderEmail] = useState('');
-  const [senderName, setSenderName] = useState('LuminaHR');
+  const [senderName, setSenderName] = useState('Arrière Plan');
   const [defaultSender, setDefaultSender] = useState('');
 
   useEffect(() => {
@@ -28,7 +28,7 @@ export const SuperadminOverview = (): JSX.Element => {
     axios.get<EmailSettings>(`${API}/email-settings`, { headers })
       .then((r) => {
         setSenderEmail(r.data.sender_email);
-        setSenderName(r.data.sender_name || 'LuminaHR');
+        setSenderName(r.data.sender_name || 'Arrière Plan');
         setDefaultSender(r.data.default_sender ?? '');
       })
       .catch(() => undefined);

@@ -4,6 +4,7 @@ import { LucideIcon } from 'lucide-react';
 export const ModuleHeader = ({ title, subtitle, action }: { title: string; subtitle: string; action?: ReactNode }): JSX.Element => (
   <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-8">
     <div>
+      <span className="block w-12 h-1 rounded-full bg-gradient-to-r from-emerald-500 to-bronze-500 mb-3" />
       <h1 className="font-heading text-3xl font-extrabold tracking-tight text-slate-900">{title}</h1>
       <p className="text-sm text-slate-500 mt-1.5">{subtitle}</p>
     </div>
@@ -32,14 +33,14 @@ const BADGE_STYLES: Record<string, string> = {
   'Validée': 'bg-sky-100 text-sky-800',
   'Entrevue': 'bg-sky-100 text-sky-800',
   'Offre': 'bg-violet-100 text-violet-800',
-  'Présélection': 'bg-amber-100 text-amber-800',
-  'En attente': 'bg-amber-100 text-amber-800',
-  'En cours': 'bg-amber-100 text-amber-800',
-  'En préparation': 'bg-amber-100 text-amber-800',
-  'Proposée': 'bg-orange-100 text-orange-800',
-  'En congé': 'bg-orange-100 text-orange-800',
+  'Présélection': 'bg-bronze-100 text-bronze-800',
+  'En attente': 'bg-bronze-100 text-bronze-800',
+  'En cours': 'bg-bronze-100 text-bronze-800',
+  'En préparation': 'bg-bronze-100 text-bronze-800',
+  'Proposée': 'bg-bronze-100 text-bronze-800',
+  'En congé': 'bg-bronze-100 text-bronze-800',
   'Nouvelle': 'bg-sky-100 text-sky-800',
-  'Ouverte': 'bg-amber-100 text-amber-800',
+  'Ouverte': 'bg-bronze-100 text-bronze-800',
   'À faire': 'bg-slate-100 text-slate-700',
   'Refusée': 'bg-red-100 text-red-800',
   'Refusé(e)': 'bg-red-100 text-red-800',

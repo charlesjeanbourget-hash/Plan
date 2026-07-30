@@ -206,6 +206,11 @@ export default function ReplacementModule(): JSX.Element {
                   ))}
                 </div>
                 {r.notes && <p className="text-sm text-slate-500 mb-3">{r.notes}</p>}
+                {r.chosen_offer && (
+                  <p data-testid={`chosen-offer-${r.id}`} className="inline-flex items-center gap-2 text-sm text-bronze-900 bg-bronze-50 border border-bronze-200 rounded-lg px-3 py-2 mb-3">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" /> Retenu : <strong>{r.chosen_offer.candidate_name}</strong> ({r.chosen_offer.agency_name}) — {r.chosen_offer.hourly_rate} $/h · visible dans l'horaire
+                  </p>
+                )}
                 <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100">
                   <span className="text-xs text-slate-500 inline-flex items-center gap-1 mr-auto">
                     <Mail className="w-3.5 h-3.5" /> {r.emails_sent} courriel(s) envoyé(s) · {r.offers_count ?? 0} offre(s) reçue(s)

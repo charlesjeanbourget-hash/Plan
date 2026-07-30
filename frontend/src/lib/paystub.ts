@@ -25,10 +25,12 @@ export const downloadPayStub = (
 
   doc.setFillColor(5, 150, 105);
   doc.rect(0, 0, 210, 28, 'F');
+  doc.setFillColor(195, 96, 48);
+  doc.rect(0, 28, 210, 1.6, 'F');
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(18);
   doc.setFont('helvetica', 'bold');
-  doc.text('LuminaHR — Relevé de paie', 20, 18);
+  doc.text('Arrière Plan — Relevé de paie', 20, 18);
 
   doc.setTextColor(15, 23, 42);
   doc.setFontSize(11);
@@ -111,7 +113,7 @@ export const downloadPayStub = (
   doc.setFontSize(8);
   doc.setTextColor(148, 163, 184);
   doc.setFont('helvetica', 'normal');
-  doc.text(`Document généré par LuminaHR. Cumulatifs calculés sur ${ytd.length} période(s) de paie. Déductions réparties à titre indicatif.`, 20, cy + 8);
+  doc.text(`Document généré par Arrière Plan. Cumulatifs calculés sur ${ytd.length} période(s) de paie. Déductions réparties à titre indicatif.`, 20, cy + 8);
 
   doc.save(`releve-paie-${employee.lastName.toLowerCase()}-${entry.period.replace(/\s+/g, '-').toLowerCase()}.pdf`);
 };

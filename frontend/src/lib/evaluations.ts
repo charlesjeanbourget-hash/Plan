@@ -26,8 +26,8 @@ export const SELF_QUESTIONS: { id: string; label: string }[] = [
 
 export const EVAL_STATUS_META: Record<EvaluationStatus, { label: string; cls: string }> = {
   en_cours: { label: 'Évaluations en cours', cls: 'bg-sky-100 text-sky-800' },
-  a_proposer: { label: 'Salaire à proposer', cls: 'bg-amber-100 text-amber-800' },
-  propose: { label: 'En attente de l\'employé', cls: 'bg-amber-100 text-amber-800' },
+  a_proposer: { label: 'Salaire à proposer', cls: 'bg-bronze-100 text-bronze-800' },
+  propose: { label: 'En attente de l\'employé', cls: 'bg-bronze-100 text-bronze-800' },
   accepte: { label: 'Salaire accepté', cls: 'bg-emerald-100 text-emerald-800' },
   refuse: { label: 'Refusé — à re-proposer', cls: 'bg-red-100 text-red-800' },
   applique: { label: 'Appliqué au dossier', cls: 'bg-slate-200 text-slate-700' },

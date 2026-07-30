@@ -1,6 +1,8 @@
-import { useState, FormEvent } from 'react';
+import { useState, useEffect, FormEvent } from 'react';
+import axios from 'axios';
 import { useHR } from '@/context/HRContext';
 import { useAuth } from '@/context/AuthContext';
+import { ReplacementRequestDoc } from '@/types';
 import { ModuleHeader, StatusBadge } from '@/components/modules/shared';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -12,6 +14,8 @@ import { ScheduleProposals } from '@/components/ScheduleProposals';
 import { toast } from 'sonner';
 
 const DAY_LABELS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
+
+const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 const getWeekStart = (offsetWeeks: number): Date => {
   const d = new Date();
@@ -25,7 +29,7 @@ const iso = (d: Date): string => d.toISOString().slice(0, 10);
 
 export default function SchedulingModule(): JSX.Element {
   const { state, addShift, deleteShift, updateShift, setShiftSwapStatus, getEmployee } = useHR();
-  const { currentUser } = useAuth();
+  const { currentUser, token } = useAuth();
   const isAdmin = currentUser?.role !== 'employee';
   const [weekOffset, setWeekOffset] = useState(0);
   const [branchFilter, setBranchFilter] = useState('all');
@@ -34,6 +38,14 @@ export default function SchedulingModule(): JSX.Element {
   const [date, setDate] = useState(iso(new Date()));
   const [startTime, setStartTime] = useState('09:00');
   const [endTime, setEndTime] = useState('17:00');
+  const [replacements, setReplacements] = useState<ReplacementRequestDoc[]>([]);
+
+  useEffect(() => {
+    if (!isAdmin || !token) return;
+    axios.get<ReplacementRequestDoc[]>(`${API}/replacements/requests`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => setReplacements(r.data.filter((q) => q.status === 'filled' && !!q.chosen_offer)))
+      .catch(() => undefined);
+  }, [isAdmin, token]);
 
   const weekStart = getWeekStart(weekOffset);
   const days: string[] = Array.from({ length: 7 }, (_, i) => {
@@ -180,6 +192,36 @@ export default function SchedulingModule(): JSX.Element {
                 })}
               </tr>
             ))}
+            {isAdmin && (() => {
+              const weekSlots = replacements.flatMap((q) =>
+                q.slots
+                  .filter((s) => days.includes(s.date))
+                  .map((s) => ({ ...s, candidate: q.chosen_offer?.candidate_name ?? '', agency: q.chosen_offer?.agency_name ?? '', role: q.role })));
+              if (weekSlots.length === 0) return null;
+              return (
+                <tr data-testid="replacements-schedule-row" className="bg-bronze-50/40 border-t-2 border-bronze-200">
+                  <td className="p-4 border-r border-slate-200 align-top">
+                    <p className="font-semibold text-bronze-800">Remplaçants (agence)</p>
+                    <p className="text-xs text-bronze-700/70">Retenus via le module Remplacements</p>
+                  </td>
+                  {days.map((d) => (
+                    <td key={d} className="p-2 border-r border-slate-200 last:border-r-0 align-top">
+                      {weekSlots.filter((s) => s.date === d).map((s, i) => (
+                        <div
+                          key={`${s.date}-${i}`}
+                          data-testid={`replacement-chip-${s.date}-${i}`}
+                          className="bg-bronze-100 border border-bronze-300 text-bronze-900 rounded-lg px-2 py-1.5 mb-1 text-xs font-semibold text-center"
+                          title={`${s.candidate} (${s.agency}) — ${s.role}`}
+                        >
+                          {s.start}–{s.end}
+                          <span className="block text-[10px] font-normal truncate">{s.candidate} · {s.role}</span>
+                        </div>
+                      ))}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })()}
           </tbody>
         </table>
       </div>

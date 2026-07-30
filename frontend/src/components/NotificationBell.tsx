@@ -2,9 +2,9 @@ import { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import { useAuth } from '@/context/AuthContext';
 import { useHR } from '@/context/HRContext';
-import { ModuleKey, LicenseReportItem, Training, ScheduleProposal } from '@/types';
+import { ModuleKey, LicenseReportItem, Training, ScheduleProposal, Evaluation } from '@/types';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Bell, TreePalm, RefreshCw, BadgeCheck, GraduationCap, CheckCheck, CalendarCheck } from 'lucide-react';
+import { Bell, TreePalm, RefreshCw, BadgeCheck, GraduationCap, CheckCheck, CalendarCheck, ClipboardCheck, HandCoins } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -14,13 +14,13 @@ interface Notif {
   detail: string;
   module: ModuleKey;
   tone: 'amber' | 'red' | 'sky' | 'emerald';
-  icon: 'leave' | 'swap' | 'license' | 'training' | 'schedule';
+  icon: 'leave' | 'swap' | 'license' | 'training' | 'schedule' | 'eval' | 'salary';
 }
 
-const ICONS = { leave: TreePalm, swap: RefreshCw, license: BadgeCheck, training: GraduationCap, schedule: CalendarCheck } as const;
+const ICONS = { leave: TreePalm, swap: RefreshCw, license: BadgeCheck, training: GraduationCap, schedule: CalendarCheck, eval: ClipboardCheck, salary: HandCoins } as const;
 
 const TONES: Record<Notif['tone'], string> = {
-  amber: 'bg-amber-100 text-amber-700',
+  amber: 'bg-bronze-100 text-bronze-700',
   red: 'bg-red-100 text-red-700',
   sky: 'bg-sky-100 text-sky-700',
   emerald: 'bg-emerald-100 text-emerald-700',
@@ -32,6 +32,7 @@ export const NotificationBell = ({ onNavigate }: { onNavigate: (m: ModuleKey) =>
   const [licenseItems, setLicenseItems] = useState<LicenseReportItem[]>([]);
   const [trainings, setTrainings] = useState<Training[]>([]);
   const [proposals, setProposals] = useState<ScheduleProposal[]>([]);
+  const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
   const [open, setOpen] = useState(false);
   const readKey = `luminahr_notif_read_v1_${currentUser?.id ?? ''}`;
   const [readIds, setReadIds] = useState<string[]>(() => {
@@ -48,6 +49,9 @@ export const NotificationBell = ({ onNavigate }: { onNavigate: (m: ModuleKey) =>
         .catch(() => undefined);
       axios.get<ScheduleProposal[]>(`${API}/schedule/proposals`, { headers })
         .then((r) => setProposals(r.data))
+        .catch(() => undefined);
+      axios.get<Evaluation[]>(`${API}/evaluations`, { headers })
+        .then((r) => setEvaluations(r.data))
         .catch(() => undefined);
     } else {
       axios.get<{ items: LicenseReportItem[] }>(`${API}/licenses/report`, { headers })
@@ -105,6 +109,26 @@ export const NotificationBell = ({ onNavigate }: { onNavigate: (m: ModuleKey) =>
             icon: 'training',
           });
         });
+      evaluations
+        .filter((ev) => !ev.self_eval && ev.status === 'en_cours')
+        .forEach((ev) => list.push({
+          id: `eval-self-${ev.id}`,
+          title: 'Auto-évaluation à compléter',
+          detail: `Évaluation lancée le ${ev.created_at.slice(0, 10)} — complétez-la dans « Mon espace »`,
+          module: 'myspace',
+          tone: 'amber',
+          icon: 'eval',
+        }));
+      evaluations
+        .filter((ev) => ev.status === 'propose' && ev.proposed_rate !== null)
+        .forEach((ev) => list.push({
+          id: `eval-prop-${ev.id}`,
+          title: 'Proposition salariale reçue',
+          detail: `Nouveau taux proposé : ${ev.proposed_rate} $/h — répondez dans « Mon espace »`,
+          module: 'myspace',
+          tone: 'emerald',
+          icon: 'salary',
+        }));
     } else {
       state.leaveRequests
         .filter((l) => l.status === 'En attente')
@@ -142,7 +166,7 @@ export const NotificationBell = ({ onNavigate }: { onNavigate: (m: ModuleKey) =>
       }));
     }
     return list;
-  }, [currentUser, state, trainings, licenseItems, proposals, getEmployee]);
+  }, [currentUser, state, trainings, licenseItems, proposals, evaluations, getEmployee]);
 
   const unreadCount = notifs.filter((n) => !readIds.includes(n.id)).length;
 

@@ -101,7 +101,7 @@ export const SEED_STATE: HRState = {
     { id: 'o5', employeeId: 'e3', label: 'Remise de l\'uniforme et du badge', done: true, category: 'Équipement' },
     { id: 'o6', employeeId: 'e3', label: 'Accès au système de caisse', done: false, category: 'Équipement' },
     { id: 'o7', employeeId: 'e3', label: 'Rencontre avec l\'équipe du laboratoire', done: false, category: 'Intégration' },
-    { id: 'o8', employeeId: 'e2', label: 'Formation d\'intégration Proxim (examen LuminaHR)', done: false, category: 'Formation' },
+    { id: 'o8', employeeId: 'e2', label: 'Formation d\'intégration Proxim (examen Arrière Plan)', done: false, category: 'Formation' },
   ],
   contracts: [
     { id: 'ct1', employeeId: 'e1', type: 'Temps plein', startDate: '2019-03-11', signed: true, salary: '62 $ / h' },

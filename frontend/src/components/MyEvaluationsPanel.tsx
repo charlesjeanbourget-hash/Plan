@@ -17,8 +17,8 @@ const money = (v: number): string => v.toLocaleString('fr-CA', { style: 'currenc
 
 const MY_STATUS: Record<EvaluationStatus, { label: string; cls: string }> = {
   en_cours: { label: 'En cours', cls: 'bg-sky-100 text-sky-800' },
-  a_proposer: { label: 'En analyse par votre gestionnaire', cls: 'bg-amber-100 text-amber-800' },
-  propose: { label: 'Proposition salariale reçue', cls: 'bg-amber-100 text-amber-800' },
+  a_proposer: { label: 'En analyse par votre gestionnaire', cls: 'bg-bronze-100 text-bronze-800' },
+  propose: { label: 'Proposition salariale reçue', cls: 'bg-bronze-100 text-bronze-800' },
   accepte: { label: 'Proposition acceptée', cls: 'bg-emerald-100 text-emerald-800' },
   refuse: { label: 'Proposition refusée', cls: 'bg-red-100 text-red-800' },
   applique: { label: 'Terminée — taux appliqué', cls: 'bg-emerald-100 text-emerald-800' },

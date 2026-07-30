@@ -597,6 +597,7 @@ export interface ReplacementRequestDoc {
   status: 'open' | 'filled';
   link?: string;
   chosen_offer_id: string | null;
+  chosen_offer?: { candidate_name: string; agency_name: string; hourly_rate: number } | null;
   emails_sent: number;
   offers_count?: number;
   created_by: string;

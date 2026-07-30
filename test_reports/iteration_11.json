@@ -1,0 +1,33 @@
+{
+  "summary": "Itération 11 — Rebrand LuminaHR → « Arrière Plan » + 3 nouvelles features (rappels auto-évaluation, historique salarial, remplaçant dans la grille horaires). BACKEND : 7/7 tests pytest verts dans /app/backend/tests/test_iteration11.py. (1) Rappels auto-évaluation : endpoint POST /api/evaluations/reminders/run répond 200 pour admin, {sent:0} quand aucune éval en retard (fresh eval), et 200 après avoir backdaté created_at à -5 jours via mongo. En mode test Resend, l'envoi réel échoue (« You can only send testing emails to your own email address ») donc sent=0 côté API, mais le endpoint ne crash PAS et loggue proprement l'échec — comportement attendu et couvert par la spec. 401 sans token. (2) chosen_offer enrichi : GET /api/replacements/requests retourne bien chosen_offer={candidate_name:'Alex Roy', agency_name:'TEST_ITER11_Agence', hourly_rate:55.0} sur la demande comblée. (3) Régression flux évaluation complet e2 (25 → employer 100 → self 80 → suggestion 94/1.2/3.6/25.9 → propose → accept → applied) → 200 partout. FRONTEND (URL publique) : Rebrand vérifié — 0 occurrence de « LuminaHR » dans le texte du body sur landing/login/sidebar/Performance/Paie ; le composant BrandLogo (data-testid brand-logo) apparaît sur landing, login, sidebar (dans aside), kiosque, portail agence, portail carrières et page publique de remplacement. Le rôle « Gestionnaire » s'affiche en bronze dans la sidebar. Titre « Arrière Plan » visible sur toutes les pages publiques. Punch kiosk : bg=rgb(248,250,252) (slate-50 clair), logo présent, flux NIP 7068 → OK → kiosk-confirm-panel « Êtes-vous bien Julie Gagnon ? » → kiosk-confirm-yes → « Entrée enregistrée à 22 h 28. Bon quart de travail ! », deuxième cycle → « Sortie enregistrée à 22 h 28 — durée : 0 h ». Portail Agence : bg=rgb(248,250,252) clair, logo présent, code AGENCE2024 → agency-dashboard OK. Historique salarial (admin → Employés → Julie e2) : salary-history-panel visible avec salary-current-rate '26,50 $/h', 1 ligne salary-change-* affichant 25,00 $/h → 25,90 $/h, +3.6 %, 'Score de performance : 94 % (mult. ×1.2)', badge 'Appliqué au dossier'. Cloche employée (Julie) : après création d'une éval en_cours pour e2 sans self_eval, notification-bell affiche 1 badge, notification-item-eval-self-{id} « Auto-évaluation à compléter — Évaluation lancée le 2026-07-30 » ; clic navigue vers 'Mon espace'. Remplaçant dans la grille horaires : après création d'une demande comblée avec slot 2026-07-29 (cette semaine), la ligne replacements-schedule-row apparaît en bas de la grille avec puce bronze replacement-chip-2026-07-29-0 affichant '09:00–17:00 Alex Roy · Pharmacien(ne)'. Module Remplacements : chosen-offer-{id} affiche 'Retenu : Alex Roy (TEST_ITER11_Agence) — 55 $/h · visible dans l'horaire'. Aucune erreur console détectée. Toutes les données de test nettoyées à la fin.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration11.py",
+    "/app/test_reports/pytest/iter11.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "SalaryHistory.tsx charge TOUT /api/evaluations puis filtre côté client sur employee_id — sur une grosse pharmacie avec beaucoup d'évaluations historiques, cela finira par transférer inutilement des données. Envisager un endpoint dédié GET /api/employees/{id}/salary-history (ou un filtre serveur ?employee_id=e2) qui ne retourne que les changements pertinents.",
+    "server.py:2148 send_evaluation_reminders : la boucle attend chaque appel Resend en série (asyncio.to_thread). Sur une longue file d'évals en retard, le endpoint /reminders/run peut mettre 30-60 s. À dispatcher via asyncio.gather ou en tâche background si N > ~5.",
+    "server.py:2159 datetime.fromisoformat(doc['created_at']) suppose que created_at est toujours une chaîne ISO ; si un vieux document a un datetime natif Mongo, l'appel lèvera TypeError. Ajouter un fallback isinstance(..., datetime) → utiliser directement.",
+    "NotificationBell.tsx:112 filtre uniquement sur `!ev.self_eval` sans considérer si Julie a déjà répondu à la proposition et l'a acceptée entretemps → la notif 'Auto-évaluation à compléter' persiste jusqu'à ce que self_eval soit rempli, même si le processus est bloqué côté employeur. Comportement acceptable mais à documenter."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration11.py"
+  ],
+  "success_rate": {"backend": "100% (7/7 iter11)", "frontend": "100% des flux ciblés (rebrand, kiosque clair, agence claire, historique salarial, cloche eval-self, ligne remplaçants dans horaires, chosen-offer)"},
+  "seed_data_creation": "Créés puis supprimés pendant le run : 1 agence TEST_ITER11_Agence, 1 replacement_request TEST_iter11 (slot 2026-07-29), 1 offer Alex Roy (chosen), 1 évaluation appliquée e2 (25 → 25.9). Cleanup complet vérifié en mongo (0 restes).",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "admin@luminahr.ca/admin123, julie@luminahr.ca/employe123 (NIP 7068) — noter que les emails conservent le domaine @luminahr.ca malgré le rebrand (documenté).",
+  "context_for_next_testing_agent": "Rebrand complet : le composant BrandLogo (data-testid brand-logo) est présent partout où requis ; aucune occurrence de 'LuminaHR' dans le texte visible (seul le domaine des emails de test @luminahr.ca reste, ce qui est intentionnel). Historique salarial : n'affiche des lignes que pour les évaluations avec agreed_rate!=null (statut accepte ou applique) ; le cas empty state est également couvert. La ligne 'Remplaçants (agence)' n'est rendue que côté ADMIN (isAdmin gate) et seulement si un slot chosen tombe dans la semaine affichée dans la grille. La cloche affiche 'eval-self' pour toute éval en_cours sans self_eval de l'employé courant et 'eval-prop' pour toute éval au statut propose ; les 2 sont testés (self testé, propose reste à couvrir si besoin). Le endpoint /api/evaluations/reminders/run est idempotent grâce à self_reminder_at (anti-doublon 3 jours). Testids clés ajoutés cette itération : brand-logo, salary-history-panel, salary-current-rate, salary-change-{id}, salary-history-empty, replacements-schedule-row, replacement-chip-{date}-{i}, chosen-offer-{id}, notification-item-eval-self-{id}, notification-item-eval-prop-{id}.",
+  "rca_of_the_issue": "N/A — aucun défaut trouvé sur cette itération. Le seul comportement 'inattendu' (sent=0 lors des rappels) est en fait le mode test Resend documenté dans /app/memory/test_credentials.md et confirmé par les logs backend."
+}

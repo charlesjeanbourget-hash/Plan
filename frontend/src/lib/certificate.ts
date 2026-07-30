@@ -22,13 +22,13 @@ export const downloadCertificate = (d: CertificateData): void => {
   doc.setLineWidth(1.5);
   doc.rect(10, 10, 277, 190);
   doc.setLineWidth(0.4);
-  doc.setDrawColor(217, 119, 6);
+  doc.setDrawColor(195, 96, 48);
   doc.rect(14, 14, 269, 182);
 
   doc.setTextColor(5, 150, 105);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(15);
-  doc.text('LuminaHR', cx, 34, { align: 'center' });
+  doc.text('Arrière Plan', cx, 34, { align: 'center' });
   if (d.pharmacyName) {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(10);
@@ -40,7 +40,7 @@ export const downloadCertificate = (d: CertificateData): void => {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(30);
   doc.text('CERTIFICAT DE RÉUSSITE', cx, 62, { align: 'center' });
-  doc.setDrawColor(217, 119, 6);
+  doc.setDrawColor(195, 96, 48);
   doc.setLineWidth(0.8);
   doc.line(cx - 45, 68, cx + 45, 68);
 
@@ -83,7 +83,7 @@ export const downloadCertificate = (d: CertificateData): void => {
 
   doc.setFontSize(8);
   doc.setTextColor(148, 163, 184);
-  doc.text('Certificat généré automatiquement par LuminaHR — formation conforme aux procédures internes de la pharmacie.', cx, 195, { align: 'center' });
+  doc.text('Certificat généré automatiquement par Arrière Plan — formation conforme aux procédures internes de la pharmacie.', cx, 195, { align: 'center' });
 
   doc.save(`certificat-${slug(d.trainingTitle)}-${slug(d.employeeName)}.pdf`);
 };

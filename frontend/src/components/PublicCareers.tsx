@@ -6,7 +6,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, MapPin, Clock, BadgeDollarSign, Pill } from 'lucide-react';
+import { ArrowLeft, MapPin, Clock, BadgeDollarSign } from 'lucide-react';
+import { BrandLogo } from '@/components/BrandLogo';
 import { toast } from 'sonner';
 
 interface Props {
@@ -42,14 +43,9 @@ export default function PublicCareers({ onNavigate }: Props): JSX.Element {
 
   return (
     <div className="min-h-screen bg-slate-50" data-testid="careers-page">
-      <header className="sticky top-0 z-40 backdrop-blur-xl bg-white/70 border-b border-slate-200">
-        <div className="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-9 h-9 rounded-lg bg-emerald-600 flex items-center justify-center">
-              <Pill className="w-5 h-5 text-white" />
-            </div>
-            <span className="font-heading font-extrabold text-xl text-slate-900">LuminaHR</span>
-          </div>
+      <header className="sticky top-0 z-40 bg-white border-b border-slate-200">
+        <div className="max-w-5xl mx-auto px-6 h-20 flex items-center justify-between">
+          <BrandLogo size="sm" />
           <button
             data-testid="careers-back-button"
             onClick={() => onNavigate('landing')}

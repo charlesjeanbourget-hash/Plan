@@ -5,7 +5,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
-import { Pill, CalendarDays, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { CalendarDays, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { BrandLogo } from '@/components/BrandLogo';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -62,15 +63,10 @@ export default function PublicReplacementPage({ token }: Props): JSX.Element {
 
   return (
     <div data-testid="public-replacement-page" className="min-h-screen bg-slate-50">
-      <header className="bg-emerald-950 text-white px-6 py-5">
-        <div className="max-w-3xl mx-auto flex items-center gap-3">
-          <span className="w-10 h-10 rounded-xl bg-emerald-500 flex items-center justify-center">
-            <Pill className="w-5 h-5 text-white" />
-          </span>
-          <div>
-            <p className="font-heading font-extrabold text-lg leading-tight">LuminaHR</p>
-            <p className="text-xs text-emerald-200">Demande de remplacement — espace agence</p>
-          </div>
+      <header className="bg-white border-b border-slate-200 px-6 py-4">
+        <div className="max-w-3xl mx-auto flex flex-wrap items-center justify-between gap-3">
+          <BrandLogo size="sm" />
+          <p className="text-xs font-bold uppercase tracking-[0.15em] text-bronze-700">Espace agence — remplacement</p>
         </div>
       </header>
 
@@ -90,7 +86,7 @@ export default function PublicReplacementPage({ token }: Props): JSX.Element {
                 <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${req.status === 'open' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
                   {req.status === 'open' ? 'Demande ouverte' : 'Demande comblée'}
                 </span>
-                <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-600">Urgence : {req.urgency}</span>
+                <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold bg-bronze-50 text-bronze-800">Urgence : {req.urgency}</span>
               </div>
               <p className="text-xs uppercase tracking-[0.15em] text-slate-500 font-semibold mb-2">Plages à combler</p>
               <div className="flex flex-wrap gap-2 mb-4">

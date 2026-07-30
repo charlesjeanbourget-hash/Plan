@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Plus, Mail, Phone, MapPin, Trash2 } from 'lucide-react';
 import { ProfileEditor } from '@/components/ProfileEditor';
+import { SalaryHistory } from '@/components/SalaryHistory';
 import { toast } from 'sonner';
 
 export default function EmployeeDossier(): JSX.Element {
@@ -142,6 +143,11 @@ export default function EmployeeDossier(): JSX.Element {
                   <Trash2 className="w-4 h-4 mr-1" /> Retirer
                 </Button>
               </div>
+            </div>
+          )}
+          {selected && (
+            <div className="lg:col-span-3">
+              <SalaryHistory employeeId={selected.id} currentRate={selected.hourlyRate} />
             </div>
           )}
           {selected && (

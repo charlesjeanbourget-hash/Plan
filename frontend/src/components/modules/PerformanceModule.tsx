@@ -86,7 +86,7 @@ export default function PerformanceModule(): JSX.Element {
       />
 
       {evaluations.length === 0 ? (
-        <EmptyState text="Aucune évaluation. Lancez-en une : vous remplissez le questionnaire employeur, l'employé complète son auto-évaluation, puis LuminaHR suggère l'augmentation selon le BAIIA." />
+        <EmptyState text="Aucune évaluation. Lancez-en une : vous remplissez le questionnaire employeur, l'employé complète son auto-évaluation, puis Arrière Plan suggère l'augmentation selon le BAIIA." />
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
           {evaluations.map((ev) => {

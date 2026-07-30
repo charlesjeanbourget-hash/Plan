@@ -75,7 +75,7 @@ export default function SuperadminModule(): JSX.Element {
     <div data-testid="superadmin-module">
       <ModuleHeader
         title="Superadmin"
-        subtitle="Vue d'ensemble des pharmacies clientes de LuminaHR."
+        subtitle="Vue d'ensemble des pharmacies clientes d'Arrière Plan."
         action={
           <div className="flex gap-2">
             <Button

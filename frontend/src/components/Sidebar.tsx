@@ -1,6 +1,7 @@
 import { useState, FormEvent } from 'react';
 import { ModuleKey } from '@/types';
 import { useAuth } from '@/context/AuthContext';
+import { BrandLogo } from '@/components/BrandLogo';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -9,7 +10,7 @@ import { toast } from 'sonner';
 import {
   LayoutDashboard, Users, CalendarClock, Briefcase, Wallet, RefreshCw, TreePalm,
   TrendingUp, ClipboardCheck, FileText, HeartHandshake, HelpCircle, ShieldCheck,
-  LogOut, Pill, Menu, X, LucideIcon, BadgeCheck, UserRound, KeyRound, Eye, EyeOff, GraduationCap,
+  LogOut, Menu, X, LucideIcon, BadgeCheck, UserRound, KeyRound, Eye, EyeOff, GraduationCap,
 } from 'lucide-react';
 
 interface Props {
@@ -77,12 +78,9 @@ export default function Sidebar({ active, onSelect, onLogout }: Props): JSX.Elem
   });
 
   const content = (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center gap-2 px-6 h-16 border-b border-slate-800">
-        <div className="w-8 h-8 rounded-lg bg-emerald-600 flex items-center justify-center">
-          <Pill className="w-4 h-4 text-white" />
-        </div>
-        <span className="font-heading font-extrabold text-lg text-white">LuminaHR</span>
+    <div className="flex flex-col h-full bg-white">
+      <div className="flex items-center px-5 h-20 border-b border-slate-200">
+        <BrandLogo size="sm" />
       </div>
       <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-0.5" data-testid="sidebar-nav">
         {items.map((item) => (
@@ -93,36 +91,36 @@ export default function Sidebar({ active, onSelect, onLogout }: Props): JSX.Elem
               onSelect(item.key);
               setMobileOpen(false);
             }}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-left border-l-4 ${
               active === item.key
-                ? 'bg-emerald-600 text-white'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                ? 'bg-emerald-50 text-emerald-800 border-emerald-600'
+                : 'text-slate-500 border-transparent hover:text-slate-900 hover:bg-slate-50'
             }`}
           >
-            <item.icon className="w-4 h-4 shrink-0" />
+            <item.icon className={`w-4 h-4 shrink-0 ${active === item.key ? 'text-emerald-600' : ''}`} />
             {item.label}
           </button>
         ))}
       </nav>
-      <div className="p-4 border-t border-slate-800">
-        <p className="text-sm font-semibold text-white truncate" data-testid="sidebar-user-name">{currentUser?.name}</p>
-        <p className="text-xs text-slate-500 mb-3 capitalize">
+      <div className="p-4 border-t border-slate-200">
+        <p className="text-sm font-semibold text-slate-900 truncate" data-testid="sidebar-user-name">{currentUser?.name}</p>
+        <p className="text-xs text-bronze-700 font-semibold mb-3 capitalize">
           {currentUser?.role === 'admin' ? 'Gestionnaire' : currentUser?.role === 'superadmin' ? 'Superadmin' : 'Employé(e)'}
         </p>
         <button
           data-testid="sidebar-password-button"
           onClick={() => setPwdOpen(true)}
-          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-500 hover:text-slate-900 hover:bg-slate-50 transition-colors"
         >
           <KeyRound className="w-4 h-4" /> Mot de passe
           {currentUser?.isTemporaryPassword && (
-            <span className="ml-auto w-2 h-2 rounded-full bg-amber-400 animate-pulse" title="Mot de passe temporaire" />
+            <span className="ml-auto w-2 h-2 rounded-full bg-bronze-500 animate-pulse" title="Mot de passe temporaire" />
           )}
         </button>
         <button
           data-testid="sidebar-logout-button"
           onClick={onLogout}
-          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-500 hover:text-red-700 hover:bg-red-50 transition-colors"
         >
           <LogOut className="w-4 h-4" /> Déconnexion
         </button>
@@ -135,15 +133,15 @@ export default function Sidebar({ active, onSelect, onLogout }: Props): JSX.Elem
       <button
         data-testid="sidebar-mobile-toggle"
         onClick={() => setMobileOpen(!mobileOpen)}
-        className="lg:hidden fixed top-4 left-4 z-50 w-10 h-10 rounded-lg bg-slate-900 text-white flex items-center justify-center"
+        className="lg:hidden fixed top-4 left-4 z-50 w-10 h-10 rounded-lg bg-white border border-slate-200 shadow-md text-slate-700 flex items-center justify-center"
       >
         {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
       </button>
-      <aside className="hidden lg:block fixed inset-y-0 left-0 w-64 bg-slate-900 z-40">{content}</aside>
+      <aside className="hidden lg:block fixed inset-y-0 left-0 w-64 bg-white border-r border-slate-200 z-40">{content}</aside>
       {mobileOpen && (
         <div className="lg:hidden fixed inset-0 z-40 flex">
-          <aside className="w-64 bg-slate-900">{content}</aside>
-          <div className="flex-1 bg-slate-900/50" onClick={() => setMobileOpen(false)} />
+          <aside className="w-64 bg-white border-r border-slate-200">{content}</aside>
+          <div className="flex-1 bg-slate-900/30" onClick={() => setMobileOpen(false)} />
         </div>
       )}
       <Dialog open={pwdOpen} onOpenChange={setPwdOpen}>
@@ -152,7 +150,7 @@ export default function Sidebar({ active, onSelect, onLogout }: Props): JSX.Elem
             <DialogTitle className="font-heading">Changer mon mot de passe</DialogTitle>
           </DialogHeader>
           {currentUser?.isTemporaryPassword && (
-            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
+            <p className="text-xs text-bronze-800 bg-bronze-50 border border-bronze-200 rounded-lg p-3">
               Votre mot de passe actuel est temporaire. Veuillez le remplacer par un mot de passe personnel.
             </p>
           )}

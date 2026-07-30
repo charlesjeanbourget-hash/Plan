@@ -2,7 +2,8 @@ import { useState } from 'react';
 import axios from 'axios';
 import { View, PunchActionResult, PunchPreview } from '@/types';
 import { fmtTime } from '@/lib/pharmacy';
-import { ArrowLeft, Pill, Delete, LogIn, LogOut, UserCheck } from 'lucide-react';
+import { BrandLogo } from '@/components/BrandLogo';
+import { ArrowLeft, Delete, LogIn, LogOut, UserCheck } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -69,33 +70,31 @@ export default function PunchKiosk({ onNavigate }: Props): JSX.Element {
   };
 
   return (
-    <div data-testid="punch-kiosk" className="min-h-screen bg-slate-900 flex flex-col items-center justify-center px-4 py-10">
+    <div data-testid="punch-kiosk" className="min-h-screen bg-slate-50 flex flex-col items-center justify-center px-4 py-10">
       <button
         data-testid="kiosk-back-button"
         onClick={() => onNavigate('landing')}
-        className="fixed top-5 left-5 inline-flex items-center gap-2 text-sm text-slate-400 hover:text-white transition-colors"
+        className="fixed top-5 left-5 inline-flex items-center gap-2 text-sm text-slate-500 hover:text-slate-900 transition-colors"
       >
         <ArrowLeft className="w-4 h-4" /> Retour au site
       </button>
 
-      <div className="flex items-center gap-2 mb-8">
-        <span className="w-10 h-10 rounded-xl bg-emerald-500 flex items-center justify-center">
-          <Pill className="w-5 h-5 text-white" />
-        </span>
-        <div>
-          <p className="font-heading font-extrabold text-white text-lg leading-tight">LuminaHR</p>
-          <p className="text-xs text-slate-400">Borne de punch — entrez votre NIP personnel</p>
+      <div className="w-full max-w-sm bg-white rounded-3xl border border-slate-200 shadow-xl p-8">
+        <div className="flex flex-col items-center gap-1 mb-6 text-center">
+          <BrandLogo size="lg" withText={false} />
+          <p className="font-heading font-extrabold text-slate-900 text-lg leading-tight">
+            Arrière <span className="text-bronze-600">Plan</span>
+          </p>
+          <p className="text-xs text-slate-500">Borne de punch — entrez votre NIP personnel</p>
         </div>
-      </div>
 
-      <div className="w-full max-w-xs">
         {preview ? (
-          <div data-testid="kiosk-confirm-panel" className="rounded-2xl bg-slate-800 border border-emerald-500/40 p-6 text-center">
-            <UserCheck className="w-10 h-10 text-emerald-400 mx-auto mb-3" />
-            <p className="text-white font-heading font-extrabold text-xl mb-1" data-testid="kiosk-confirm-name">
+          <div data-testid="kiosk-confirm-panel" className="rounded-2xl bg-emerald-50 border border-emerald-200 p-6 text-center">
+            <UserCheck className="w-10 h-10 text-emerald-600 mx-auto mb-3" />
+            <p className="text-slate-900 font-heading font-extrabold text-xl mb-1" data-testid="kiosk-confirm-name">
               Êtes-vous bien {preview.employee_name} ?
             </p>
-            <p className="text-sm text-slate-300 mb-6">
+            <p className="text-sm text-slate-600 mb-6">
               {preview.next_action === 'in'
                 ? 'Vous allez puncher votre ENTRÉE.'
                 : `Vous allez puncher votre SORTIE${preview.since ? ` (entrée à ${fmtTime(preview.since)})` : ''}.`}
@@ -104,7 +103,7 @@ export default function PunchKiosk({ onNavigate }: Props): JSX.Element {
               data-testid="kiosk-confirm-yes"
               onClick={() => void confirm()}
               disabled={busy}
-              className="w-full h-14 rounded-2xl bg-emerald-600 text-white font-bold hover:bg-emerald-500 disabled:opacity-40 active:scale-95 transition-all mb-3"
+              className="w-full h-14 rounded-2xl bg-emerald-600 text-white font-bold hover:bg-emerald-700 disabled:opacity-40 active:scale-95 transition-all mb-3"
             >
               Oui, c'est moi — confirmer
             </button>
@@ -112,26 +111,26 @@ export default function PunchKiosk({ onNavigate }: Props): JSX.Element {
               data-testid="kiosk-confirm-no"
               onClick={reset}
               disabled={busy}
-              className="w-full h-12 rounded-2xl bg-slate-700 text-slate-300 font-semibold hover:bg-slate-600 active:scale-95 transition-all"
+              className="w-full h-12 rounded-2xl border border-bronze-300 text-bronze-800 font-semibold hover:bg-bronze-50 active:scale-95 transition-all"
             >
               Non, ce n'est pas moi
             </button>
           </div>
         ) : (
           <>
-            <div data-testid="kiosk-code-display" className="bg-slate-800 rounded-2xl h-16 flex items-center justify-center gap-3 mb-4 border border-slate-700">
+            <div data-testid="kiosk-code-display" className="bg-slate-50 rounded-2xl h-16 flex items-center justify-center gap-3 mb-4 border border-slate-200">
               {[0, 1, 2, 3].map((i) => (
-                <span key={i} className={`w-4 h-4 rounded-full ${i < code.length ? 'bg-emerald-400' : 'bg-slate-600'}`} />
+                <span key={i} className={`w-4 h-4 rounded-full transition-colors ${i < code.length ? 'bg-emerald-500' : 'bg-slate-200'}`} />
               ))}
             </div>
 
             {result && (
-              <div data-testid="kiosk-result" className={`rounded-xl p-4 mb-4 text-center ${result.action === 'in' ? 'bg-emerald-500/15 border border-emerald-500/40' : 'bg-sky-500/15 border border-sky-500/40'}`}>
-                <p className="text-white font-heading font-bold inline-flex items-center gap-2">
-                  {result.action === 'in' ? <LogIn className="w-4 h-4 text-emerald-400" /> : <LogOut className="w-4 h-4 text-sky-400" />}
+              <div data-testid="kiosk-result" className={`rounded-xl p-4 mb-4 text-center border ${result.action === 'in' ? 'bg-emerald-50 border-emerald-200' : 'bg-bronze-50 border-bronze-200'}`}>
+                <p className="text-slate-900 font-heading font-bold inline-flex items-center gap-2">
+                  {result.action === 'in' ? <LogIn className="w-4 h-4 text-emerald-600" /> : <LogOut className="w-4 h-4 text-bronze-600" />}
                   Bonjour {result.employee_name} !
                 </p>
-                <p className="text-sm text-slate-300 mt-1">
+                <p className="text-sm text-slate-600 mt-1">
                   {result.action === 'in'
                     ? `Entrée enregistrée à ${fmtTime(result.time)}. Bon quart de travail !`
                     : `Sortie enregistrée à ${fmtTime(result.time)} — durée : ${result.duration_hours} h. À bientôt !`}
@@ -139,7 +138,7 @@ export default function PunchKiosk({ onNavigate }: Props): JSX.Element {
               </div>
             )}
             {error && (
-              <p data-testid="kiosk-error" className="rounded-xl bg-red-500/15 border border-red-500/40 text-red-300 text-sm text-center p-3 mb-4">{error}</p>
+              <p data-testid="kiosk-error" className="rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm text-center p-3 mb-4">{error}</p>
             )}
 
             <div className="grid grid-cols-3 gap-3">
@@ -148,7 +147,7 @@ export default function PunchKiosk({ onNavigate }: Props): JSX.Element {
                   key={d}
                   data-testid={`kiosk-key-${d}`}
                   onClick={() => press(d)}
-                  className="h-16 rounded-2xl bg-slate-800 border border-slate-700 text-white text-xl font-bold hover:bg-slate-700 active:scale-95 transition-all"
+                  className="h-16 rounded-2xl bg-white border border-slate-200 text-slate-900 text-xl font-bold hover:border-emerald-400 hover:bg-emerald-50 active:scale-95 transition-all"
                 >
                   {d}
                 </button>
@@ -156,7 +155,7 @@ export default function PunchKiosk({ onNavigate }: Props): JSX.Element {
               <button
                 data-testid="kiosk-key-clear"
                 onClick={reset}
-                className="h-16 rounded-2xl bg-slate-800 border border-slate-700 text-slate-400 flex items-center justify-center hover:bg-slate-700 active:scale-95 transition-all"
+                className="h-16 rounded-2xl bg-white border border-slate-200 text-slate-400 flex items-center justify-center hover:border-bronze-300 hover:text-bronze-700 active:scale-95 transition-all"
                 aria-label="Effacer"
               >
                 <Delete className="w-5 h-5" />
@@ -164,7 +163,7 @@ export default function PunchKiosk({ onNavigate }: Props): JSX.Element {
               <button
                 data-testid="kiosk-key-0"
                 onClick={() => press('0')}
-                className="h-16 rounded-2xl bg-slate-800 border border-slate-700 text-white text-xl font-bold hover:bg-slate-700 active:scale-95 transition-all"
+                className="h-16 rounded-2xl bg-white border border-slate-200 text-slate-900 text-xl font-bold hover:border-emerald-400 hover:bg-emerald-50 active:scale-95 transition-all"
               >
                 0
               </button>
@@ -172,12 +171,12 @@ export default function PunchKiosk({ onNavigate }: Props): JSX.Element {
                 data-testid="kiosk-submit"
                 onClick={() => void submit()}
                 disabled={code.length !== 4 || busy}
-                className="h-16 rounded-2xl bg-emerald-600 text-white font-bold hover:bg-emerald-500 disabled:opacity-40 active:scale-95 transition-all"
+                className="h-16 rounded-2xl bg-emerald-600 text-white font-bold hover:bg-emerald-700 disabled:opacity-40 active:scale-95 transition-all"
               >
                 OK
               </button>
             </div>
-            <p className="text-center text-xs text-slate-500 mt-6">
+            <p className="text-center text-xs text-slate-400 mt-6">
               Un punch = entrée · un second punch = sortie. Votre identité sera confirmée avant l'enregistrement.
             </p>
           </>
