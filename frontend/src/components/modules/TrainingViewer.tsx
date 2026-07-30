@@ -209,6 +209,15 @@ export default function TrainingViewer({ training, onBack }: Props): JSX.Element
           </p>
         </div>
       </div>
+      {training.my_assignment && !training.my_passed && (
+        <p data-testid="assignment-due-banner" className={`text-sm rounded-lg px-4 py-2.5 mt-4 inline-flex items-center gap-2 border ${
+          training.my_assignment.due_date < new Date().toISOString().slice(0, 10)
+            ? 'text-red-700 bg-red-50 border-red-200'
+            : 'text-amber-700 bg-amber-50 border-amber-200'
+        }`}>
+          <CalendarClock className="w-4 h-4" /> À compléter avant le {training.my_assignment.due_date}
+        </p>
+      )}
       {training.my_passed && (
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <p data-testid="already-passed-banner" className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2.5 inline-flex items-center gap-2">

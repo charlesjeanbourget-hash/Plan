@@ -73,6 +73,13 @@ admin@luminahr.ca/admin123 · julie@luminahr.ca/employe123 · super@luminahr.ca/
 - **Expéditeur courriel configurable** : GET/POST /api/email-settings (édition superadmin), utilisé par les rapports mensuels et rappels 30 j. Défaut : LuminaHR <onboarding@resend.dev>. Une fois le domaine vérifié sur resend.com/domains, entrer l'adresse du domaine dans le panneau du module Superadmin.
 - Nouveaux fichiers : TrainingModule/TrainingEditor/TrainingViewer.tsx, NotificationBell.tsx, SuperadminOverview.tsx, popover.d.ts. Dépendance backend : pypdf.
 
+## Itération 6 (30 juin 2026) — testée à 100% (iteration_8.json : backend 54/54, frontend tous flux)
+- **Certificat de réussite PDF** (jsPDF paysage, bordures émeraude/ambre) : téléchargeable sur l'écran de résultat après réussite ET depuis la bannière « déjà réussi » (meilleure tentative récupérée via l'API). Nom, formation, score, note de passage, date, pharmacie, ligne de signature.
+- **Assignation de formations** : onglet « Assignations » dans l'éditeur admin — sélection d'un employé + date limite, table avec statuts calculés (Réussie/score, En retard, En attente), retrait. Relances courriel automatiques (job quotidien 8h45 America/Montreal) à ≤7 jours de l'échéance et en retard, dédupliquées par due_date, tant que l'examen n'est pas réussi. Bouton « Envoyer les relances maintenant » (POST /api/trainings/assignments/reminders/run, portée limitée à la pharmacie de l'admin). Puces d'échéance sur les cartes employé + notifications cloche « Formation en retard » (rouge).
+- **Onboarding lié** : à la réussite de l'examen, les étapes d'onboarding de catégorie « Formation » de l'employé sont cochées automatiquement (toast). Seed v4 (STATE_KEY luminahr_state_v4) avec item o8 pour Julie.
+- Correctifs revue de code : validation format date (400), portée pharmacie des relances manuelles. NOTE : le testing agent avait écrasé la bannière d'échéance du viewer — re-ajoutée et vérifiée.
+- Assignation démo : Julie → Formation Proxim, échéance 2026-08-05 (réussie à 100 %).
+
 ## Notes techniques
 - Ne jamais recréer `jsconfig.json` (conflit CRA avec tsconfig.json)
 - npm interdit — yarn uniquement

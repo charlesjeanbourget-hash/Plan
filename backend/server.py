@@ -1139,7 +1139,8 @@ class AssignmentsIn(BaseModel):
 
 @api_router.post("/trainings/assignments/reminders/run")
 async def run_training_reminders(principal: dict = Depends(get_principal)):
-    sent = await send_training_reminders()
+    scope_pid = None if principal["role"] == "superadmin" else principal["pharmacy_id"]
+    sent = await send_training_reminders(scope_pid)
     await log_audit(principal["email"], principal["role"], "RELANCES_FORMATION_DECLENCHEES", "formation", "relances",
                     f"{sent} relance(s) envoyée(s) manuellement", principal.get("pharmacy_id", ""))
     return {"sent": sent}
@@ -1171,6 +1172,10 @@ async def assign_training(training_id: str, payload: AssignmentsIn, principal: d
         email = a.employee_email.strip().lower()
         if not email or not a.due_date:
             continue
+        try:
+            date.fromisoformat(a.due_date)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Date limite invalide (format attendu : AAAA-MM-JJ).")
         await db.training_assignments.update_one(
             {"training_id": training_id, "employee_email": email},
             {"$set": {"employee_name": a.employee_name, "due_date": a.due_date,
@@ -1215,14 +1220,15 @@ def training_reminder_html(name: str, title: str, due_date: str, days: int) -> s
     )
 
 
-async def send_training_reminders() -> int:
+async def send_training_reminders(pharmacy_id: Optional[str] = None) -> int:
     api_key = os.environ.get("RESEND_API_KEY", "")
     if not api_key:
         logger.warning("Relances formations : RESEND_API_KEY manquante, envoi ignoré.")
         return 0
     resend.api_key = api_key
     sender = await get_sender()
-    assigns = await db.training_assignments.find({}).to_list(5000)
+    query = {"pharmacy_id": pharmacy_id} if pharmacy_id else {}
+    assigns = await db.training_assignments.find(query).to_list(5000)
     today = date.today()
     sent = 0
     for a in assigns:
