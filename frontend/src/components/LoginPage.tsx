@@ -24,7 +24,7 @@ export default function LoginPage({ onNavigate, onSuccess }: Props): JSX.Element
     e.preventDefault();
     setLoading(true);
     setError('');
-    const err = await login(email, password);
+    const err = await login(email.trim(), password.trim());
     setLoading(false);
     if (err) {
       setError(err);

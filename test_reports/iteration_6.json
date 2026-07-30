@@ -1,0 +1,31 @@
+{
+  "summary": "Focused re-test of the login trim fix (bug: 'le mot de passe ne marche pas' pour charlesjeanbourget@gmail.com). Backend: 30/30 pytest passed including 4 new TestTrimWhitespaceLoginFix tests that exercise leading/trailing spaces on email (mixed case) and password on both /api/auth/login and /api/auth/change-password. Frontend: Playwright login flow with the exact padded, mixed-case credentials ('  CharlesJeanBourget@gmail.com ' / 'Lumina-Owner!5127 ') succeeded through the public URL; sidebar-user-name = 'Charles Jean-Bourget', role superadmin. Eye toggle (login-password-toggle) correctly switches the input type between 'password' and 'text' and back. Existing admin/employee/superadmin regressions still green (test_login_admin_ok, test_employee_login_and_licenses_forbidden, TestChangePassword::test_change_password_success_and_restore, TestAdminUsers full lifecycle, brute-force lockout via public URL, isolation between locked email and admin login). No brute-force lockout was triggered on real accounts (throw-away UUID emails used for the 401 path).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml",
+    "/app/test_reports/pytest/iter6_trim.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py: payload.email.strip().lower() and payload.password.strip() are applied at /api/auth/login (l.188/196) and current_password/new_password stripped at /api/auth/change-password (l.220-221). Consider centralising 'sanitize_credentials' if more auth endpoints are added, and reject passwords that are ONLY whitespace with a clear 400 before hitting bcrypt (currently they become '' after strip and fail with generic 401 'identifiants invalides', which is acceptable but slightly misleading)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py"
+  ],
+  "success_rate": {"backend": "100% (30/30)", "frontend": "100% (login + eye toggle + dashboard)"},
+  "seed_data_creation": "Test admin user (trim_test_<uuid>@lumina.test) created via POST /api/admin/users and deleted at end of test. No persistent test data left in DB. Julie's password briefly rotated by TestChangePassword and restored to 'employe123' in the same test.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": false,
+  "test_credentials": "Superadmin propriétaire: charlesjeanbourget@gmail.com / Lumina-Owner!5127 (from /app/memory/test_credentials.md)",
+  "context_for_next_testing_agent": "Trim fix on login/change-password is verified end-to-end (backend + UI). Whole 30-test backend suite is green. If user still reports the login not working, the cause is almost certainly client-side (browser autofill inserting NBSPs, an actual typo in the password, or a stale JS bundle) rather than the API. Public URL used: https://employee-portal-305.preview.emergentagent.com. Do NOT hammer the real superadmin account with wrong passwords — email-based lockout after 5 fails is active.",
+  "rca_of_the_issue": "The reported symptom 'le mot de passe ne marche pas' was reproduced only when whitespace is present around the email or password (copy-paste artifact). Root cause was that /api/auth/login previously matched email/password literally, so a trailing space in the password caused bcrypt.verify to fail. Fix applied by main agent (backend .strip() on email+password and .strip() on current/new password in change-password, plus trim in LoginPage.tsx and Sidebar.tsx password dialog) resolves it. Verified with padded values through both curl-style requests and real browser UI on the public URL."
+}

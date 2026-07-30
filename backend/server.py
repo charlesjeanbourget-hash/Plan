@@ -193,7 +193,7 @@ async def auth_login(payload: LoginIn, request: Request):
         raise HTTPException(status_code=429, detail="Trop de tentatives échouées. Réessayez dans 15 minutes.",
                             headers={"Retry-After": str(LOCKOUT_MINUTES * 60)})
     user = await db.users.find_one({"email": email}, {"_id": 0})
-    if not user or not verify_password(payload.password, user["password_hash"]):
+    if not user or not verify_password(payload.password.strip(), user["password_hash"]):
         count = (attempt.get("count", 0) + 1) if attempt else 1
         update = {"identifier": identifier, "count": count, "updated_at": now.isoformat()}
         if count >= LOCKOUT_ATTEMPTS:
@@ -217,13 +217,15 @@ async def auth_me(user: dict = Depends(get_current_user)):
 
 @api_router.post("/auth/change-password")
 async def auth_change_password(payload: ChangePasswordIn, user: dict = Depends(get_current_user)):
-    if not verify_password(payload.current_password, user["password_hash"]):
+    current_password = payload.current_password.strip()
+    new_password = payload.new_password.strip()
+    if not verify_password(current_password, user["password_hash"]):
         raise HTTPException(status_code=400, detail="Mot de passe actuel incorrect.")
-    if len(payload.new_password) < 8:
+    if len(new_password) < 8:
         raise HTTPException(status_code=400, detail="Le nouveau mot de passe doit contenir au moins 8 caractères.")
     await db.users.update_one(
         {"id": user["id"]},
-        {"$set": {"password_hash": hash_password(payload.new_password), "is_temporary_password": False}},
+        {"$set": {"password_hash": hash_password(new_password), "is_temporary_password": False}},
     )
     await log_audit(user["email"], user["role"], "CHANGEMENT_MOT_DE_PASSE", "utilisateur", user["id"],
                     "Mot de passe modifié par l'utilisateur", user.get("pharmacy_id") or "")

@@ -57,7 +57,7 @@ export default function Sidebar({ active, onSelect, onLogout }: Props): JSX.Elem
   const submitPassword = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
     setPwdError('');
-    const err = await changePassword(currentPwd, newPwd);
+    const err = await changePassword(currentPwd.trim(), newPwd.trim());
     if (err) {
       setPwdError(err);
     } else {

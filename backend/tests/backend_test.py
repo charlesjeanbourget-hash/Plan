@@ -144,6 +144,78 @@ class TestAuthJWT:
         assert "access_token" in r_admin.json()
 
 
+# ---------------------- Iteration 6: Trim whitespace fix ----------------------
+class TestTrimWhitespaceLoginFix:
+    """Verify the login trim fix reported in iteration 6.
+
+    Backend must strip surrounding whitespace on email + password so users
+    who accidentally paste with trailing/leading spaces (or with different
+    email casing) can still authenticate.
+    """
+
+    def test_owner_login_with_padded_email_and_password(self, s):
+        r = s.post(f"{BASE_URL}/api/auth/login",
+                   json={"email": "  CharlesJeanBourget@gmail.com ",
+                         "password": "Lumina-Owner!5127  "},
+                   timeout=30)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["user"]["email"] == "charlesjeanbourget@gmail.com"
+        assert body["user"]["role"] == "superadmin"
+        assert isinstance(body["access_token"], str) and body["access_token"]
+
+    def test_owner_login_exact(self, s):
+        r = login(s, "charlesjeanbourget@gmail.com", "Lumina-Owner!5127")
+        assert r.status_code == 200, r.text
+        assert r.json()["user"]["role"] == "superadmin"
+
+    def test_wrong_password_still_401_on_throwaway_email(self, s):
+        # Use a throw-away email so we don't lock real accounts. Only 1 attempt.
+        r = s.post(f"{BASE_URL}/api/auth/login",
+                   json={"email": f"nonexistent-{uuid.uuid4().hex[:6]}@test.ca",
+                         "password": "  wrong-with-spaces  "},
+                   timeout=30)
+        assert r.status_code == 401
+        assert "invalide" in r.json().get("detail", "").lower()
+
+    def test_change_password_with_surrounding_spaces_roundtrip(self, s, super_token):
+        """Create a test user (as superadmin), log in with temp pwd, change pwd
+        with padded values, then re-login with the trimmed password."""
+        email = f"trim_test_{uuid.uuid4().hex[:8]}@lumina.test"
+        payload = {"email": email, "name": "TEST Trim", "role": "employee", "pharmacy_id": "ph1"}
+        rc = s.post(f"{BASE_URL}/api/admin/users", json=payload, headers=bearer(super_token))
+        assert rc.status_code == 200, rc.text
+        created = rc.json()
+        uid = created["user"]["id"]
+        temp = created["temporary_password"]
+        try:
+            # Login with temp
+            rl = login(s, email, temp)
+            assert rl.status_code == 200, rl.text
+            tok = rl.json()["access_token"]
+
+            # Change password with padded values
+            new_pwd = "NouveauMdp123"
+            rp = s.post(f"{BASE_URL}/api/auth/change-password",
+                        json={"current_password": f"  {temp}  ",
+                              "new_password": f"  {new_pwd}  "},
+                        headers=bearer(tok))
+            assert rp.status_code == 200, rp.text
+
+            # Re-login with the untrimmed new password
+            rn = login(s, email, new_pwd)
+            assert rn.status_code == 200, rn.text
+            assert rn.json()["user"]["is_temporary_password"] is False
+
+            # Padded email + padded password login should also work
+            rn2 = s.post(f"{BASE_URL}/api/auth/login",
+                         json={"email": f" {email.upper()} ", "password": f" {new_pwd} "},
+                         timeout=30)
+            assert rn2.status_code == 200, rn2.text
+        finally:
+            s.delete(f"{BASE_URL}/api/admin/users/{uid}", headers=bearer(super_token))
+
+
 # ---------------------- Change password ----------------------
 class TestChangePassword:
     """Uses a temporary user seeded direct in mongo, NOT the seeded accounts."""
