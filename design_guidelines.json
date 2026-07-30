@@ -1,75 +1,107 @@
 {
-  "theme": "Light theme preferred for Health/HR context, with Dark Mode support",
-  "archetype": "Organic & Earthy (Trust, Growth, Calm) optimized for Pharmacy SaaS",
-  "typography": {
-    "headings": "Manrope (Professional, highly legible, modern)",
-    "body": "Figtree (Clean, excellent for dense data in dashboards)",
-    "rules": "H1 max text-5xl to text-6xl. Use tracking-tight for headings >32px. Use tracking-[0.2em] uppercase for overlines and small labels. Never use Inter for headings."
+  "brand": {
+    "name": "Arrière Plan",
+    "theme_preference": "light_dominant"
   },
   "colors": {
-    "primary": "#10B981", 
-    "secondary": "#0F172A",
-    "background": "#F8FAFC",
-    "surface": "#FFFFFF",
-    "accent": "#F97316",
-    "rules": "No pure black (#000000) or pure gray. Always tint grays with cool (blue) or warm (orange) undertones. Ensure 4.5:1 contrast for normal text."
-  },
-  "visual_enhancers": {
-    "surfaces": "Neumorphism (Tactile) for dashboard cards: flat background, sharp 1px border (border-slate-200), no shadow on default, subtle lift on hover.",
-    "glassmorphism": "Use backdrop-blur-xl bg-white/70 for sticky headers. DO NOT use completely transparent backgrounds where content scrolls underneath.",
-    "borders": "Grid borders (The 'Technical' Look) for dense data tables to expose the skeleton."
-  },
-  "component_name": {
-    "marketing": "Native HTML + Tailwind for asymmetrical layouts. Avoid rigid Shadcn wrappers for landing pages.",
-    "dashboard": "Shadcn UI (Tables, Calendars, Dialogs, Select, Dropdowns). Go cardless or use max 8px radius.",
-    "chat_widget": "Floating bottom-right ChatWidget. Must use Glassmorphism to feel premium.",
-    "forms": "Strictly use Shadcn Form elements. No native <input> or <select>."
-  },
-  "grids": {
-    "marketing_landing": "The 'Tetris' Grid (grid-cols-1 md:grid-cols-12, gap-8 to gap-12). Force asymmetry for the 3 main action cards.",
-    "dashboard": "High Density Grid (grid-cols-1 md:grid-cols-4, gap-4 or gap-6). North Star metric top-left. Subgrid for alignment."
-  },
-  "layouts": {
-    "general": "Optical alignment over geometrical. Mobile-first responsive grids.",
-    "spacing": "Generous spacing philosophy (p-6, p-8, p-12). Dashboard needs high density but clear hierarchy."
-  },
-  "motion": {
-    "rules": "Micro-interactions on all hover/active states. Staggered entrance animations for lists.",
-    "technical": "Use specific transition properties (e.g., transition-colors, transition-transform). NEVER use 'transition: all'."
-  },
-  "accessibility": {
-    "contrast": "Text over images MUST use overlays (max bg-black/50) or text shadows to pass APCA/WCAG.",
-    "testing": "All interactive and key informational elements MUST include a `data-testid` attribute (e.g., data-testid='login-submit-button').",
-    "focus": "High contrast focus states required (focus:ring-2 focus:ring-emerald-500)."
-  },
-  "media": {
-    "hero_overlay": "For hero images, use bg-black/30 to bg-black/50 or gradients to ensure text readability without killing the image."
-  },
-  "3d_libraries": {
-    "recommendation": "Not highly recommended for a medical HR dashboard, but Framer Motion can be used for smooth page transitions and ChatWidget interactions. Recharts for HR data visualization."
-  },
-  "image_urls": {
-    "landing_hero": {
-      "url": "https://images.pexels.com/photos/19471013/pexels-photo-19471013.jpeg",
-      "description": "Female pharmacist in a lab coat in a modern pharmacy. Use as the main hero background on the landing page."
+    "primary": {
+      "name": "Jade Green",
+      "description": "Matches the glossy jade-green checkmark/arrow in the logo. Replaces the old emerald.",
+      "scale": {
+        "50": "#ECFDF4",
+        "100": "#D1FAE4",
+        "200": "#A7F3D0",
+        "300": "#6EE7B7",
+        "400": "#34D399",
+        "500": "#10B981",
+        "600": "#059669",
+        "700": "#047857",
+        "800": "#065F46",
+        "900": "#064E3B",
+        "950": "#022C22"
+      },
+      "usage": "Primary CTA buttons, active state highlights, success badges, main navigation active icons. E-mail links."
     },
-    "career_portal": {
-      "url": "https://images.unsplash.com/photo-1580281657529-557a6abb6387",
-      "description": "Pharmacy team professionals. Use in the 'Portail Carrières' public portal to showcase culture."
+    "secondary": {
+      "name": "Bronze / Gold",
+      "description": "Matches the 3D bronze/copper ring, gears, and businessman in the logo. Replaces the old amber/orange.",
+      "scale": {
+        "50": "#FDF8F3",
+        "100": "#F9EDE2",
+        "200": "#F2D8C0",
+        "300": "#E9BC96",
+        "400": "#DD9665",
+        "500": "#D2793D",
+        "600": "#C36030",
+        "700": "#A34A28",
+        "800": "#833E26",
+        "900": "#6A3423",
+        "950": "#391A10"
+      },
+      "usage": "Secondary buttons, accents, warning/pending badges, subtle borders, card hover borders, notification bell badges."
     },
-    "agency_portal": {
-      "url": "https://images.unsplash.com/photo-1780190338428-832775a117b2",
-      "description": "Abstract medical pattern. Use as a subtle textured background for the Login or 'Portail Agence' auth pages."
+    "background": {
+      "white": "#FFFFFF",
+      "slate_50": "#F8FAFC",
+      "usage": "The site must be 'blanc prédominant'. Use pure white (#FFFFFF) for all cards, sidebars, topbars, and panels. Use a very subtle off-white (like slate-50 or neutral-50) for the main application background wrapper so the white cards pop. DO NOT use dark panels anymore."
+    },
+    "text": {
+      "primary": "#0F172A",
+      "secondary": "#475569",
+      "tertiary": "#64748B"
     }
   },
-  "instructions_to_main_agent": [
-    "Interface MUST be 100% in French as requested by the user.",
-    "Use .js/.jsx files exclusively (no .tsx), but follow standard React component patterns.",
-    "Build the Landing Page with 3 distinct action cards: Espace Employés, Portail Carrières, Portail Agence.",
-    "Implement a robust Admin Sidebar with 13 specific modules: Tableau de bord, Horaires, Recrutement, Paie, Dossiers Employés, Remplacements, Vacances, Performance, Onboarding, Contrats, Avantages sociaux, FAQ, Superadmin.",
-    "Integrate a floating ChatWidget IA (assistant).",
-    "Use sonner for toast notifications.",
-    "NEVER use generic AI emojis (🤖, 💡). Use professional Lucide icons."
-  ],
-  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": "Avoid 'AI slop' aesthetic. DO NOT center align the app container (.App { text-align: center; }). Create depth through layered design elements with z-index hierarchy. Ensure custom micro-interactions on every clickable element. Use 2-3x more spacing than feels comfortable. DO NOT use complete transparent backgrounds in headers or dropdowns if content scrolls behind them. Always add data-testid to interactive elements. Prioritize using pre-existing components from src/components/ui."
+  "typography": {
+    "strategy": "Keep existing fonts, update weights and tracking to modern SaaS standards.",
+    "headings": {
+      "family": "Manrope",
+      "style": "tracking-tight, primarily text-slate-900. Use font-light for large expressive headers, font-extrabold for KPI numbers."
+    },
+    "body": {
+      "family": "Figtree",
+      "style": "tracking-normal, text-slate-600 for descriptions, text-slate-900 for important values."
+    }
+  },
+  "logo_integration": {
+    "url": "https://customer-assets-gfyr7b9c.emergentagent.net/job_employee-portal-305/artifacts/jt8hk0qw_IMG_1308.png",
+    "rules": [
+      "CRITICAL: The logo has a non-transparent pure white background.",
+      "It MUST ONLY be placed inside containers that have a pure white background (bg-white).",
+      "Never place it on slate-50, gray, dark, or colored backgrounds. It will look like a white block.",
+      "Ensure it maintains aspect ratio (object-contain) and size appropriately (h-10 to h-16)."
+    ]
+  },
+  "key_surfaces_guidance": {
+    "landing_page": {
+      "hero": "White background, large slate-900 typography with Jade Green highlight words. Bronze secondary accents.",
+      "action_cards": "Pure white cards with 1px border. On hover, the border shifts to Bronze-400 and the card slightly lifts (-translate-y-1)."
+    },
+    "login_page": {
+      "layout": "Centered clean white card on a soft slate-50 background, OR split screen with left side pure white (for form and logo) and right side featuring a subtle brand graphic (bronze/jade abstract)."
+    },
+    "punch_kiosk": {
+      "layout": "Change completely from dark slate-900. Make the background soft slate-50. The main punch module must be a prominent, elevated pure white card (shadow-xl, rounded-2xl). Logo is placed at the top of this white card. Numpad buttons should have light borders, highlighting with Jade or Bronze on press."
+    },
+    "dashboard_sidebar": {
+      "layout": "Pure white (bg-white) with border-r border-slate-200. Replaces any dark emerald backgrounds.",
+      "active_state": "bg-jade-50 text-jade-700 with a left border indicator border-l-4 border-jade-600."
+    },
+    "dashboard_modules": {
+      "cards": "All 13+ modules (KPIs, scheduling, payroll) are pure white (bg-white) cards with subtle slate-200 borders and diffuse shadow-sm.",
+      "baiia_performance": "Previously dark emerald-950. Convert to a pure white card. Give it a distinctive accent, like a border-t-4 border-bronze-500, to make it stand out without breaking the light theme."
+    },
+    "pdfs_and_emails": {
+      "branding": "Header must be pure white to host the logo. Update all accent colors from old emerald/amber to the new Jade Green and Bronze palette."
+    }
+  },
+  "universal_guidelines": {
+    "general": [
+      "DO NOT use generic centered layouts. Use clean, left-aligned, bento-grid structures typical of high-end SaaS.",
+      "Create depth through layered design elements (slate-50 app bg -> pure white cards -> shadows).",
+      "DO NOT use transparent backgrounds for cards, dropdowns, or headers. Use solid white (bg-white).",
+      "Add micro-animations for hover states on all interactive elements (transitions, subtle transform, color shifts).",
+      "All interactive elements MUST include a data-testid attribute for robust automated testing (e.g. data-testid='login-button').",
+      "Ensure all generated components use .js or .jsx extensions, NOT .tsx."
+    ]
+  }
 }
