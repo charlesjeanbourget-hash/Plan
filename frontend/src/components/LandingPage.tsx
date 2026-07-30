@@ -10,20 +10,20 @@ export default function LandingPage({ onNavigate }: Props): JSX.Element {
   return (
     <div className="min-h-screen bg-white" data-testid="landing-page">
       <header className="sticky top-0 z-40 bg-white border-b border-slate-200">
-        <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
-          <BrandLogo size="sm" />
-          <div className="flex items-center gap-3">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 sm:h-20 flex items-center justify-between gap-2">
+          <BrandLogo size="sm" hideTextOnSmall />
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             <button
               data-testid="header-punch-button"
               onClick={() => onNavigate('punch')}
-              className="px-5 py-2 rounded-full border border-bronze-300 text-bronze-800 text-sm font-semibold hover:bg-bronze-50 hover:border-bronze-400 transition-colors"
+              className="px-3.5 sm:px-5 py-2 rounded-full border border-bronze-300 text-bronze-800 text-xs sm:text-sm font-semibold whitespace-nowrap hover:bg-bronze-50 hover:border-bronze-400 transition-colors"
             >
               Borne de punch
             </button>
             <button
               data-testid="header-login-button"
               onClick={() => onNavigate('login')}
-              className="px-5 py-2 rounded-full bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 transition-colors"
+              className="px-3.5 sm:px-5 py-2 rounded-full bg-emerald-600 text-white text-xs sm:text-sm font-semibold whitespace-nowrap hover:bg-emerald-700 transition-colors"
             >
               Connexion
             </button>
@@ -32,7 +32,7 @@ export default function LandingPage({ onNavigate }: Props): JSX.Element {
       </header>
 
       <section className="relative overflow-hidden bg-white">
-        <div className="max-w-7xl mx-auto px-6 py-20 md:py-28 grid grid-cols-1 md:grid-cols-12 gap-12 items-center">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-14 md:py-28 grid grid-cols-1 md:grid-cols-12 gap-10 md:gap-12 items-center">
           <div className="md:col-span-7 animate-fade-up">
             <p className="text-xs uppercase tracking-[0.2em] text-bronze-700 font-bold mb-5">SIRH conçu pour les pharmacies</p>
             <h1 className="font-heading text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-slate-900 leading-[1.05]">
@@ -75,14 +75,14 @@ export default function LandingPage({ onNavigate }: Props): JSX.Element {
         </div>
       </section>
 
-      <section className="max-w-7xl mx-auto px-6 pb-24">
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 pb-16 sm:pb-24">
         <span className="block w-12 h-1 rounded-full bg-gradient-to-r from-emerald-500 to-bronze-500 mb-4" />
         <p className="text-xs uppercase tracking-[0.2em] text-slate-500 font-bold mb-8">Choisissez votre espace</p>
         <div className="grid grid-cols-1 md:grid-cols-12 gap-8">
           <button
             data-testid="portal-card-employees"
             onClick={() => onNavigate('login')}
-            className="md:col-span-6 group text-left rounded-2xl bg-white border border-slate-200 p-10 hover:border-emerald-400 hover:-translate-y-1 shadow-sm hover:shadow-md transition-all"
+            className="md:col-span-6 group text-left rounded-2xl bg-white border border-slate-200 p-6 sm:p-10 hover:border-emerald-400 hover:-translate-y-1 shadow-sm hover:shadow-md transition-all"
           >
             <div className="w-12 h-12 rounded-xl bg-emerald-50 flex items-center justify-center mb-6">
               <Users className="w-6 h-6 text-emerald-600" />
@@ -114,7 +114,7 @@ export default function LandingPage({ onNavigate }: Props): JSX.Element {
           <button
             data-testid="portal-card-agency"
             onClick={() => onNavigate('agency')}
-            className="md:col-span-3 group text-left rounded-2xl bg-white border border-slate-200 p-10 hover:border-bronze-400 hover:-translate-y-1 shadow-sm hover:shadow-md transition-all"
+            className="md:col-span-3 group text-left rounded-2xl bg-white border border-slate-200 p-6 sm:p-10 hover:border-bronze-400 hover:-translate-y-1 shadow-sm hover:shadow-md transition-all"
           >
             <div className="w-12 h-12 rounded-xl bg-emerald-50 flex items-center justify-center mb-6">
               <Building2 className="w-6 h-6 text-emerald-700" />
@@ -129,7 +129,7 @@ export default function LandingPage({ onNavigate }: Props): JSX.Element {
       </section>
 
       <section className="bg-slate-50 border-y border-slate-200">
-        <div className="max-w-7xl mx-auto px-6 py-20">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-14 sm:py-20">
           <span className="block w-12 h-1 rounded-full bg-gradient-to-r from-emerald-500 to-bronze-500 mb-4" />
           <h2 className="font-heading text-lg font-bold text-slate-900 mb-10">Tout votre SIRH, module par module</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
@@ -149,7 +149,7 @@ export default function LandingPage({ onNavigate }: Props): JSX.Element {
         </div>
       </section>
 
-      <footer className="max-w-7xl mx-auto px-6 py-10 flex flex-col sm:flex-row items-center justify-between gap-4 bg-white">
+      <footer className="max-w-7xl mx-auto px-4 sm:px-6 py-10 flex flex-col sm:flex-row items-center justify-between gap-4 bg-white">
         <p className="text-sm text-slate-500">© 2026 Arrière Plan — Le SIRH des pharmacies.</p>
         <div className="flex gap-6 text-sm text-slate-500">
           <button data-testid="footer-careers-link" onClick={() => onNavigate('careers')} className="hover:text-bronze-700 transition-colors">Carrières</button>

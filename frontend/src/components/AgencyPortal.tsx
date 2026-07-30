@@ -48,9 +48,9 @@ export default function AgencyPortal({ onNavigate }: Props): JSX.Element {
   return (
     <div className="min-h-screen bg-slate-50" data-testid="agency-page">
       <header className="bg-white border-b border-slate-200">
-        <div className="max-w-5xl mx-auto px-6 h-20 flex items-center justify-between">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 h-16 sm:h-20 flex items-center justify-between gap-2">
           <div className="flex items-center gap-3">
-            <BrandLogo size="sm" />
+            <BrandLogo size="sm" hideTextOnSmall />
             <span className="hidden sm:inline-flex px-2.5 py-0.5 rounded-full bg-bronze-100 text-bronze-800 text-xs font-bold">Agences</span>
           </div>
           <button

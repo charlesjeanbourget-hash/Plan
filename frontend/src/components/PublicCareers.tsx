@@ -44,8 +44,8 @@ export default function PublicCareers({ onNavigate }: Props): JSX.Element {
   return (
     <div className="min-h-screen bg-slate-50" data-testid="careers-page">
       <header className="sticky top-0 z-40 bg-white border-b border-slate-200">
-        <div className="max-w-5xl mx-auto px-6 h-20 flex items-center justify-between">
-          <BrandLogo size="sm" />
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 h-16 sm:h-20 flex items-center justify-between gap-2">
+          <BrandLogo size="sm" hideTextOnSmall />
           <button
             data-testid="careers-back-button"
             onClick={() => onNavigate('landing')}

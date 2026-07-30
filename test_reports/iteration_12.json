@@ -1,0 +1,26 @@
+{
+  "summary": "Frontend-only responsive/typography/favicon regression pass (iteration 12) at 390x844 / 768x1024 / 1920x800. Verified favicon.png (200), favicon.ico (200), <title>='Arrière Plan — SIRH pour pharmacies', h1 computed font-family='Fraunces, Georgia, serif', body='Archivo, sans-serif'. Landing, Login, Kiosk (NIP 7068 → kiosk-confirm-panel visible → cancelled with kiosk-confirm-no), Careers (+ application dialog on mobile), Agency (+ AGENCE2024 dashboard), Public Replacement page (via seeded token), Employee (julie) dashboard, Employee Myspace, Notification bell open, and all 14 admin modules (dashboard, employees, scheduling, payroll, replacements, performance, training, licenses, vacations, recruitment, onboarding, contracts, benefits, faq) each opened via hamburger + sidebar-mobile-toggle. Seed replacement request created and DELETEd after test (200).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Employees module (admin) / Mon espace (employee)", "issue": "At 390px viewport, document.documentElement.scrollWidth = 423 (>390) → 33px of horizontal overflow is technically present. Root cause: several off-screen shadcn <input> elements (class 'flex rounded-md border border-input bg-transparent px-3 py-1', width 111px, positioned at left≈312 so right up to 423). They are visually hidden (likely visually-hidden file inputs for CSV upload / photo upload) but not display:none/hidden, so they enlarge scrollWidth. Not visible to end user in screenshots but does allow a small horizontal scroll on some devices.", "selector": "input.flex.rounded-md.border.border-input (offscreen at left≈312 on 390px viewport)", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/test_reports/iteration_12.json"],
+  "action_items": [
+    "OPTIONAL/LOW: For the hidden shadcn file/photo inputs used in Employees & Mon espace, add 'sr-only' or wrap in a container with 'overflow: hidden' / 'w-0 h-0' so they don't push scrollWidth past 390px. Suggestion: replace inline styling with Tailwind 'sr-only' or set style={{position:'absolute', width:0, height:0, opacity:0, pointerEvents:'none'}} on the raw <input type=\"file\">. All visible layout is already responsive — this only removes a minor 33px non-visual horizontal scroll."
+  ],
+  "critical_code_review_comments": [
+    "Sidebar renders twice in DOM (desktop persistent + mobile drawer) with identical data-testid — causes Playwright strict-mode collisions. Consider suffixing testids (e.g. sidebar-link-{key}-mobile) or setting aria-hidden on the hidden copy so testids remain unique in the visible tree."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped)", "frontend": "~97% (only 2 pages show 33px non-visual scrollWidth overflow at 390px; all 14 admin modules, all public pages, kiosk flow, careers dialog, agency portal, public replacement page, and both auth flows pass at all 3 viewports)"},
+  "seed_data_creation": "Created replacement request id=f234b6f7-f2eb-47d4-a4f8-0528a381b877 via POST /api/replacements/requests, tested public page ?remplacement=7tutkKpKMNptWKMnoeV6IgyTKVLEmYrz at 3 viewports (no overflow), then DELETEd (HTTP 200). Nothing left behind.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "Admin admin@luminahr.ca/admin123 (worked). Employee julie@luminahr.ca/employe123 (worked, NIP 7068 recognized on kiosk). Agency code AGENCE2024 (worked).",
+  "context_for_next_testing_agent": "Sidebar has DUAL DOM rendering — always use .nth() + is_visible() loop instead of .first when clicking sidebar-link-* on mobile, or 2 identical elements trigger Playwright strict-mode errors. Kiosk OK button is data-testid='kiosk-submit' (NOT 'kiosk-key-ok'). Notification bell testid is 'notification-bell'. Favicon/fonts/title all verified on this iteration.",
+  "rca_of_the_issue": "The 33px horizontal overflow at 390px on Employees / Mon espace pages is caused by off-screen (but not display:none) file-upload inputs styled with the standard shadcn Input class 'flex rounded-md border border-input bg-transparent px-3 py-1 ...' width 111px positioned at left≈312, right up to 423. These do not affect visible layout — landing / dashboard / other modules all report sw=390 cw=390 clean — but browsers still count them in scrollWidth. Fix: use Tailwind 'sr-only' or absolute positioning with width:0 for the invisible file inputs, OR set 'overflow-x: clip' on the module <main> container."
+}

@@ -63,14 +63,14 @@ export default function PublicReplacementPage({ token }: Props): JSX.Element {
 
   return (
     <div data-testid="public-replacement-page" className="min-h-screen bg-slate-50">
-      <header className="bg-white border-b border-slate-200 px-6 py-4">
+      <header className="bg-white border-b border-slate-200 px-4 sm:px-6 py-4">
         <div className="max-w-3xl mx-auto flex flex-wrap items-center justify-between gap-3">
           <BrandLogo size="sm" />
           <p className="text-xs font-bold uppercase tracking-[0.15em] text-bronze-700">Espace agence — remplacement</p>
         </div>
       </header>
 
-      <main className="max-w-3xl mx-auto px-6 py-10">
+      <main className="max-w-3xl mx-auto px-4 sm:px-6 py-8 sm:py-10">
         {loadError && (
           <div data-testid="public-request-error" className="bg-white rounded-xl border border-red-200 p-10 text-center">
             <AlertTriangle className="w-8 h-8 text-red-500 mx-auto mb-3" />

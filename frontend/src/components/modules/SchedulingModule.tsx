@@ -124,7 +124,7 @@ export default function SchedulingModule(): JSX.Element {
         </div>
       )}
 
-      <div className="flex items-center gap-3 mb-6">
+      <div className="flex flex-wrap items-center gap-3 mb-6">
         <Button data-testid="week-prev-button" variant="outline" size="icon" className="rounded-full" onClick={() => setWeekOffset(weekOffset - 1)}>
           <ChevronLeft className="w-4 h-4" />
         </Button>
@@ -139,9 +139,9 @@ export default function SchedulingModule(): JSX.Element {
             Cette semaine
           </button>
         )}
-        <div className="ml-auto">
+        <div className="ml-auto w-full sm:w-auto">
           <Select value={branchFilter} onValueChange={setBranchFilter}>
-            <SelectTrigger data-testid="scheduling-branch-filter" className="w-56">
+            <SelectTrigger data-testid="scheduling-branch-filter" className="w-full sm:w-56">
               <SelectValue placeholder="Toutes les succursales" />
             </SelectTrigger>
             <SelectContent>

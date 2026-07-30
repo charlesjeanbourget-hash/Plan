@@ -46,7 +46,7 @@ export default function LoginPage({ onNavigate, onSuccess }: Props): JSX.Element
         >
           <ArrowLeft className="w-4 h-4" /> Retour à l'accueil
         </button>
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-10">
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 sm:p-10">
           <div className="mb-8">
             <BrandLogo />
           </div>

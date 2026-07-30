@@ -75,7 +75,7 @@ function App(): JSX.Element {
       <div className="App flex min-h-screen bg-slate-50" data-testid="dashboard-layout">
         <Sidebar active={activeModule} onSelect={setActiveModule} onLogout={handleLogout} />
         <NotificationBell onNavigate={setActiveModule} />
-        <main className="flex-1 min-w-0 lg:ml-64 p-6 md:p-10">
+        <main className="flex-1 min-w-0 lg:ml-64 p-4 pt-20 sm:p-6 sm:pt-20 md:p-10 md:pt-20 lg:pt-10">
           <ActiveModule />
         </main>
         <ChatWidget />

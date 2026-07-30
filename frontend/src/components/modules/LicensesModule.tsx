@@ -202,9 +202,9 @@ export default function LicensesModule(): JSX.Element {
         subtitle="Gestion sécurisée et conforme à la Loi 25 — accès réservé aux administrateurs, chaque consultation est journalisée."
       />
 
-      <div className="flex items-center gap-3 mb-6">
+      <div className="flex flex-wrap items-center gap-3 mb-6">
         <Select value={branchFilter} onValueChange={setBranchFilter}>
-          <SelectTrigger data-testid="license-branch-filter" className="w-64">
+          <SelectTrigger data-testid="license-branch-filter" className="w-full sm:w-64">
             <SelectValue placeholder="Toutes les succursales" />
           </SelectTrigger>
           <SelectContent>

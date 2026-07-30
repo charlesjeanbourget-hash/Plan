@@ -184,7 +184,7 @@ export const PunchHoursPanel = (): JSX.Element => {
         <h2 className="font-heading text-base font-bold text-slate-900 inline-flex items-center gap-2">
           <Timer className="w-4 h-4 text-emerald-600" /> Heures punchées (source officielle de la paie)
         </h2>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button data-testid="export-csv-button" size="sm" variant="outline" onClick={() => void exportCsv()} className="rounded-full text-xs">
             <Download className="w-3.5 h-3.5 mr-1" /> Exporter CSV
           </Button>
@@ -229,7 +229,7 @@ export const PunchHoursPanel = (): JSX.Element => {
       )}
 
       {period && (
-        <div className="flex items-center gap-3 mb-4">
+        <div className="flex flex-wrap items-center gap-3 mb-4">
           <Button data-testid="period-prev-button" variant="outline" size="icon" className="rounded-full h-8 w-8" onClick={() => setOffset(offset - 1)}>
             <ChevronLeft className="w-4 h-4" />
           </Button>
