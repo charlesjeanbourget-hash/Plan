@@ -970,6 +970,8 @@ async def list_trainings(pharmacy_id: Optional[str] = Query(None), user: dict = 
             item["my_attempts"] = len(attempts)
             item["my_best_score"] = max((a["score"] for a in attempts), default=None)
             item["my_passed"] = any(a["passed"] for a in attempts)
+            item["my_assignment"] = await db.training_assignments.find_one(
+                {"training_id": d["id"], "employee_email": user["email"]}, {"_id": 0, "due_date": 1})
         out.append(item)
     return out
 
@@ -1123,6 +1125,144 @@ async def list_attempts(training_id: str, user: dict = Depends(get_current_user)
     return docs
 
 
+# ==================== Assignation de formations & relances ====================
+
+class AssignmentIn(BaseModel):
+    employee_email: str
+    employee_name: str
+    due_date: str
+
+
+class AssignmentsIn(BaseModel):
+    assignments: list[AssignmentIn]
+
+
+@api_router.post("/trainings/assignments/reminders/run")
+async def run_training_reminders(principal: dict = Depends(get_principal)):
+    sent = await send_training_reminders()
+    await log_audit(principal["email"], principal["role"], "RELANCES_FORMATION_DECLENCHEES", "formation", "relances",
+                    f"{sent} relance(s) envoyée(s) manuellement", principal.get("pharmacy_id", ""))
+    return {"sent": sent}
+
+
+@api_router.get("/trainings/{training_id}/assignments")
+async def list_training_assignments(training_id: str, principal: dict = Depends(get_principal)):
+    user = {"role": principal["role"], "pharmacy_id": principal["pharmacy_id"]}
+    await get_training_or_404(training_id, user)
+    assigns = await db.training_assignments.find({"training_id": training_id}, {"_id": 0}).sort("due_date", 1).to_list(1000)
+    today = date.today().isoformat()
+    for a in assigns:
+        best = await db.training_attempts.find_one(
+            {"training_id": training_id, "user_email": a["employee_email"], "passed": True},
+            {"_id": 0, "score": 1, "completed_at": 1}, sort=[("score", -1)])
+        a["passed"] = best is not None
+        a["passed_score"] = best["score"] if best else None
+        a["overdue"] = (best is None) and a["due_date"] < today
+    return assigns
+
+
+@api_router.post("/trainings/{training_id}/assignments")
+async def assign_training(training_id: str, payload: AssignmentsIn, principal: dict = Depends(get_principal)):
+    user = {"role": principal["role"], "pharmacy_id": principal["pharmacy_id"]}
+    doc = await get_training_or_404(training_id, user)
+    now = datetime.now(timezone.utc).isoformat()
+    count = 0
+    for a in payload.assignments:
+        email = a.employee_email.strip().lower()
+        if not email or not a.due_date:
+            continue
+        await db.training_assignments.update_one(
+            {"training_id": training_id, "employee_email": email},
+            {"$set": {"employee_name": a.employee_name, "due_date": a.due_date,
+                      "assigned_by": principal["email"], "assigned_at": now, "reminder_sent_for": None,
+                      "pharmacy_id": doc["pharmacy_id"]},
+             "$setOnInsert": {"id": str(uuid.uuid4())}},
+            upsert=True)
+        count += 1
+    await log_audit(principal["email"], principal["role"], "ASSIGNATION_FORMATION", "formation", training_id,
+                    f"Formation « {doc['title']} » assignée à {count} employé(s)", doc["pharmacy_id"])
+    return {"count": count}
+
+
+@api_router.delete("/trainings/{training_id}/assignments/{assignment_id}")
+async def delete_training_assignment(training_id: str, assignment_id: str, principal: dict = Depends(get_principal)):
+    user = {"role": principal["role"], "pharmacy_id": principal["pharmacy_id"]}
+    doc = await get_training_or_404(training_id, user)
+    target = await db.training_assignments.find_one({"id": assignment_id, "training_id": training_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="Assignation introuvable.")
+    await db.training_assignments.delete_one({"id": assignment_id})
+    await log_audit(principal["email"], principal["role"], "RETRAIT_ASSIGNATION", "formation", training_id,
+                    f"Assignation retirée pour {target['employee_email']}", doc["pharmacy_id"])
+    return {"status": "retirée"}
+
+
+def training_reminder_html(name: str, title: str, due_date: str, days: int) -> str:
+    if days < 0:
+        urgence = (f"était à compléter avant le <strong>{due_date}</strong> — "
+                   f"elle est en retard de <strong>{-days} jour(s)</strong>")
+    else:
+        urgence = (f"doit être complétée avant le <strong>{due_date}</strong> — "
+                   f"il vous reste <strong>{days} jour(s)</strong>")
+    return (
+        "<div style='font-family:Arial,sans-serif;max-width:640px;margin:0 auto;color:#0f172a'>"
+        "<h2 style='color:#059669'>LuminaHR — Relance de formation</h2>"
+        f"<p>Bonjour {name},</p>"
+        f"<p>Votre formation <strong>« {title} »</strong> {urgence}.</p>"
+        "<p>Connectez-vous à LuminaHR, consultez le contenu par secteur puis complétez l'examen final.</p>"
+        "<p style='font-size:12px;color:#94a3b8;margin-top:24px'>Relance automatique envoyée par LuminaHR.</p>"
+        "</div>"
+    )
+
+
+async def send_training_reminders() -> int:
+    api_key = os.environ.get("RESEND_API_KEY", "")
+    if not api_key:
+        logger.warning("Relances formations : RESEND_API_KEY manquante, envoi ignoré.")
+        return 0
+    resend.api_key = api_key
+    sender = await get_sender()
+    assigns = await db.training_assignments.find({}).to_list(5000)
+    today = date.today()
+    sent = 0
+    for a in assigns:
+        try:
+            days = (date.fromisoformat(a["due_date"]) - today).days
+        except (ValueError, KeyError):
+            continue
+        if days > 7:
+            continue
+        if a.get("reminder_sent_for") == a["due_date"]:
+            continue
+        passed = await db.training_attempts.find_one(
+            {"training_id": a["training_id"], "user_email": a["employee_email"], "passed": True})
+        if passed:
+            continue
+        training = await db.trainings.find_one({"id": a["training_id"]}, {"_id": 0, "title": 1, "status": 1})
+        if not training or training.get("status") != "published":
+            continue
+        try:
+            params = {
+                "from": sender,
+                "to": [a["employee_email"]],
+                "subject": f"Relance — formation « {training['title']} » à compléter" + (" (en retard)" if days < 0 else ""),
+                "html": training_reminder_html(a.get("employee_name", ""), training["title"], a["due_date"], days),
+            }
+            await asyncio.to_thread(resend.Emails.send, params)
+            await db.training_assignments.update_one({"id": a["id"]}, {"$set": {"reminder_sent_for": a["due_date"]}})
+            await log_audit("système", "system", "RELANCE_FORMATION_ENVOYEE", "formation", a["training_id"],
+                            f"Relance envoyée à {a['employee_email']} (échéance {a['due_date']})", a.get("pharmacy_id", ""))
+            sent += 1
+        except Exception as exc:
+            logger.error(f"Relance formation {a.get('id')} échouée : {exc}")
+    return sent
+
+
+async def training_reminders_job():
+    sent = await send_training_reminders()
+    logger.info(f"Relances formations quotidiennes : {sent} envoyée(s)")
+
+
 scheduler = AsyncIOScheduler(timezone="America/Montreal")
 
 
@@ -1215,6 +1355,7 @@ async def startup_tasks():
     await seed_users()
     scheduler.add_job(monthly_reports_job, CronTrigger(day=1, hour=8, minute=0))
     scheduler.add_job(license_reminders_job, CronTrigger(hour=8, minute=30))
+    scheduler.add_job(training_reminders_job, CronTrigger(hour=8, minute=45))
     scheduler.start()
 
 

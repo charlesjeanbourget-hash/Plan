@@ -1,12 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, FormEvent } from 'react';
 import axios from 'axios';
 import { useAuth } from '@/context/AuthContext';
-import { Training, TrainingSection, ExamQuestion, TrainingAttempt, TrainingStatus } from '@/types';
+import { useHR } from '@/context/HRContext';
+import { Training, TrainingSection, ExamQuestion, TrainingAttempt, TrainingStatus, TrainingAssignment } from '@/types';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { ArrowLeft, Plus, Trash2, Send, Save, CheckCircle2 } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { ArrowLeft, Plus, Trash2, Send, Save, CheckCircle2, BellRing } from 'lucide-react';
 import { toast } from 'sonner';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -26,10 +28,11 @@ interface Props {
   onUpdated: () => Promise<void> | void;
 }
 
-type Tab = 'content' | 'exam' | 'results';
+type Tab = 'content' | 'exam' | 'assignments' | 'results';
 
 export default function TrainingEditor({ training, onBack, onUpdated }: Props): JSX.Element {
   const { token } = useAuth();
+  const { state } = useHR();
   const headers = { Authorization: `Bearer ${token ?? ''}` };
   const [title, setTitle] = useState(training.title);
   const [sections, setSections] = useState<TrainingSection[]>(training.sections);
@@ -38,15 +41,67 @@ export default function TrainingEditor({ training, onBack, onUpdated }: Props): 
   const [status, setStatus] = useState<TrainingStatus>(training.status);
   const [tab, setTab] = useState<Tab>('content');
   const [attempts, setAttempts] = useState<TrainingAttempt[]>([]);
+  const [assignments, setAssignments] = useState<TrainingAssignment[]>([]);
+  const [assignEmployeeId, setAssignEmployeeId] = useState('');
+  const [assignDueDate, setAssignDueDate] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (tab !== 'results') return;
-    axios.get<TrainingAttempt[]>(`${API}/trainings/${training.id}/attempts`, { headers })
-      .then((r) => setAttempts(r.data))
-      .catch(() => toast.error('Impossible de charger les résultats.'));
+    if (tab === 'results') {
+      axios.get<TrainingAttempt[]>(`${API}/trainings/${training.id}/attempts`, { headers })
+        .then((r) => setAttempts(r.data))
+        .catch(() => toast.error('Impossible de charger les résultats.'));
+    }
+    if (tab === 'assignments') {
+      void refreshAssignments();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
+
+  const refreshAssignments = async (): Promise<void> => {
+    try {
+      const r = await axios.get<TrainingAssignment[]>(`${API}/trainings/${training.id}/assignments`, { headers });
+      setAssignments(r.data);
+    } catch {
+      toast.error('Impossible de charger les assignations.');
+    }
+  };
+
+  const submitAssignment = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
+    e.preventDefault();
+    const emp = state.employees.find((emp2) => emp2.id === assignEmployeeId);
+    if (!emp || !assignDueDate) return;
+    try {
+      await axios.post(`${API}/trainings/${training.id}/assignments`, {
+        assignments: [{ employee_email: emp.email, employee_name: `${emp.firstName} ${emp.lastName}`, due_date: assignDueDate }],
+      }, { headers });
+      toast.success(`Formation assignée à ${emp.firstName} ${emp.lastName} (échéance ${assignDueDate}).`);
+      setAssignEmployeeId('');
+      setAssignDueDate('');
+      await refreshAssignments();
+    } catch {
+      toast.error('Assignation impossible.');
+    }
+  };
+
+  const removeAssignment = async (a: TrainingAssignment): Promise<void> => {
+    try {
+      await axios.delete(`${API}/trainings/${training.id}/assignments/${a.id}`, { headers });
+      toast.success(`Assignation retirée pour ${a.employee_name}.`);
+      await refreshAssignments();
+    } catch {
+      toast.error('Retrait impossible.');
+    }
+  };
+
+  const sendReminders = async (): Promise<void> => {
+    try {
+      const r = await axios.post<{ sent: number }>(`${API}/trainings/assignments/reminders/run`, {}, { headers });
+      toast.success(`${r.data.sent} relance(s) envoyée(s) par courriel.`);
+    } catch {
+      toast.error('Envoi des relances impossible.');
+    }
+  };
 
   const patchSection = (i: number, patch: Partial<TrainingSection>): void =>
     setSections((prev) => prev.map((s, si) => (si === i ? { ...s, ...patch } : s)));
@@ -90,6 +145,7 @@ export default function TrainingEditor({ training, onBack, onUpdated }: Props): 
   const TABS: { key: Tab; label: string }[] = [
     { key: 'content', label: `Contenu (${sections.length})` },
     { key: 'exam', label: `Examen (${exam.length})` },
+    { key: 'assignments', label: 'Assignations' },
     { key: 'results', label: 'Résultats' },
   ];
 
@@ -228,6 +284,91 @@ export default function TrainingEditor({ training, onBack, onUpdated }: Props): 
           >
             <Plus className="w-4 h-4 mr-1" /> Ajouter une question
           </Button>
+        </div>
+      )}
+
+      {tab === 'assignments' && (
+        <div className="space-y-6" data-testid="editor-assignments-panel">
+          <div className="bg-white rounded-xl border border-slate-200 p-6">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="font-heading text-sm font-bold text-slate-900">Assigner cette formation</h3>
+              <Button data-testid="send-reminders-button" size="sm" variant="outline" onClick={() => void sendReminders()} className="rounded-full text-xs">
+                <BellRing className="w-3.5 h-3.5 mr-1" /> Envoyer les relances maintenant
+              </Button>
+            </div>
+            <p className="text-xs text-slate-500 mb-4">
+              L'employé recevra une relance automatique par courriel à 7 jours de l'échéance (et en cas de retard), tant que l'examen n'est pas réussi.
+              {status !== 'published' && <span className="text-amber-700 font-semibold"> Publiez la formation pour que les relances partent.</span>}
+            </p>
+            <form onSubmit={(e) => void submitAssignment(e)} className="flex flex-col sm:flex-row gap-3 sm:items-end">
+              <div className="space-y-2 flex-1">
+                <Label>Employé(e)</Label>
+                <Select value={assignEmployeeId} onValueChange={setAssignEmployeeId}>
+                  <SelectTrigger data-testid="assign-employee-select"><SelectValue placeholder="Choisir un employé" /></SelectTrigger>
+                  <SelectContent>
+                    {state.employees.map((emp) => (
+                      <SelectItem key={emp.id} value={emp.id}>{emp.firstName} {emp.lastName} — {emp.position}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Date limite</Label>
+                <Input data-testid="assign-due-date-input" type="date" value={assignDueDate} onChange={(e) => setAssignDueDate(e.target.value)} required />
+              </div>
+              <Button data-testid="assign-submit-button" type="submit" disabled={!assignEmployeeId || !assignDueDate} className="rounded-full bg-emerald-600 hover:bg-emerald-700">
+                Assigner
+              </Button>
+            </form>
+          </div>
+
+          <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
+            <table className="w-full text-sm min-w-[640px]">
+              <thead>
+                <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-[0.15em] text-slate-500">
+                  <th className="p-4">Employé</th>
+                  <th className="p-4">Échéance</th>
+                  <th className="p-4">Statut</th>
+                  <th className="p-4 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {assignments.map((a) => (
+                  <tr key={a.id} data-testid={`assignment-row-${a.employee_email}`} className="border-b border-slate-100 last:border-0">
+                    <td className="p-4">
+                      <p className="font-semibold text-slate-800">{a.employee_name}</p>
+                      <p className="text-xs text-slate-500">{a.employee_email}</p>
+                    </td>
+                    <td className="p-4 text-slate-600">{a.due_date}</td>
+                    <td className="p-4">
+                      {a.passed ? (
+                        <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">
+                          Réussie — {a.passed_score} %
+                        </span>
+                      ) : a.overdue ? (
+                        <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-800">En retard</span>
+                      ) : (
+                        <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">En attente</span>
+                      )}
+                    </td>
+                    <td className="p-4 text-right">
+                      <Button
+                        data-testid={`remove-assignment-${a.employee_email}`}
+                        size="sm" variant="outline"
+                        onClick={() => void removeAssignment(a)}
+                        className="rounded-full text-xs text-red-600 border-red-200 hover:bg-red-50"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+                {assignments.length === 0 && (
+                  <tr><td colSpan={4} className="p-8 text-center text-slate-500">Aucune assignation pour le moment.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

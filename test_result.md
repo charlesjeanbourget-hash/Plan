@@ -167,3 +167,34 @@ frontend:
 agent_communication:
   - agent: "main"
     message: "Backend teste par curl (tous verts). Frontend smoke test OK (module Formations + cloche visibles). Une formation demo 'Formation d'integration Proxim' (id 5d2a444d-08bc-4e47-adbd-0db5a64d1e28) est publiee avec une tentative de Julie a 100%. tsc --noEmit propre."
+
+## Iteration 6 (main agent) — certificat + assignations + onboarding lie
+user_problem_statement: "1) Certificat PDF telechargeable quand un employe reussit son examen de formation. 2) Assignation d'une formation a des employes precis avec date limite et relances courriel automatiques (7 jours avant echeance + retard, dedup). 3) Cocher automatiquement les etapes 'Formation' de l'onboarding quand l'employe reussit son examen."
+backend:
+  - task: "Assignations formations (/api/trainings/{id}/assignments CRUD + /api/trainings/assignments/reminders/run + job quotidien 8h45)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Teste par curl: POST 2 assignations, GET avec statuts calcules (passed/overdue), relance reelle envoyee (sent:1 vers adresse proprietaire Resend), DELETE ok. my_assignment inclus dans GET /api/trainings pour employes."
+frontend:
+  - task: "Certificat PDF (lib/certificate.ts, boutons dans TrainingViewer resultat + lecture)"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/lib/certificate.ts"
+    needs_retesting: true
+  - task: "Onglet Assignations dans TrainingEditor (select employe + date limite + relances + table statuts)"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/components/modules/TrainingEditor.tsx"
+    needs_retesting: true
+  - task: "Onboarding auto-coche (categorie Formation) apres examen reussi + puces echeance cartes/cloche"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/components/modules/TrainingViewer.tsx"
+    needs_retesting: true
+agent_communication:
+  - agent: "main"
+    message: "Backend teste par curl (vert). STATE_KEY localStorage bumpe v3->v4 avec nouvel item onboarding o8 (e2/Julie, categorie Formation, non fait) pour tester l'auto-coche. Julie a une assignation demo due 2026-08-05 sur la formation Proxim. tsc propre."

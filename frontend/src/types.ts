@@ -342,6 +342,7 @@ export interface Training {
   my_attempts?: number;
   my_best_score?: number | null;
   my_passed?: boolean;
+  my_assignment?: { due_date: string } | null;
 }
 
 export interface AttemptQuestionResult {
@@ -373,6 +374,21 @@ export interface TrainingAttempt {
   correct_count: number;
   total: number;
   completed_at: string;
+}
+
+export interface TrainingAssignment {
+  id: string;
+  training_id: string;
+  pharmacy_id: string;
+  employee_email: string;
+  employee_name: string;
+  due_date: string;
+  assigned_by: string;
+  assigned_at: string;
+  reminder_sent_for?: string | null;
+  passed?: boolean;
+  passed_score?: number | null;
+  overdue?: boolean;
 }
 
 export interface OverviewPharmacy {

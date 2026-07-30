@@ -79,14 +79,18 @@ export const NotificationBell = ({ onNavigate }: { onNavigate: (m: ModuleKey) =>
         }));
       trainings
         .filter((t) => !t.my_passed)
-        .forEach((t) => list.push({
-          id: `training-${t.id}`,
-          title: 'Formation à compléter',
-          detail: t.title,
-          module: 'training',
-          tone: 'sky',
-          icon: 'training',
-        }));
+        .forEach((t) => {
+          const due = t.my_assignment?.due_date;
+          const overdue = !!due && due < new Date().toISOString().slice(0, 10);
+          list.push({
+            id: `training-${t.id}${due ? `-${due}` : ''}`,
+            title: overdue ? 'Formation en retard' : 'Formation à compléter',
+            detail: due ? `${t.title} — avant le ${due}` : t.title,
+            module: 'training',
+            tone: overdue ? 'red' : 'sky',
+            icon: 'training',
+          });
+        });
     } else {
       state.leaveRequests
         .filter((l) => l.status === 'En attente')

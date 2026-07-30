@@ -166,6 +166,15 @@ export default function TrainingModule(): JSX.Element {
               {t.status === 'error' && !isEmployee && (
                 <p className="text-xs text-red-600 mb-2">{t.error ?? 'La génération a échoué. Supprimez et réessayez.'}</p>
               )}
+              {isEmployee && t.my_assignment && !t.my_passed && (
+                <p className={`text-xs font-semibold rounded-full px-2.5 py-0.5 inline-flex mb-2 ${
+                  t.my_assignment.due_date < new Date().toISOString().slice(0, 10)
+                    ? 'bg-red-100 text-red-800'
+                    : 'bg-amber-100 text-amber-800'
+                }`}>
+                  À compléter avant le {t.my_assignment.due_date}
+                </p>
+              )}
               {isEmployee ? (
                 <p className="text-xs text-slate-500 inline-flex items-center gap-1.5">
                   {t.my_passed

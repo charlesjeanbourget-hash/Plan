@@ -1,0 +1,43 @@
+{
+  "summary": "Iteration 8 (LuminaHR – Formations IA: assignations + certificat PDF + auto-onboarding). Backend: 9 nouveaux tests pytest dans /app/backend/tests/test_iteration8.py (GET assignments + champs calculés passed/passed_score/overdue, POST upsert idempotent, DELETE 404 sur id inexistant, POST reminders/run RBAC employee=403 + admin=200, GET /api/trainings côté Julie inclut my_assignment{due_date:2026-08-05}) → 9/9 verts. Régression: backend_test.py (30) + test_iteration7.py (15) → 45/45 verts. Total = 54/54 backend. Frontend testé sur URL publique: (a) ADMIN – éditeur Formation Proxim, onglet Assignations, ligne Julie 'Réussie – 100%' due 2026-08-05, ajout Karim Benali due 2026-07-01 → badge 'En retard' rouge, send-reminders-button déclenche toast, delete Karim OK, Julie reste; (b) EMPLOYÉ Julie – carte sans puce échéance, viewer affiche already-passed-banner + download-past-certificate-button, clic télécharge 'certificat-formation-d-integration-proxim-julie-gagnon.pdf', 0 erreur console; (c) EXAMEN – 14 questions répondues correctement (correct_index récupérés via API admin), score 100%, verdict 'Examen réussi — félicitations !', download-certificate-button télécharge le PDF, toast 'Étape « Formation » cochée automatiquement dans votre onboarding (1).' visible; (d) cloche Julie ouvre sans erreur, aucune notif formation (attendu). 2 BUGS UI critiques trouvés et fixés (voir 'updated_files' + action_items pour visibilité).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "TrainingEditor.tsx (l.145-149 TABS)", "issue": "L'entrée { key: 'assignments', label: 'Assignations' } manquait dans le tableau TABS — l'onglet Assignations était totalement inaccessible bien que tout le panneau, les handlers (loadAssignments/submitAssignment/removeAssignment/sendReminders) et les data-testid soient déjà codés en aval. Fix: ajouté entre 'exam' et 'results'.", "selector": "[data-testid=\"editor-tab-assignments\"]", "priority": "HIGH"},
+      {"component": "TrainingViewer.tsx (l.212-216)", "issue": "Le bouton download-past-certificate-button n'était pas rendu dans la bannière 'déjà réussi', bien que le handler downloadPastCertificate soit défini. Fix: wrappé la bannière dans un flex + ajouté le Button (variant outline, icône Download) qui appelle downloadPastCertificate.", "selector": "[data-testid=\"download-past-certificate-button\"]", "priority": "HIGH"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration8.py",
+    "/app/backend/tests/test_iteration7.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/iter8.xml",
+    "/app/test_reports/pytest/iter8_regression.xml"
+  ],
+  "action_items": [
+    "Confirmer les 2 fixes UI (TABS assignments + bouton certificat bannière) — il s'agissait d'oublis d'intégration du côté frontend, tout le backend et les handlers étaient déjà codés.",
+    "Facultatif: exposer un bouton dédié 'Télécharger le certificat' dans le tableau Assignations côté admin (feature bonus non demandée)."
+  ],
+  "critical_code_review_comments": [
+    "TrainingViewer.tsx: downloadPastCertificate fait 2 appels réseau (GET /attempts puis génération PDF). Envisager de mémoriser best_attempt dans training.my_assignment pour éviter le GET (mineur, latence acceptable).",
+    "server.py:1160: overdue est calculé côté serveur mais la comparaison de dates ISO (a.due_date < today) suppose YYYY-MM-DD strict — Pydantic ne valide pas le format de due_date à l'entrée. Ajouter un validator pour rejeter les strings hors format ISO éviterait un état incohérent silencieux.",
+    "server.py:1140: POST /trainings/assignments/reminders/run n'exige pas admin/superadmin explicitement — le RBAC dépend uniquement de send_training_reminders qui parcourt TOUTES les pharmacies. Un admin pharmacie X peut donc déclencher les relances des employés de pharmacie Y. Restreindre à sa propre pharmacy_id (ou reserver au superadmin) est recommandé."
+  ],
+  "updated_files": [
+    "/app/frontend/src/components/modules/TrainingEditor.tsx",
+    "/app/frontend/src/components/modules/TrainingViewer.tsx",
+    "/app/backend/tests/test_iteration8.py"
+  ],
+  "success_rate": {"backend": "100% (54/54 — 9 iter8 + 15 iter7 + 30 legacy)", "frontend": "100% après 2 fixes UI in-scope (missing tab entry + missing button wiring)"},
+  "seed_data_creation": "Aucune donnée persistée: assignation TEST_karim créée puis supprimée dans les tests pytest; assignation UI de Karim créée puis supprimée; assignation démo de Julie (due 2026-08-05) préservée; formation démo 5d2a444d-… intacte. Julie a soumis un examen supplémentaire à 100% via l'UI (attempt persisté, non-destructif).",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "admin@luminahr.ca/admin123, julie@luminahr.ca/employe123, charlesjeanbourget@gmail.com/Lumina-Owner!5127 — depuis /app/memory/test_credentials.md",
+  "context_for_next_testing_agent": "Iteration 8 verte après 2 fixes UI in-scope (voir updated_files). Les nouveaux endpoints /api/trainings/{id}/assignments (GET/POST/DELETE) et /api/trainings/assignments/reminders/run sont pleinement couverts par test_iteration8.py. Astuce pour la validation certificate: récupérer correct_index via GET /api/trainings/{id} avec un token admin pour construire une soumission passante côté employé (utilisé ici). Le toast onboarding apparaît côté sonner et disparaît après ~3s — capturer via document.body.innerText immédiatement après submit. Resend en mode test: sent=0 quand cible ≠ charlesjeanbourget@gmail.com est attendu (voir logs backend).",
+  "rca_of_the_issue": "Bug 1 (TABS): omission dans TrainingEditor.tsx — le développeur a codé le panneau, les handlers et les data-testid mais a oublié d'ajouter l'entrée dans le tableau TABS (rendu par TABS.map). Bug 2 (bouton bannière): omission similaire dans TrainingViewer.tsx — la fonction downloadPastCertificate est définie et l'import du data-testid attendu par le test est absent car aucun Button ne l'utilise. Les deux sont des oublis d'intégration triviaux (1-2 lignes chacun), pas des défauts de logique métier. Backend et pipeline complets restent verts."
+}

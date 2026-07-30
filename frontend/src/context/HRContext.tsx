@@ -6,7 +6,7 @@ import {
 } from '@/types';
 import { SEED_STATE } from '@/context/seedData';
 
-const STATE_KEY = 'luminahr_state_v3';
+const STATE_KEY = 'luminahr_state_v4';
 
 export const uid = (): string => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 

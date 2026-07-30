@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import axios from 'axios';
 import { useAuth } from '@/context/AuthContext';
-import { Training, AttemptResult } from '@/types';
+import { useHR } from '@/context/HRContext';
+import { Training, AttemptResult, TrainingAttempt } from '@/types';
+import { downloadCertificate } from '@/lib/certificate';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, GraduationCap, CheckCircle2, XCircle, Award, RotateCcw } from 'lucide-react';
+import { ArrowLeft, GraduationCap, CheckCircle2, XCircle, Award, RotateCcw, Download, CalendarClock } from 'lucide-react';
 import { toast } from 'sonner';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -17,11 +19,52 @@ interface Props {
 }
 
 export default function TrainingViewer({ training, onBack }: Props): JSX.Element {
-  const { token } = useAuth();
+  const { token, currentUser } = useAuth();
+  const { state, toggleOnboardingItem } = useHR();
   const [mode, setMode] = useState<Mode>('read');
   const [answers, setAnswers] = useState<number[]>([]);
   const [result, setResult] = useState<AttemptResult | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  const pharmacyName = state.pharmacies.find((p) => p.id === currentUser?.pharmacyId)?.name;
+
+  const makeCertificate = (score: number, dateStr: string): void => {
+    downloadCertificate({
+      employeeName: currentUser?.name ?? '',
+      trainingTitle: training.title,
+      score,
+      passingScore: training.passing_score,
+      date: dateStr,
+      pharmacyName,
+    });
+  };
+
+  const downloadPastCertificate = async (): Promise<void> => {
+    try {
+      const res = await axios.get<TrainingAttempt[]>(`${API}/trainings/${training.id}/attempts`, {
+        headers: { Authorization: `Bearer ${token ?? ''}` },
+      });
+      const best = res.data.filter((a) => a.passed).sort((a, b) => b.score - a.score)[0];
+      if (!best) {
+        toast.error('Aucune tentative réussie trouvée.');
+        return;
+      }
+      makeCertificate(best.score, best.completed_at.slice(0, 10));
+    } catch {
+      toast.error('Impossible de générer le certificat.');
+    }
+  };
+
+  const checkOnboarding = (): void => {
+    if (!currentUser?.employeeId) return;
+    const items = state.onboardingItems.filter(
+      (o) => o.employeeId === currentUser.employeeId && o.category === 'Formation' && !o.done
+    );
+    items.forEach((o) => toggleOnboardingItem(o.id));
+    if (items.length > 0) {
+      toast.success(`Étape « Formation » cochée automatiquement dans votre onboarding (${items.length}).`);
+    }
+  };
 
   const startExam = (): void => {
     setAnswers(new Array(training.exam.length).fill(-1));
@@ -41,6 +84,7 @@ export default function TrainingViewer({ training, onBack }: Props): JSX.Element
       );
       setResult(res.data);
       setMode('result');
+      if (res.data.passed) checkOnboarding();
     } catch {
       toast.error('Impossible de soumettre l\'examen.');
     } finally {
@@ -131,6 +175,15 @@ export default function TrainingViewer({ training, onBack }: Props): JSX.Element
           })}
         </div>
         <div className="flex gap-3">
+          {result.passed && (
+            <Button
+              data-testid="download-certificate-button"
+              onClick={() => makeCertificate(result.score, new Date().toISOString().slice(0, 10))}
+              className="rounded-full bg-emerald-600 hover:bg-emerald-700"
+            >
+              <Download className="w-4 h-4 mr-1" /> Télécharger mon certificat
+            </Button>
+          )}
           {!result.passed && (
             <Button data-testid="retake-exam-button" onClick={startExam} className="rounded-full bg-emerald-600 hover:bg-emerald-700">
               <RotateCcw className="w-4 h-4 mr-1" /> Reprendre l'examen
@@ -157,9 +210,19 @@ export default function TrainingViewer({ training, onBack }: Props): JSX.Element
         </div>
       </div>
       {training.my_passed && (
-        <p data-testid="already-passed-banner" className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2.5 mt-4 inline-flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4" /> Vous avez déjà réussi cet examen ({training.my_best_score} %).
-        </p>
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <p data-testid="already-passed-banner" className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2.5 inline-flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4" /> Vous avez déjà réussi cet examen ({training.my_best_score} %).
+          </p>
+          <Button
+            data-testid="download-past-certificate-button"
+            size="sm" variant="outline"
+            onClick={() => void downloadPastCertificate()}
+            className="rounded-full text-xs"
+          >
+            <Download className="w-3.5 h-3.5 mr-1" /> Télécharger mon certificat
+          </Button>
+        </div>
       )}
       <Accordion type="single" collapsible className="mt-6 space-y-3">
         {training.sections.map((s, i) => (
