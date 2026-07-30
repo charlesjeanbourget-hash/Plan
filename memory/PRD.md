@@ -54,6 +54,16 @@ admin@luminahr.ca/admin123 · julie@luminahr.ca/employe123 · super@luminahr.ca/
 - **Filtres succursales** : Horaires, Paie (totaux recalculés) et Dossiers employés.
 - **Resend ACTIVÉ** : clé réelle dans backend/.env, envoi de rapport testé avec succès vers charlesjeanbourget@gmail.com. Attention mode test Resend : livraison limitée à l'adresse du propriétaire du compte tant qu'aucun domaine n'est vérifié.
 
+## Itération 4 (30 juin 2026) — testée à 100% (iteration_5.json : backend 26/26, frontend tous flux critiques)
+- **Gestion des comptes (superadmin)** : module SuperadminUsers + routes /api/admin/users — créer un compte (mot de passe temporaire 15 car. affiché en modal), réinitialiser le mot de passe (support à distance), suspendre/réactiver (login 403 « Compte suspendu »), supprimer. Garde-fous : impossible de se suspendre/supprimer soi-même. Audit loggé.
+- **Rappels licences 30 jours** : job quotidien 8h30 (America/Montreal) — courriel Resend envoyé directement à employee_email si expiration ≤30 j, dédupliqué par expiry_date (reminder_sent_for). Déclenchement manuel POST /api/licenses/reminders/run → {sent: N}.
+- **Relevés PDF historiques** : sélecteur de périodes de paie passées dans Paie (admin) et Mon espace (employé), cumulatifs annuels (YTD) réels calculés sur les périodes de l'année.
+- Fix : import `Branch` manquant dans HRContext.tsx (tsc --noEmit propre).
+- Mots de passe temporaires superadmin communiqués à l'utilisateur.
+
+## Backlog technique (suggestions revue de code, non bloquant)
+- Throttle sur POST /api/licenses/reminders/run (1 exécution/min) et plafond de reprises Resend en cas d'échec transitoire (éviter renvois en boucle).
+
 ## Notes techniques
 - Ne jamais recréer `jsconfig.json` (conflit CRA avec tsconfig.json)
 - npm interdit — yarn uniquement
