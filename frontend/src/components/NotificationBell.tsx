@@ -2,9 +2,9 @@ import { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import { useAuth } from '@/context/AuthContext';
 import { useHR } from '@/context/HRContext';
-import { ModuleKey, LicenseReportItem, Training } from '@/types';
+import { ModuleKey, LicenseReportItem, Training, ScheduleProposal } from '@/types';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Bell, TreePalm, RefreshCw, BadgeCheck, GraduationCap, CheckCheck } from 'lucide-react';
+import { Bell, TreePalm, RefreshCw, BadgeCheck, GraduationCap, CheckCheck, CalendarCheck } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -14,10 +14,10 @@ interface Notif {
   detail: string;
   module: ModuleKey;
   tone: 'amber' | 'red' | 'sky' | 'emerald';
-  icon: 'leave' | 'swap' | 'license' | 'training';
+  icon: 'leave' | 'swap' | 'license' | 'training' | 'schedule';
 }
 
-const ICONS = { leave: TreePalm, swap: RefreshCw, license: BadgeCheck, training: GraduationCap } as const;
+const ICONS = { leave: TreePalm, swap: RefreshCw, license: BadgeCheck, training: GraduationCap, schedule: CalendarCheck } as const;
 
 const TONES: Record<Notif['tone'], string> = {
   amber: 'bg-amber-100 text-amber-700',
@@ -31,6 +31,7 @@ export const NotificationBell = ({ onNavigate }: { onNavigate: (m: ModuleKey) =>
   const { state, getEmployee } = useHR();
   const [licenseItems, setLicenseItems] = useState<LicenseReportItem[]>([]);
   const [trainings, setTrainings] = useState<Training[]>([]);
+  const [proposals, setProposals] = useState<ScheduleProposal[]>([]);
   const [open, setOpen] = useState(false);
   const readKey = `luminahr_notif_read_v1_${currentUser?.id ?? ''}`;
   const [readIds, setReadIds] = useState<string[]>(() => {
@@ -45,6 +46,9 @@ export const NotificationBell = ({ onNavigate }: { onNavigate: (m: ModuleKey) =>
       axios.get<Training[]>(`${API}/trainings`, { headers })
         .then((r) => setTrainings(r.data))
         .catch(() => undefined);
+      axios.get<ScheduleProposal[]>(`${API}/schedule/proposals`, { headers })
+        .then((r) => setProposals(r.data))
+        .catch(() => undefined);
     } else {
       axios.get<{ items: LicenseReportItem[] }>(`${API}/licenses/report`, { headers })
         .then((r) => setLicenseItems(r.data.items))
@@ -57,6 +61,16 @@ export const NotificationBell = ({ onNavigate }: { onNavigate: (m: ModuleKey) =>
     const list: Notif[] = [];
     if (currentUser.role === 'employee') {
       const empId = currentUser.employeeId;
+      proposals
+        .filter((p) => p.employee_approvals[empId ?? '']?.status === 'pending' && !p.deadline_passed)
+        .forEach((p) => list.push({
+          id: `proposal-${p.id}`,
+          title: 'Horaire à approuver',
+          detail: `Semaine du ${p.week_start} — répondez avant le ${new Date(p.approval_deadline).toLocaleString('fr-CA', { dateStyle: 'short', timeStyle: 'short' })}`,
+          module: 'myspace',
+          tone: 'amber',
+          icon: 'schedule',
+        }));
       state.leaveRequests
         .filter((l) => l.employeeId === empId && l.status !== 'En attente')
         .forEach((l) => list.push({
@@ -128,7 +142,7 @@ export const NotificationBell = ({ onNavigate }: { onNavigate: (m: ModuleKey) =>
       }));
     }
     return list;
-  }, [currentUser, state, trainings, licenseItems, getEmployee]);
+  }, [currentUser, state, trainings, licenseItems, proposals, getEmployee]);
 
   const unreadCount = notifs.filter((n) => !readIds.includes(n.id)).length;
 

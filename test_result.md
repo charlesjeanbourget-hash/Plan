@@ -198,3 +198,24 @@ frontend:
 agent_communication:
   - agent: "main"
     message: "Backend teste par curl (vert). STATE_KEY localStorage bumpe v3->v4 avec nouvel item onboarding o8 (e2/Julie, categorie Formation, non fait) pour tester l'auto-coche. Julie a une assignation demo due 2026-08-05 sur la formation Proxim. tsc propre."
+
+## Iteration 7 (main agent) — profils employes + punch + horaires IA double approbation
+user_problem_statement: "1) Profils employes (dispos par jour, heures min/max, restrictions, capacites/taches, roles - listes completes pharmacie) modifiables par admin ET employe, stockes MongoDB, utilises par l'IA d'horaires. 2) Generation d'horaire par IA: admin ET employes doivent approuver avec delai maximal (approbation tacite au-dela). 3) Punch avec NIP personnel (borne kiosque publique + Mon espace) + saisie manuelle admin; seules heures punchees/manuelles comptent pour la paie. 4) Periode de paie configurable (hebdo/2 semaines) par l'admin."
+backend:
+  - task: "Profils (/api/profiles CRUD + /punch-code), punch (/api/punch kiosque public, /punch/me, /punches CRUD+summary), /api/pay-settings, horaires IA (/api/schedule/generate + proposals respond/decision/apply/delete)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Teste par curl E2E: profil e2 sauvegarde, NIP genere (7068), punch in/out par code, NIP inconnu 404, saisie manuelle, summary (3.5h), pay-settings biweekly, generation IA reelle (16 quarts respectant le profil de Julie: pas de mercredi/soir/weekend, 24h dans fourchette 20-32h), double approbation admin+employe, apply bloque 400 tant que tous les employes n'ont pas approuve (fix teste)."
+frontend:
+  - task: "ProfileEditor (MySpace employe + EmployeeDossier admin avec NIP), PunchKiosk (vue publique), MyPunchCard, MyProposalsPanel, ScheduleProposals (admin), PunchHoursPanel (Paie), NotificationBell horaires"
+    implemented: true
+    working: "NA"
+    files: "/app/frontend/src/components/{ProfileEditor,PunchKiosk,MyPunchCard,MyProposalsPanel,ScheduleProposals,PunchHoursPanel}.tsx"
+    needs_retesting: true
+agent_communication:
+  - agent: "main"
+    message: "Smoke test frontend OK (kiosque, carte punch, propositions, profil dans Mon espace). Donnees demo: proposition cb21ac33 semaine 2026-08-03 (admin approuve, Julie approuve, e1/e3 pending, deadline 48h), NIP e2=7068, punch demo + 3.5h manuel aujourd'hui. tsc propre."

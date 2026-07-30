@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Button } from '@/components/ui/button';
 import { Wallet, TrendingDown, Banknote, Download } from 'lucide-react';
 import { downloadPayStub } from '@/lib/paystub';
+import { PunchHoursPanel } from '@/components/PunchHoursPanel';
 import { toast } from 'sonner';
 
 const PAYROLL_STATUSES: PayrollStatus[] = ['En préparation', 'Validée', 'Payée'];
@@ -35,6 +36,7 @@ export default function PayrollModule(): JSX.Element {
   return (
     <div data-testid="payroll-module">
       <ModuleHeader title="Paie" subtitle="Historique des périodes de paie avec cumulatifs annuels." />
+      <PunchHoursPanel />
       <div className="mb-6 flex flex-wrap gap-3">
         <Select value={periodFilter} onValueChange={setPeriodFilter}>
           <SelectTrigger data-testid="payroll-period-filter" className="w-72">

@@ -10,6 +10,9 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { CalendarClock, Download, TreePalm, ArrowLeftRight, Plus } from 'lucide-react';
 import { downloadPayStub } from '@/lib/paystub';
+import { MyPunchCard } from '@/components/MyPunchCard';
+import { MyProposalsPanel } from '@/components/MyProposalsPanel';
+import { ProfileEditor } from '@/components/ProfileEditor';
 import { toast } from 'sonner';
 
 const LEAVE_TYPES: LeaveType[] = ['Vacances', 'Maladie', 'Personnel', 'Formation'];
@@ -72,6 +75,10 @@ export default function MySpaceModule(): JSX.Element {
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="lg:col-span-2">
+          <MyPunchCard />
+        </div>
+        <MyProposalsPanel />
         <div className="bg-white rounded-xl border border-slate-200 p-7" data-testid="myspace-shifts">
           <div className="flex items-center justify-between mb-5">
             <h2 className="font-heading text-base font-bold text-slate-900 inline-flex items-center gap-2">
@@ -156,6 +163,10 @@ export default function MySpaceModule(): JSX.Element {
             ))}
             {myLeaves.length === 0 && <p className="text-sm text-slate-500">Aucune demande de congé.</p>}
           </div>
+        </div>
+
+        <div className="lg:col-span-2">
+          <ProfileEditor employeeId={me.id} employeeName={`${me.firstName} ${me.lastName}`} canManageCode={false} />
         </div>
       </div>
 

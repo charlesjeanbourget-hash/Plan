@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ChevronLeft, ChevronRight, Plus, X, ArrowLeftRight, Check } from 'lucide-react';
+import { ScheduleProposals } from '@/components/ScheduleProposals';
 import { toast } from 'sonner';
 
 const DAY_LABELS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
@@ -71,6 +72,7 @@ export default function SchedulingModule(): JSX.Element {
           </Button>
         }
       />
+      {isAdmin && <ScheduleProposals />}
       {isAdmin && (
         <div className="bg-white rounded-xl border border-slate-200 p-6 mb-6" data-testid="swap-requests-panel">
           <h2 className="font-heading text-base font-bold text-slate-900 mb-4 inline-flex items-center gap-2">

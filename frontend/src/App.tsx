@@ -3,6 +3,7 @@ import '@/App.css';
 import { View, ModuleKey } from '@/types';
 import { useAuth } from '@/context/AuthContext';
 import LandingPage from '@/components/LandingPage';
+import PunchKiosk from '@/components/PunchKiosk';
 import LoginPage from '@/components/LoginPage';
 import PublicCareers from '@/components/PublicCareers';
 import AgencyPortal from '@/components/AgencyPortal';
@@ -80,6 +81,8 @@ function App(): JSX.Element {
         <PublicCareers onNavigate={navigate} />
       ) : view === 'agency' ? (
         <AgencyPortal onNavigate={navigate} />
+      ) : view === 'punch' ? (
+        <PunchKiosk onNavigate={navigate} />
       ) : (
         <LandingPage onNavigate={navigate} />
       )}

@@ -16,13 +16,22 @@ export default function LandingPage({ onNavigate }: Props): JSX.Element {
             </div>
             <span className="font-heading font-800 font-extrabold text-xl text-slate-900">LuminaHR</span>
           </div>
-          <button
-            data-testid="header-login-button"
-            onClick={() => onNavigate('login')}
-            className="px-5 py-2 rounded-full bg-slate-900 text-white text-sm font-semibold hover:bg-emerald-700 transition-colors"
-          >
-            Connexion
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              data-testid="header-punch-button"
+              onClick={() => onNavigate('punch')}
+              className="px-5 py-2 rounded-full border border-slate-300 text-slate-700 text-sm font-semibold hover:border-emerald-500 hover:text-emerald-700 transition-colors"
+            >
+              Borne de punch
+            </button>
+            <button
+              data-testid="header-login-button"
+              onClick={() => onNavigate('login')}
+              className="px-5 py-2 rounded-full bg-slate-900 text-white text-sm font-semibold hover:bg-emerald-700 transition-colors"
+            >
+              Connexion
+            </button>
+          </div>
         </div>
       </header>
 
@@ -147,6 +156,7 @@ export default function LandingPage({ onNavigate }: Props): JSX.Element {
         <div className="flex gap-6 text-sm text-slate-500">
           <button data-testid="footer-careers-link" onClick={() => onNavigate('careers')} className="hover:text-emerald-700 transition-colors">Carrières</button>
           <button data-testid="footer-agency-link" onClick={() => onNavigate('agency')} className="hover:text-emerald-700 transition-colors">Agences</button>
+          <button data-testid="footer-punch-link" onClick={() => onNavigate('punch')} className="hover:text-emerald-700 transition-colors">Borne de punch</button>
           <button data-testid="footer-login-link" onClick={() => onNavigate('login')} className="hover:text-emerald-700 transition-colors">Connexion</button>
         </div>
       </footer>

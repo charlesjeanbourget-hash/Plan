@@ -11,6 +11,7 @@ import uuid
 import asyncio
 import secrets
 import requests
+from zoneinfo import ZoneInfo
 from pypdf import PdfReader
 import resend
 import bcrypt
@@ -1267,6 +1268,553 @@ async def send_training_reminders(pharmacy_id: Optional[str] = None) -> int:
 async def training_reminders_job():
     sent = await send_training_reminders()
     logger.info(f"Relances formations quotidiennes : {sent} envoyée(s)")
+
+
+# ==================== Profils employés (disponibilités, rôles, capacités) ====================
+
+MONTREAL_TZ = ZoneInfo("America/Montreal")
+WEEK_DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+
+
+def default_availability() -> dict:
+    return {d: {"available": True, "start": "08:00", "end": "21:00"} for d in WEEK_DAYS}
+
+
+class ProfileIn(BaseModel):
+    employee_name: Optional[str] = None
+    roles: Optional[list[str]] = None
+    capacities: Optional[list[str]] = None
+    restrictions: Optional[list[str]] = None
+    min_hours_week: Optional[int] = None
+    max_hours_week: Optional[int] = None
+    availability: Optional[dict] = None
+    notes: Optional[str] = None
+
+
+async def get_or_create_profile(pharmacy_id: str, employee_id: str, employee_name: str = "") -> dict:
+    doc = await db.employee_profiles.find_one({"pharmacy_id": pharmacy_id, "employee_id": employee_id}, {"_id": 0})
+    if doc:
+        return doc
+    doc = {
+        "id": str(uuid.uuid4()), "pharmacy_id": pharmacy_id, "employee_id": employee_id,
+        "employee_name": employee_name, "roles": [], "capacities": [], "restrictions": [],
+        "min_hours_week": 0, "max_hours_week": 40, "availability": default_availability(),
+        "punch_code": None, "notes": "",
+        "updated_at": datetime.now(timezone.utc).isoformat(), "updated_by": "",
+    }
+    await db.employee_profiles.insert_one({**doc})
+    return doc
+
+
+def check_profile_access(user: dict, employee_id: str) -> str:
+    if user["role"] in ("admin", "superadmin"):
+        pid = user.get("pharmacy_id") or ""
+        if not pid and user["role"] == "admin":
+            raise HTTPException(status_code=403, detail="Aucune pharmacie associée.")
+        return pid or "ph1"
+    if user.get("employee_id") != employee_id:
+        raise HTTPException(status_code=403, detail="Vous ne pouvez modifier que votre propre profil.")
+    return user.get("pharmacy_id") or ""
+
+
+@api_router.get("/profiles")
+async def list_profiles(user: dict = Depends(get_current_user)):
+    if user["role"] in ("admin", "superadmin"):
+        pid = user.get("pharmacy_id") or ""
+        query = {"pharmacy_id": pid} if pid else {}
+        return await db.employee_profiles.find(query, {"_id": 0}).to_list(1000)
+    if not user.get("employee_id"):
+        return []
+    return [await get_or_create_profile(user.get("pharmacy_id") or "", user["employee_id"], user["name"])]
+
+
+@api_router.get("/profiles/{employee_id}")
+async def get_profile(employee_id: str, employee_name: str = Query(""), user: dict = Depends(get_current_user)):
+    pid = check_profile_access(user, employee_id)
+    return await get_or_create_profile(pid, employee_id, employee_name or "")
+
+
+@api_router.put("/profiles/{employee_id}")
+async def update_profile(employee_id: str, payload: ProfileIn, user: dict = Depends(get_current_user)):
+    pid = check_profile_access(user, employee_id)
+    doc = await get_or_create_profile(pid, employee_id, payload.employee_name or "")
+    patch = {k: v for k, v in payload.model_dump().items() if v is not None}
+    if "availability" in patch:
+        avail = {}
+        for d in WEEK_DAYS:
+            day = patch["availability"].get(d) or {}
+            avail[d] = {"available": bool(day.get("available", True)),
+                        "start": str(day.get("start", "08:00")), "end": str(day.get("end", "21:00"))}
+        patch["availability"] = avail
+    patch["updated_at"] = datetime.now(timezone.utc).isoformat()
+    patch["updated_by"] = user["email"]
+    await db.employee_profiles.update_one({"id": doc["id"]}, {"$set": patch})
+    await log_audit(user["email"], user["role"], "MODIFICATION_PROFIL", "profil", employee_id,
+                    f"Profil de {patch.get('employee_name', doc.get('employee_name', employee_id))} mis à jour", pid)
+    return {**doc, **patch}
+
+
+@api_router.post("/profiles/{employee_id}/punch-code")
+async def generate_punch_code(employee_id: str, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    doc = await get_or_create_profile(pid, employee_id)
+    for _ in range(50):
+        code = f"{secrets.randbelow(10000):04d}"
+        exists = await db.employee_profiles.find_one({"punch_code": code})
+        if not exists:
+            break
+    else:
+        raise HTTPException(status_code=500, detail="Impossible de générer un NIP unique.")
+    await db.employee_profiles.update_one({"id": doc["id"]}, {"$set": {"punch_code": code}})
+    await log_audit(principal["email"], principal["role"], "GENERATION_NIP", "profil", employee_id,
+                    f"Nouveau NIP de punch généré pour {doc.get('employee_name') or employee_id}", pid)
+    return {"punch_code": code}
+
+
+# ==================== Punch des heures ====================
+
+class PunchCodeIn(BaseModel):
+    code: str
+
+
+async def do_punch(pharmacy_id: str, employee_id: str, employee_name: str, source: str, actor: str) -> dict:
+    now = datetime.now(timezone.utc)
+    open_p = await db.punches.find_one(
+        {"pharmacy_id": pharmacy_id, "employee_id": employee_id, "punch_out": None}, {"_id": 0})
+    if open_p:
+        await db.punches.update_one({"id": open_p["id"]}, {"$set": {"punch_out": now.isoformat()}})
+        duration = round((now - datetime.fromisoformat(open_p["punch_in"])).total_seconds() / 3600, 2)
+        await log_audit(actor, "system" if source == "punch" else "admin", "PUNCH_SORTIE", "punch", open_p["id"],
+                        f"{employee_name} — sortie ({duration} h)", pharmacy_id)
+        return {"action": "out", "employee_name": employee_name, "time": now.isoformat(),
+                "punch_in": open_p["punch_in"], "duration_hours": duration}
+    doc = {
+        "id": str(uuid.uuid4()), "pharmacy_id": pharmacy_id, "employee_id": employee_id,
+        "employee_name": employee_name, "date": now.astimezone(MONTREAL_TZ).date().isoformat(),
+        "punch_in": now.isoformat(), "punch_out": None, "source": source,
+        "created_by": actor, "note": "",
+    }
+    await db.punches.insert_one({**doc})
+    await log_audit(actor, "system" if source == "punch" else "admin", "PUNCH_ENTREE", "punch", doc["id"],
+                    f"{employee_name} — entrée", pharmacy_id)
+    return {"action": "in", "employee_name": employee_name, "time": now.isoformat()}
+
+
+@api_router.post("/punch")
+async def punch_by_code(payload: PunchCodeIn):
+    code = payload.code.strip()
+    if len(code) != 4 or not code.isdigit():
+        raise HTTPException(status_code=400, detail="NIP invalide (4 chiffres).")
+    prof = await db.employee_profiles.find_one({"punch_code": code}, {"_id": 0})
+    if not prof:
+        raise HTTPException(status_code=404, detail="NIP inconnu. Vérifiez votre code ou contactez l'administration.")
+    return await do_punch(prof["pharmacy_id"], prof["employee_id"], prof.get("employee_name", ""), "punch", "borne")
+
+
+@api_router.post("/punch/me")
+async def punch_me(user: dict = Depends(get_current_user)):
+    if not user.get("employee_id"):
+        raise HTTPException(status_code=400, detail="Aucun dossier employé associé à votre compte.")
+    return await do_punch(user.get("pharmacy_id") or "", user["employee_id"], user["name"], "punch", user["email"])
+
+
+@api_router.get("/punch/me/status")
+async def punch_me_status(user: dict = Depends(get_current_user)):
+    if not user.get("employee_id"):
+        return {"open": None, "today_hours": 0, "today_entries": []}
+    pid = user.get("pharmacy_id") or ""
+    open_p = await db.punches.find_one(
+        {"pharmacy_id": pid, "employee_id": user["employee_id"], "punch_out": None}, {"_id": 0})
+    today = datetime.now(timezone.utc).astimezone(MONTREAL_TZ).date().isoformat()
+    entries = await db.punches.find(
+        {"pharmacy_id": pid, "employee_id": user["employee_id"], "date": today}, {"_id": 0}).sort("punch_in", 1).to_list(50)
+    hours = sum(
+        (datetime.fromisoformat(p["punch_out"]) - datetime.fromisoformat(p["punch_in"])).total_seconds() / 3600
+        for p in entries if p.get("punch_out"))
+    return {"open": open_p, "today_hours": round(hours, 2), "today_entries": entries}
+
+
+class ManualPunchIn(BaseModel):
+    employee_id: str
+    employee_name: str
+    date: str
+    start_time: str
+    end_time: str
+    note: str = ""
+
+
+def local_iso(date_str: str, time_str: str) -> str:
+    try:
+        return datetime.fromisoformat(f"{date_str}T{time_str}:00").replace(tzinfo=MONTREAL_TZ).isoformat()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Date ou heure invalide.")
+
+
+@api_router.get("/punches")
+async def list_punches(start: str = Query(...), end: str = Query(...),
+                       employee_id: Optional[str] = Query(None), principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    query: dict = {"pharmacy_id": pid, "date": {"$gte": start, "$lte": end}}
+    if employee_id:
+        query["employee_id"] = employee_id
+    return await db.punches.find(query, {"_id": 0}).sort([("date", -1), ("punch_in", -1)]).to_list(2000)
+
+
+@api_router.post("/punches/manual")
+async def add_manual_punch(payload: ManualPunchIn, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    p_in, p_out = local_iso(payload.date, payload.start_time), local_iso(payload.date, payload.end_time)
+    if p_out <= p_in:
+        raise HTTPException(status_code=400, detail="L'heure de fin doit être après l'heure de début.")
+    doc = {
+        "id": str(uuid.uuid4()), "pharmacy_id": pid, "employee_id": payload.employee_id,
+        "employee_name": payload.employee_name, "date": payload.date,
+        "punch_in": p_in, "punch_out": p_out, "source": "manual",
+        "created_by": principal["email"], "note": payload.note,
+    }
+    await db.punches.insert_one({**doc})
+    await log_audit(principal["email"], principal["role"], "SAISIE_HEURES_MANUELLE", "punch", doc["id"],
+                    f"{payload.employee_name} — {payload.date} {payload.start_time}-{payload.end_time} ({payload.note or 'sans note'})", pid)
+    return doc
+
+
+class PunchUpdateIn(BaseModel):
+    date: Optional[str] = None
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    note: Optional[str] = None
+
+
+@api_router.put("/punches/{punch_id}")
+async def update_punch(punch_id: str, payload: PunchUpdateIn, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    doc = await db.punches.find_one({"id": punch_id, "pharmacy_id": pid}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Entrée introuvable.")
+    d = payload.date or doc["date"]
+    patch: dict = {"date": d}
+    if payload.start_time:
+        patch["punch_in"] = local_iso(d, payload.start_time)
+    if payload.end_time:
+        patch["punch_out"] = local_iso(d, payload.end_time)
+    if payload.note is not None:
+        patch["note"] = payload.note
+    if patch.get("punch_out") and patch.get("punch_in") and patch["punch_out"] <= patch["punch_in"]:
+        raise HTTPException(status_code=400, detail="L'heure de fin doit être après l'heure de début.")
+    await db.punches.update_one({"id": punch_id}, {"$set": patch})
+    await log_audit(principal["email"], principal["role"], "CORRECTION_HEURES", "punch", punch_id,
+                    f"{doc['employee_name']} — entrée corrigée ({d})", pid)
+    return {**doc, **patch}
+
+
+@api_router.delete("/punches/{punch_id}")
+async def delete_punch(punch_id: str, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    doc = await db.punches.find_one({"id": punch_id, "pharmacy_id": pid}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Entrée introuvable.")
+    await db.punches.delete_one({"id": punch_id})
+    await log_audit(principal["email"], principal["role"], "SUPPRESSION_HEURES", "punch", punch_id,
+                    f"{doc['employee_name']} — entrée du {doc['date']} supprimée", pid)
+    return {"status": "supprimée"}
+
+
+@api_router.get("/punches/summary")
+async def punches_summary(start: str = Query(...), end: str = Query(...), principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    docs = await db.punches.find(
+        {"pharmacy_id": pid, "date": {"$gte": start, "$lte": end}}, {"_id": 0}).to_list(5000)
+    rows: dict = {}
+    for p in docs:
+        r = rows.setdefault(p["employee_id"], {
+            "employee_id": p["employee_id"], "employee_name": p["employee_name"],
+            "punched_hours": 0.0, "manual_hours": 0.0, "total_hours": 0.0, "entries": 0, "open_entries": 0})
+        if not p.get("punch_out"):
+            r["open_entries"] += 1
+            continue
+        h = (datetime.fromisoformat(p["punch_out"]) - datetime.fromisoformat(p["punch_in"])).total_seconds() / 3600
+        r["entries"] += 1
+        r["punched_hours" if p["source"] == "punch" else "manual_hours"] += h
+        r["total_hours"] += h
+    for r in rows.values():
+        for k in ("punched_hours", "manual_hours", "total_hours"):
+            r[k] = round(r[k], 2)
+    return sorted(rows.values(), key=lambda r: r["employee_name"])
+
+
+# ==================== Paramètres de période de paie ====================
+
+class PaySettingsIn(BaseModel):
+    period_type: str
+    anchor: str
+
+
+@api_router.get("/pay-settings")
+async def get_pay_settings(principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    doc = await db.pay_settings.find_one({"pharmacy_id": pid}, {"_id": 0})
+    return doc or {"pharmacy_id": pid, "period_type": "biweekly", "anchor": "2026-06-01"}
+
+
+@api_router.post("/pay-settings")
+async def save_pay_settings(payload: PaySettingsIn, principal: dict = Depends(get_principal)):
+    if payload.period_type not in ("weekly", "biweekly"):
+        raise HTTPException(status_code=400, detail="Type de période invalide.")
+    try:
+        date.fromisoformat(payload.anchor)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Date d'ancrage invalide.")
+    pid = principal["pharmacy_id"] or "ph1"
+    doc = {"pharmacy_id": pid, "period_type": payload.period_type, "anchor": payload.anchor}
+    await db.pay_settings.update_one({"pharmacy_id": pid}, {"$set": doc}, upsert=True)
+    await log_audit(principal["email"], principal["role"], "MODIFICATION_PERIODE_PAIE", "paie", pid,
+                    f"Période de paie : {'hebdomadaire' if payload.period_type == 'weekly' else 'aux 2 semaines'} (ancrage {payload.anchor})", pid)
+    return doc
+
+
+# ==================== Horaires générés par IA (double approbation) ====================
+
+SCHEDULE_SYSTEM = (
+    "Tu es un expert en planification d'horaires pour les pharmacies du Québec. À partir de la liste des employés, "
+    "de leurs profils (rôles, capacités, disponibilités par jour, restrictions, heures minimales et maximales par semaine) "
+    "et des consignes du gestionnaire, tu crées l'horaire de la semaine demandée.\n\n"
+    "Règles impératives :\n"
+    "- RESPECTE STRICTEMENT les disponibilités (jour et plage horaire) et les restrictions de chaque employé.\n"
+    "- Ne dépasse jamais le maximum d'heures hebdomadaires d'un employé; vise au moins son minimum.\n"
+    "- Assure une couverture adéquate pendant les heures d'ouverture (par défaut lun-ven 8h-21h, sam-dim 9h-17h, "
+    "sauf indication contraire dans les consignes), en priorité un pharmacien présent en tout temps si disponible.\n"
+    "- Répartis équitablement les quarts et attribue à chacun un rôle cohérent avec ses rôles/capacités.\n"
+    "- Quarts de 4 à 8 heures.\n\n"
+    "Tu réponds UNIQUEMENT avec un objet JSON valide, sans texte avant ni après, au format exact :\n"
+    "{\n"
+    '  "summary": "Explication en français des choix effectués (3 à 6 phrases).",\n'
+    '  "shifts": [\n'
+    '    {"employee_id": "id", "employee_name": "Prénom Nom", "date": "YYYY-MM-DD", '
+    '"start": "08:00", "end": "16:00", "role": "Rôle pour ce quart"}\n'
+    "  ]\n"
+    "}"
+)
+
+
+class RosterEmployee(BaseModel):
+    id: str
+    name: str
+    position: str
+
+
+class ScheduleGenIn(BaseModel):
+    week_start: str
+    instructions: str = ""
+    approval_deadline_hours: int = 48
+    employees: list[RosterEmployee]
+
+
+def proposal_view(doc: dict) -> dict:
+    d = {k: v for k, v in doc.items() if k != "_id"}
+    approvals = d.get("employee_approvals", {})
+    deadline_passed = False
+    if d.get("approval_deadline"):
+        deadline_passed = datetime.fromisoformat(d["approval_deadline"]) < datetime.now(timezone.utc)
+    d["deadline_passed"] = deadline_passed
+    if d.get("applied_at"):
+        d["effective_status"] = "applied"
+    elif d["status"] in ("generating", "error"):
+        d["effective_status"] = d["status"]
+    elif d.get("admin_status") == "rejected":
+        d["effective_status"] = "rejected"
+    else:
+        any_rejected = any(a.get("status") == "rejected" for a in approvals.values())
+        all_approved = bool(approvals) and all(a.get("status") == "approved" for a in approvals.values())
+        if d.get("admin_status") == "approved" and (all_approved or (deadline_passed and not any_rejected)):
+            d["effective_status"] = "approved"
+        elif any_rejected:
+            d["effective_status"] = "attention"
+        else:
+            d["effective_status"] = "pending"
+    return d
+
+
+async def generate_schedule_content(proposal_id: str, pharmacy_id: str, week_start: str,
+                                    instructions: str, roster: list, profiles: list):
+    try:
+        start = date.fromisoformat(week_start)
+        week_days = [(start + timedelta(days=i)).isoformat() for i in range(7)]
+        payload = {
+            "semaine": week_days,
+            "consignes_du_gestionnaire": instructions or "Aucune consigne particulière.",
+            "employes": [{
+                "employee_id": e["id"], "nom": e["name"], "poste": e["position"],
+                "profil": next((p for p in profiles if p["employee_id"] == e["id"]), None),
+            } for e in roster],
+        }
+        llm = LlmChat(
+            api_key=os.environ['EMERGENT_LLM_KEY'],
+            session_id=f"schedule-{proposal_id}",
+            system_message=SCHEDULE_SYSTEM,
+        ).with_model("openai", "gpt-5.4")
+        resp = await llm.send_message(UserMessage(
+            text=f"Crée l'horaire de la semaine avec ces données :\n\n{json.dumps(payload, ensure_ascii=False, default=str)}"))
+        raw = resp if isinstance(resp, str) else getattr(resp, "content", None) or str(resp)
+        data = parse_llm_json(raw)
+        shifts = []
+        roster_ids = {e["id"] for e in roster}
+        for s in data.get("shifts", []):
+            if s.get("employee_id") not in roster_ids or s.get("date") not in week_days:
+                continue
+            if not s.get("start") or not s.get("end"):
+                continue
+            shifts.append({"id": str(uuid.uuid4()), "employee_id": s["employee_id"],
+                           "employee_name": str(s.get("employee_name", "")), "date": s["date"],
+                           "start": str(s["start"]), "end": str(s["end"]), "role": str(s.get("role", ""))})
+        if not shifts:
+            raise ValueError("L'IA n'a généré aucun quart valide")
+        approvals = {eid: {"status": "pending", "responded_at": None, "comment": ""}
+                     for eid in sorted({s["employee_id"] for s in shifts})}
+        await db.schedule_proposals.update_one({"id": proposal_id}, {"$set": {
+            "status": "pending_approval", "shifts": shifts, "summary": str(data.get("summary", "")),
+            "employee_approvals": approvals, "error": None,
+            "updated_at": datetime.now(timezone.utc).isoformat()}})
+        await log_audit("système", "system", "GENERATION_HORAIRE", "horaire", proposal_id,
+                        f"Horaire IA généré : {len(shifts)} quart(s) pour la semaine du {week_start}", pharmacy_id)
+    except Exception as exc:
+        logger.error(f"Génération horaire {proposal_id} échouée : {exc}")
+        await db.schedule_proposals.update_one({"id": proposal_id}, {"$set": {
+            "status": "error", "error": str(exc), "updated_at": datetime.now(timezone.utc).isoformat()}})
+
+
+@api_router.post("/schedule/generate")
+async def schedule_generate(payload: ScheduleGenIn, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    try:
+        date.fromisoformat(payload.week_start)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Date de début de semaine invalide.")
+    if not payload.employees:
+        raise HTTPException(status_code=400, detail="Aucun employé fourni.")
+    if not (1 <= payload.approval_deadline_hours <= 168):
+        raise HTTPException(status_code=400, detail="Délai d'approbation invalide (1 à 168 h).")
+    roster = [e.model_dump() for e in payload.employees]
+    profiles = []
+    for e in roster:
+        profiles.append(await get_or_create_profile(pid, e["id"], e["name"]))
+    profiles = [{k: v for k, v in p.items() if k not in ("punch_code",)} for p in profiles]
+    now = datetime.now(timezone.utc)
+    doc = {
+        "id": str(uuid.uuid4()), "pharmacy_id": pid, "week_start": payload.week_start,
+        "status": "generating", "error": None, "summary": "", "shifts": [],
+        "instructions": payload.instructions,
+        "employee_approvals": {}, "admin_status": "pending", "admin_decided_by": None,
+        "approval_deadline": (now + timedelta(hours=payload.approval_deadline_hours)).isoformat(),
+        "approval_deadline_hours": payload.approval_deadline_hours,
+        "applied_at": None, "created_by": principal["email"],
+        "created_at": now.isoformat(), "updated_at": now.isoformat(),
+    }
+    await db.schedule_proposals.insert_one({**doc})
+    await log_audit(principal["email"], principal["role"], "DEMANDE_HORAIRE_IA", "horaire", doc["id"],
+                    f"Génération IA demandée pour la semaine du {payload.week_start}", pid)
+    asyncio.create_task(generate_schedule_content(doc["id"], pid, payload.week_start, payload.instructions, roster, profiles))
+    return proposal_view(doc)
+
+
+@api_router.get("/schedule/proposals")
+async def list_proposals(user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or ""
+    if user["role"] in ("admin", "superadmin"):
+        query: dict = {"pharmacy_id": pid} if pid else {}
+        docs = await db.schedule_proposals.find(query, {"_id": 0}).sort("created_at", -1).to_list(100)
+        return [proposal_view(d) for d in docs]
+    eid = user.get("employee_id")
+    if not eid:
+        return []
+    docs = await db.schedule_proposals.find(
+        {"pharmacy_id": pid, "status": "pending_approval", f"employee_approvals.{eid}": {"$exists": True}},
+        {"_id": 0}).sort("created_at", -1).to_list(50)
+    return [proposal_view(d) for d in docs]
+
+
+class ProposalRespondIn(BaseModel):
+    status: str
+    comment: str = ""
+
+
+@api_router.post("/schedule/proposals/{proposal_id}/respond")
+async def respond_proposal(proposal_id: str, payload: ProposalRespondIn, user: dict = Depends(get_current_user)):
+    if payload.status not in ("approved", "rejected"):
+        raise HTTPException(status_code=400, detail="Réponse invalide.")
+    eid = user.get("employee_id")
+    if not eid:
+        raise HTTPException(status_code=403, detail="Aucun dossier employé associé à votre compte.")
+    doc = await db.schedule_proposals.find_one({"id": proposal_id}, {"_id": 0})
+    if not doc or eid not in (doc.get("employee_approvals") or {}):
+        raise HTTPException(status_code=404, detail="Proposition introuvable.")
+    if doc.get("applied_at"):
+        raise HTTPException(status_code=400, detail="Cet horaire a déjà été appliqué.")
+    await db.schedule_proposals.update_one({"id": proposal_id}, {"$set": {
+        f"employee_approvals.{eid}": {"status": payload.status,
+                                      "responded_at": datetime.now(timezone.utc).isoformat(),
+                                      "comment": payload.comment.strip()}}})
+    await log_audit(user["email"], user["role"],
+                    "APPROBATION_HORAIRE" if payload.status == "approved" else "REFUS_HORAIRE",
+                    "horaire", proposal_id,
+                    f"{user['name']} a {'approuvé' if payload.status == 'approved' else 'refusé'} l'horaire de la semaine du {doc['week_start']}"
+                    + (f" — {payload.comment.strip()}" if payload.comment.strip() else ""), doc["pharmacy_id"])
+    updated = await db.schedule_proposals.find_one({"id": proposal_id}, {"_id": 0})
+    return proposal_view(updated)
+
+
+class ProposalDecisionIn(BaseModel):
+    status: str
+
+
+@api_router.post("/schedule/proposals/{proposal_id}/decision")
+async def decide_proposal(proposal_id: str, payload: ProposalDecisionIn, principal: dict = Depends(get_principal)):
+    if payload.status not in ("approved", "rejected"):
+        raise HTTPException(status_code=400, detail="Décision invalide.")
+    doc = await db.schedule_proposals.find_one({"id": proposal_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Proposition introuvable.")
+    await db.schedule_proposals.update_one({"id": proposal_id}, {"$set": {
+        "admin_status": payload.status, "admin_decided_by": principal["email"],
+        "updated_at": datetime.now(timezone.utc).isoformat()}})
+    await log_audit(principal["email"], principal["role"], "DECISION_HORAIRE_ADMIN", "horaire", proposal_id,
+                    f"Horaire semaine du {doc['week_start']} : {'approuvé' if payload.status == 'approved' else 'rejeté'} par l'administration",
+                    doc["pharmacy_id"])
+    updated = await db.schedule_proposals.find_one({"id": proposal_id}, {"_id": 0})
+    return proposal_view(updated)
+
+
+@api_router.post("/schedule/proposals/{proposal_id}/apply")
+async def apply_proposal(proposal_id: str, principal: dict = Depends(get_principal)):
+    doc = await db.schedule_proposals.find_one({"id": proposal_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Proposition introuvable.")
+    if doc.get("admin_status") != "approved":
+        raise HTTPException(status_code=400, detail="L'administration doit d'abord approuver cet horaire.")
+    if doc.get("applied_at"):
+        raise HTTPException(status_code=400, detail="Cet horaire a déjà été appliqué.")
+    view = proposal_view(doc)
+    if view["effective_status"] != "approved":
+        raise HTTPException(
+            status_code=400,
+            detail="Les employés doivent approuver (ou le délai doit être écoulé sans refus) avant d'appliquer l'horaire.")
+    await db.schedule_proposals.update_one({"id": proposal_id}, {"$set": {
+        "applied_at": datetime.now(timezone.utc).isoformat()}})
+    await log_audit(principal["email"], principal["role"], "APPLICATION_HORAIRE", "horaire", proposal_id,
+                    f"Horaire IA de la semaine du {doc['week_start']} appliqué ({len(doc.get('shifts', []))} quarts)",
+                    doc["pharmacy_id"])
+    updated = await db.schedule_proposals.find_one({"id": proposal_id}, {"_id": 0})
+    return proposal_view(updated)
+
+
+@api_router.delete("/schedule/proposals/{proposal_id}")
+async def delete_proposal(proposal_id: str, principal: dict = Depends(get_principal)):
+    doc = await db.schedule_proposals.find_one({"id": proposal_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Proposition introuvable.")
+    await db.schedule_proposals.delete_one({"id": proposal_id})
+    await log_audit(principal["email"], principal["role"], "SUPPRESSION_HORAIRE_IA", "horaire", proposal_id,
+                    f"Proposition d'horaire de la semaine du {doc['week_start']} supprimée", doc["pharmacy_id"])
+    return {"status": "supprimée"}
 
 
 scheduler = AsyncIOScheduler(timezone="America/Montreal")

@@ -1,6 +1,6 @@
 export type Role = 'superadmin' | 'admin' | 'employee';
 
-export type View = 'landing' | 'login' | 'careers' | 'agency' | 'dashboard';
+export type View = 'landing' | 'login' | 'careers' | 'agency' | 'dashboard' | 'punch';
 
 export type ModuleKey =
   | 'dashboard'
@@ -403,6 +403,112 @@ export interface EmailSettings {
   sender_email: string;
   sender_name: string;
   default_sender?: string;
+}
+
+export interface AvailabilityDay {
+  available: boolean;
+  start: string;
+  end: string;
+}
+
+export type WeekDayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
+
+export interface EmployeeProfile {
+  id: string;
+  pharmacy_id: string;
+  employee_id: string;
+  employee_name: string;
+  roles: string[];
+  capacities: string[];
+  restrictions: string[];
+  min_hours_week: number;
+  max_hours_week: number;
+  availability: Record<WeekDayKey, AvailabilityDay>;
+  punch_code: string | null;
+  notes: string;
+  updated_at: string;
+  updated_by: string;
+}
+
+export interface Punch {
+  id: string;
+  pharmacy_id: string;
+  employee_id: string;
+  employee_name: string;
+  date: string;
+  punch_in: string;
+  punch_out: string | null;
+  source: 'punch' | 'manual';
+  created_by: string;
+  note: string;
+}
+
+export interface PunchSummaryRow {
+  employee_id: string;
+  employee_name: string;
+  punched_hours: number;
+  manual_hours: number;
+  total_hours: number;
+  entries: number;
+  open_entries: number;
+}
+
+export interface PunchStatus {
+  open: Punch | null;
+  today_hours: number;
+  today_entries: Punch[];
+}
+
+export interface PunchActionResult {
+  action: 'in' | 'out';
+  employee_name: string;
+  time: string;
+  punch_in?: string;
+  duration_hours?: number;
+}
+
+export interface PaySettings {
+  pharmacy_id: string;
+  period_type: 'weekly' | 'biweekly';
+  anchor: string;
+}
+
+export interface ProposalShift {
+  id: string;
+  employee_id: string;
+  employee_name: string;
+  date: string;
+  start: string;
+  end: string;
+  role: string;
+}
+
+export interface ApprovalSlot {
+  status: 'pending' | 'approved' | 'rejected';
+  responded_at: string | null;
+  comment: string;
+}
+
+export type ProposalStatus = 'generating' | 'error' | 'pending' | 'attention' | 'approved' | 'rejected' | 'applied';
+
+export interface ScheduleProposal {
+  id: string;
+  pharmacy_id: string;
+  week_start: string;
+  status: string;
+  effective_status: ProposalStatus;
+  error?: string | null;
+  summary: string;
+  instructions: string;
+  shifts: ProposalShift[];
+  employee_approvals: Record<string, ApprovalSlot>;
+  admin_status: 'pending' | 'approved' | 'rejected';
+  approval_deadline: string;
+  approval_deadline_hours: number;
+  deadline_passed: boolean;
+  applied_at: string | null;
+  created_by: string;
+  created_at: string;
 }
 
 export interface HRState {
