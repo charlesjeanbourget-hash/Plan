@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState, ReactNode, useCallback 
 import {
   HRState, Employee, Shift, Task, JobOffer, Candidate, LeaveRequest, ReplacementRequest,
   PayrollEntry, PerformanceReview, OnboardingItem, Contract, Benefit, FAQItem, Pharmacy,
-  CandidateStatus, RequestStatus, TaskStatus, PayrollStatus, ReplacementStatus, ShiftSwapRequest,
+  CandidateStatus, RequestStatus, TaskStatus, PayrollStatus, ReplacementStatus, ShiftSwapRequest, Branch,
 } from '@/types';
 import { SEED_STATE } from '@/context/seedData';
 

@@ -101,3 +101,30 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+## Iteration 4 (main agent) — a tester
+user_problem_statement: "Iteration 4: gestion des comptes superadmin (creation/suspension/suppression/reset mot de passe), rappels courriel 30 jours envoyes directement aux employes pour licences expirantes, relevés PDF avec periodes de paie historiques et cumulatifs annuels reels, support a distance superadmin."
+backend:
+  - task: "Gestion des comptes superadmin (/api/admin/users CRUD + reset-password)"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py"
+    needs_retesting: true
+  - task: "Rappels licences 30 jours (job quotidien + POST /api/licenses/reminders/run)"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py"
+    needs_retesting: true
+frontend:
+  - task: "Module SuperadminUsers (gestion comptes, reset mdp, suspension)"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/components/modules/SuperadminUsers.tsx"
+    needs_retesting: true
+  - task: "Relevés PDF avec périodes historiques et cumulatifs annuels"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/lib/paystub.ts"
+    needs_retesting: true
+agent_communication:
+  - agent: "main"
+    message: "Iteration 4 code écrit + fix import Branch dans HRContext.tsx (tsc OK). Smoke test backend OK (login superadmin, GET /api/admin/users → 5 users, POST reminders/run → sent:0). Besoin de régression complète."

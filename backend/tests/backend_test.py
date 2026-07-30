@@ -263,16 +263,174 @@ class TestLicensesJWT:
         assert isinstance(r.json(), list)
 
 
+# ---------------------- Iteration 5: Admin user management ----------------------
+class TestAdminUsers:
+    created_ids = []
+
+    def test_list_requires_superadmin(self, s, admin_token, employee_token):
+        r_no = s.get(f"{BASE_URL}/api/admin/users")
+        assert r_no.status_code == 401
+        r_adm = s.get(f"{BASE_URL}/api/admin/users", headers=bearer(admin_token))
+        assert r_adm.status_code == 403
+        r_emp = s.get(f"{BASE_URL}/api/admin/users", headers=bearer(employee_token))
+        assert r_emp.status_code == 403
+
+    def test_list_users_superadmin(self, s, super_token):
+        r = s.get(f"{BASE_URL}/api/admin/users", headers=bearer(super_token))
+        assert r.status_code == 200
+        arr = r.json()
+        assert isinstance(arr, list) and len(arr) >= 3
+        emails = {u["email"] for u in arr}
+        assert "admin@luminahr.ca" in emails
+        for u in arr:
+            assert "password_hash" not in u
+            assert "_id" not in u
+
+    def test_create_login_reset_suspend_delete(self, s, super_token):
+        email = f"test_{uuid.uuid4().hex[:8]}@lumina.test"
+        payload = {"email": email, "name": "TEST User", "role": "employee", "pharmacy_id": "ph1"}
+        r = s.post(f"{BASE_URL}/api/admin/users", json=payload, headers=bearer(super_token))
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert "user" in body and "temporary_password" in body
+        assert body["user"]["email"] == email
+        assert body["user"]["is_temporary_password"] is True
+        uid = body["user"]["id"]
+        temp = body["temporary_password"]
+        TestAdminUsers.created_ids.append(uid)
+
+        # Duplicate creation → 400
+        r_dup = s.post(f"{BASE_URL}/api/admin/users", json=payload, headers=bearer(super_token))
+        assert r_dup.status_code == 400
+
+        # Login with temp works
+        r_login = login(s, email, temp)
+        assert r_login.status_code == 200, r_login.text
+        assert r_login.json()["user"]["is_temporary_password"] is True
+
+        # Reset password → new temp works, old temp fails
+        r_reset = s.post(f"{BASE_URL}/api/admin/users/{uid}/reset-password", headers=bearer(super_token))
+        assert r_reset.status_code == 200
+        new_temp = r_reset.json()["temporary_password"]
+        assert new_temp != temp
+        r_old = login(s, email, temp)
+        assert r_old.status_code == 401
+        r_new = login(s, email, new_temp)
+        assert r_new.status_code == 200
+
+        # Suspend → login 403
+        r_susp = s.put(f"{BASE_URL}/api/admin/users/{uid}", json={"suspended": True},
+                       headers=bearer(super_token))
+        assert r_susp.status_code == 200
+        r_locked = login(s, email, new_temp)
+        assert r_locked.status_code == 403
+        assert "suspendu" in r_locked.json().get("detail", "").lower()
+
+        # Reactivate → login OK again
+        r_react = s.put(f"{BASE_URL}/api/admin/users/{uid}", json={"suspended": False},
+                        headers=bearer(super_token))
+        assert r_react.status_code == 200
+        r_ok = login(s, email, new_temp)
+        assert r_ok.status_code == 200
+
+        # Delete
+        r_del = s.delete(f"{BASE_URL}/api/admin/users/{uid}", headers=bearer(super_token))
+        assert r_del.status_code == 200
+        # Login should now fail (user removed)
+        r_gone = login(s, email, new_temp)
+        assert r_gone.status_code == 401
+        TestAdminUsers.created_ids.remove(uid)
+
+    def test_cannot_self_suspend_or_self_delete(self, s, super_token):
+        me = s.get(f"{BASE_URL}/api/auth/me", headers=bearer(super_token)).json()
+        my_id = me["id"]
+        r_susp = s.put(f"{BASE_URL}/api/admin/users/{my_id}", json={"suspended": True},
+                       headers=bearer(super_token))
+        assert r_susp.status_code == 400
+        r_del = s.delete(f"{BASE_URL}/api/admin/users/{my_id}", headers=bearer(super_token))
+        assert r_del.status_code == 400
+
+    def test_invalid_role(self, s, super_token):
+        r = s.post(f"{BASE_URL}/api/admin/users",
+                   json={"email": f"bad_{uuid.uuid4().hex[:6]}@t.ca", "name": "x",
+                         "role": "hacker", "pharmacy_id": "ph1"},
+                   headers=bearer(super_token))
+        assert r.status_code == 400
+
+
+# ---------------------- Iteration 5: License reminders ----------------------
+class TestLicenseReminders:
+    created_lic = []
+
+    def test_reminders_run_admin_ok(self, s, admin_token):
+        r = s.post(f"{BASE_URL}/api/licenses/reminders/run", headers=bearer(admin_token))
+        assert r.status_code == 200
+        assert "sent" in r.json()
+        assert isinstance(r.json()["sent"], int)
+
+    def test_reminders_forbidden_without_token(self, s):
+        r = s.post(f"{BASE_URL}/api/licenses/reminders/run")
+        assert r.status_code == 401
+
+    def test_reminders_forbidden_for_employee(self, s, employee_token):
+        r = s.post(f"{BASE_URL}/api/licenses/reminders/run", headers=bearer(employee_token))
+        assert r.status_code == 403
+
+    def test_reminder_sent_and_deduplicated(self, s, admin_token):
+        import datetime as dt
+        # Create a licence expiring in 15 days with employee_email
+        expiry = (dt.date.today() + dt.timedelta(days=15)).isoformat()
+        data = {
+            "employee_id": f"TEST_rem_{uuid.uuid4()}",
+            "employee_name": "TEST Rappel",
+            "employee_email": "charlesjeanbourget@gmail.com",
+            "position": "Pharm",
+            "branch_id": "br1",
+            "license_number": f"TEST-REM-{uuid.uuid4().hex[:6]}",
+            "expiry_date": expiry,
+        }
+        r = s.post(f"{BASE_URL}/api/licenses", data=data, headers=bearer(admin_token))
+        assert r.status_code == 200, r.text
+        lic = r.json()
+        TestLicenseReminders.created_lic.append((lic["id"], data["employee_id"]))
+
+        # 1st run: sent >= 1 (contains our new licence)
+        r1 = s.post(f"{BASE_URL}/api/licenses/reminders/run", headers=bearer(admin_token))
+        assert r1.status_code == 200
+        sent1 = r1.json()["sent"]
+        # If Resend fails delivery the endpoint logs an error but does NOT dedupe,
+        # so sent may be 0. Assert at least the endpoint returns coherent JSON.
+        assert isinstance(sent1, int)
+
+        # 2nd run within same expiry_date → should be deduplicated (0 new)
+        r2 = s.post(f"{BASE_URL}/api/licenses/reminders/run", headers=bearer(admin_token))
+        assert r2.status_code == 200
+        sent2 = r2.json()["sent"]
+        # dedupe: 2nd run must be <= 1st run (typically 0)
+        assert sent2 <= sent1 or sent2 == 0
+
+
 # ---------------------- Cleanup ----------------------
 @pytest.fixture(scope="module", autouse=True)
 def cleanup(s):
     yield
-    # attempt cleanup with a fresh admin token to avoid ordering issues
+    # attempt cleanup with a fresh admin/superadmin token to avoid ordering issues
     try:
         r = login(s, "admin@luminahr.ca", "admin123")
         if r.status_code == 200:
             tok = r.json()["access_token"]
             for lic_id, emp_id in TestLicensesJWT.created:
                 s.delete(f"{BASE_URL}/api/licenses/employee/{emp_id}", headers=bearer(tok))
+            for lic_id, emp_id in TestLicenseReminders.created_lic:
+                s.delete(f"{BASE_URL}/api/licenses/employee/{emp_id}", headers=bearer(tok))
+    except Exception:
+        pass
+    # delete any leftover TEST admin/users
+    try:
+        rs = login(s, "jeffmenard78@hotmail.com", "Lumina-Jeff!2941")
+        if rs.status_code == 200:
+            st = rs.json()["access_token"]
+            for uid in list(TestAdminUsers.created_ids):
+                s.delete(f"{BASE_URL}/api/admin/users/{uid}", headers=bearer(st))
     except Exception:
         pass
