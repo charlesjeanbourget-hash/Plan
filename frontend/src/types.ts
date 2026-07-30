@@ -4,7 +4,9 @@ export type View = 'landing' | 'login' | 'careers' | 'agency' | 'dashboard';
 
 export type ModuleKey =
   | 'dashboard'
+  | 'myspace'
   | 'employees'
+  | 'licenses'
   | 'scheduling'
   | 'recruitment'
   | 'payroll'
@@ -24,6 +26,7 @@ export interface User {
   password: string;
   role: Role;
   employeeId?: string;
+  pharmacyId?: string;
 }
 
 export type Position =
@@ -50,6 +53,7 @@ export interface Employee {
   email: string;
   phone: string;
   position: Position;
+  branchId: string;
   status: EmployeeStatus;
   hireDate: string;
   hourlyRate: number;
@@ -219,9 +223,65 @@ export interface Pharmacy {
   address: string;
   city: string;
   ownerName: string;
+  adminEmail: string;
   employeeCount: number;
   plan: PharmacyPlan;
   active: boolean;
+}
+
+export interface Branch {
+  id: string;
+  pharmacyId: string;
+  name: string;
+  address: string;
+}
+
+export interface ShiftSwapRequest {
+  id: string;
+  shiftId: string;
+  requesterId: string;
+  targetEmployeeId: string;
+  reason: string;
+  status: RequestStatus;
+}
+
+export interface License {
+  id: string;
+  employee_id: string;
+  employee_name: string;
+  position: string;
+  pharmacy_id: string;
+  branch_id: string;
+  license_number: string;
+  expiry_date: string;
+  certificate_filename: string | null;
+  certificate_content_type: string | null;
+  certificate_size: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LicenseReportItem extends License {
+  days_remaining: number;
+}
+
+export interface AuditLog {
+  id: string;
+  actor_email: string;
+  actor_role: string;
+  action: string;
+  resource_type: string;
+  resource_id: string;
+  details: string;
+  pharmacy_id: string;
+  created_at: string;
+}
+
+export interface ReportSettings {
+  pharmacy_id: string;
+  pharmacy_name: string;
+  admin_email: string;
+  enabled: boolean;
 }
 
 export interface ChatMessage {
@@ -232,7 +292,9 @@ export interface ChatMessage {
 
 export interface HRState {
   employees: Employee[];
+  branches: Branch[];
   shifts: Shift[];
+  shiftSwaps: ShiftSwapRequest[];
   tasks: Task[];
   jobOffers: JobOffer[];
   candidates: Candidate[];

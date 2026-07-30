@@ -8,10 +8,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, Check, X } from 'lucide-react';
+import { Plus, Check, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 
 const LEAVE_TYPES: LeaveType[] = ['Vacances', 'Maladie', 'Personnel', 'Formation'];
+
+const MONTH_NAMES = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+const DAY_HEADERS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
 
 export default function VacationModule(): JSX.Element {
   const { state, addLeaveRequest, setLeaveStatus, getEmployee } = useHR();
@@ -23,6 +26,29 @@ export default function VacationModule(): JSX.Element {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [reason, setReason] = useState('');
+  const [calDate, setCalDate] = useState<{ y: number; m: number }>(() => {
+    const now = new Date();
+    return { y: now.getFullYear(), m: now.getMonth() };
+  });
+
+  const changeMonth = (delta: number): void => {
+    setCalDate(({ y, m }) => {
+      const d = new Date(y, m + delta, 1);
+      return { y: d.getFullYear(), m: d.getMonth() };
+    });
+  };
+
+  const firstDay = new Date(calDate.y, calDate.m, 1);
+  const offset = (firstDay.getDay() + 6) % 7;
+  const daysInMonth = new Date(calDate.y, calDate.m + 1, 0).getDate();
+  const cells: Array<number | null> = [
+    ...Array.from({ length: offset }, () => null),
+    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+  ];
+  const isoFor = (day: number): string =>
+    `${calDate.y}-${String(calDate.m + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  const approvedLeaves = state.leaveRequests.filter((l) => l.status === 'Approuvée');
+  const todayIso = new Date().toISOString().slice(0, 10);
 
   const requests = isAdmin
     ? state.leaveRequests
@@ -47,6 +73,48 @@ export default function VacationModule(): JSX.Element {
           </Button>
         }
       />
+      <div className="bg-white rounded-xl border border-slate-200 p-6 mb-8" data-testid="vacation-calendar">
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="font-heading text-base font-bold text-slate-900">Calendrier des congés approuvés</h2>
+          <div className="flex items-center gap-2">
+            <Button data-testid="calendar-prev-button" variant="outline" size="icon" className="rounded-full h-8 w-8" onClick={() => changeMonth(-1)}>
+              <ChevronLeft className="w-4 h-4" />
+            </Button>
+            <p className="text-sm font-semibold text-slate-700 w-40 text-center capitalize" data-testid="calendar-month-label">
+              {MONTH_NAMES[calDate.m]} {calDate.y}
+            </p>
+            <Button data-testid="calendar-next-button" variant="outline" size="icon" className="rounded-full h-8 w-8" onClick={() => changeMonth(1)}>
+              <ChevronRight className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+        <div className="grid grid-cols-7 gap-px bg-slate-200 rounded-lg overflow-hidden border border-slate-200">
+          {DAY_HEADERS.map((d) => (
+            <div key={d} className="bg-slate-50 py-2 text-center text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">{d}</div>
+          ))}
+          {cells.map((day, idx) => {
+            if (day === null) return <div key={`empty-${idx}`} className="bg-white min-h-[72px]" />;
+            const iso = isoFor(day);
+            const onLeave = approvedLeaves.filter((l) => l.startDate <= iso && iso <= l.endDate);
+            return (
+              <div key={iso} className={`bg-white min-h-[72px] p-1.5 ${iso === todayIso ? 'bg-emerald-50' : ''}`}>
+                <p className={`text-xs font-semibold mb-1 ${iso === todayIso ? 'text-emerald-700' : 'text-slate-500'}`}>{day}</p>
+                <div className="space-y-0.5">
+                  {onLeave.map((l) => {
+                    const emp = getEmployee(l.employeeId);
+                    return (
+                      <div key={l.id} className={`${emp?.avatarColor ?? 'bg-slate-400'} text-white text-[10px] font-semibold rounded px-1 py-0.5 truncate`} title={`${emp?.firstName ?? ''} ${emp?.lastName ?? ''} — ${l.type}`}>
+                        {emp ? `${emp.firstName} ${emp.lastName[0]}.` : '?'} · {l.type}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       {requests.length === 0 ? (
         <EmptyState text="Aucune demande de congé." />
       ) : (

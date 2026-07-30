@@ -1,12 +1,13 @@
 import { useState, FormEvent } from 'react';
 import { useHR } from '@/context/HRContext';
-import { ModuleHeader } from '@/components/modules/shared';
+import { useAuth } from '@/context/AuthContext';
+import { ModuleHeader, StatusBadge } from '@/components/modules/shared';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ChevronLeft, ChevronRight, Plus, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, X, ArrowLeftRight, Check } from 'lucide-react';
 import { toast } from 'sonner';
 
 const DAY_LABELS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
@@ -22,7 +23,9 @@ const getWeekStart = (offsetWeeks: number): Date => {
 const iso = (d: Date): string => d.toISOString().slice(0, 10);
 
 export default function SchedulingModule(): JSX.Element {
-  const { state, addShift, deleteShift } = useHR();
+  const { state, addShift, deleteShift, updateShift, setShiftSwapStatus, getEmployee } = useHR();
+  const { currentUser } = useAuth();
+  const isAdmin = currentUser?.role !== 'employee';
   const [weekOffset, setWeekOffset] = useState(0);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [employeeId, setEmployeeId] = useState(state.employees[0]?.id ?? '');
@@ -46,6 +49,16 @@ export default function SchedulingModule(): JSX.Element {
     setDialogOpen(false);
   };
 
+  const pendingSwaps = state.shiftSwaps.filter((s) => s.status === 'En attente');
+
+  const approveSwap = (swapId: string): void => {
+    const swap = state.shiftSwaps.find((s) => s.id === swapId);
+    if (!swap) return;
+    updateShift(swap.shiftId, { employeeId: swap.targetEmployeeId });
+    setShiftSwapStatus(swapId, 'Approuvée');
+    toast.success('Échange approuvé — l\'horaire a été mis à jour automatiquement.');
+  };
+
   return (
     <div data-testid="scheduling-module">
       <ModuleHeader
@@ -57,6 +70,45 @@ export default function SchedulingModule(): JSX.Element {
           </Button>
         }
       />
+      {isAdmin && (
+        <div className="bg-white rounded-xl border border-slate-200 p-6 mb-6" data-testid="swap-requests-panel">
+          <h2 className="font-heading text-base font-bold text-slate-900 mb-4 inline-flex items-center gap-2">
+            <ArrowLeftRight className="w-4 h-4 text-emerald-600" /> Demandes d'échange de quarts
+          </h2>
+          {pendingSwaps.length === 0 ? (
+            <p className="text-sm text-slate-500">Aucune demande d'échange en attente.</p>
+          ) : (
+            <div className="space-y-3">
+              {pendingSwaps.map((swap) => {
+                const shift = state.shifts.find((s) => s.id === swap.shiftId);
+                const requester = getEmployee(swap.requesterId);
+                const target = getEmployee(swap.targetEmployeeId);
+                return (
+                  <div key={swap.id} data-testid={`swap-request-${swap.id}`} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg border border-slate-200 px-4 py-3">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800">
+                        {requester ? `${requester.firstName} ${requester.lastName}` : '?'} → {target ? `${target.firstName} ${target.lastName}` : '?'}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {shift ? `${shift.date} · ${shift.startTime}–${shift.endTime}` : 'Quart introuvable'} · {swap.reason}
+                      </p>
+                    </div>
+                    <div className="flex gap-2 shrink-0">
+                      <Button data-testid={`approve-swap-${swap.id}`} size="sm" onClick={() => approveSwap(swap.id)} className="rounded-full bg-emerald-600 hover:bg-emerald-700 text-xs">
+                        <Check className="w-3.5 h-3.5 mr-1" /> Approuver
+                      </Button>
+                      <Button data-testid={`reject-swap-${swap.id}`} size="sm" variant="outline" onClick={() => { setShiftSwapStatus(swap.id, 'Refusée'); toast.success('Échange refusé.'); }} className="rounded-full text-xs text-red-600 border-red-200 hover:bg-red-50">
+                        <X className="w-3.5 h-3.5 mr-1" /> Refuser
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="flex items-center gap-3 mb-6">
         <Button data-testid="week-prev-button" variant="outline" size="icon" className="rounded-full" onClick={() => setWeekOffset(weekOffset - 1)}>
           <ChevronLeft className="w-4 h-4" />

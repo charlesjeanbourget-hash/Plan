@@ -4,7 +4,7 @@ import { useAuth } from '@/context/AuthContext';
 import {
   LayoutDashboard, Users, CalendarClock, Briefcase, Wallet, RefreshCw, TreePalm,
   TrendingUp, ClipboardCheck, FileText, HeartHandshake, HelpCircle, ShieldCheck,
-  LogOut, Pill, Menu, X, LucideIcon,
+  LogOut, Pill, Menu, X, LucideIcon, BadgeCheck, UserRound,
 } from 'lucide-react';
 
 interface Props {
@@ -21,7 +21,9 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { key: 'dashboard', label: 'Tableau de bord', icon: LayoutDashboard },
+  { key: 'myspace', label: 'Mon espace', icon: UserRound },
   { key: 'employees', label: 'Employés', icon: Users },
+  { key: 'licenses', label: 'Licences pro.', icon: BadgeCheck },
   { key: 'scheduling', label: 'Horaires', icon: CalendarClock },
   { key: 'recruitment', label: 'Recrutement', icon: Briefcase },
   { key: 'payroll', label: 'Paie', icon: Wallet },
@@ -35,7 +37,7 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'superadmin', label: 'Superadmin', icon: ShieldCheck },
 ];
 
-const EMPLOYEE_MODULES: ModuleKey[] = ['dashboard', 'scheduling', 'vacations', 'benefits', 'faq'];
+const EMPLOYEE_MODULES: ModuleKey[] = ['dashboard', 'myspace', 'scheduling', 'vacations', 'benefits', 'faq'];
 
 export default function Sidebar({ active, onSelect, onLogout }: Props): JSX.Element {
   const { currentUser } = useAuth();
@@ -43,7 +45,7 @@ export default function Sidebar({ active, onSelect, onLogout }: Props): JSX.Elem
 
   const items = NAV_ITEMS.filter((item) => {
     if (currentUser?.role === 'employee') return EMPLOYEE_MODULES.includes(item.key);
-    return true;
+    return item.key !== 'myspace';
   });
 
   const content = (

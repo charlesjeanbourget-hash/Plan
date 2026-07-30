@@ -2,11 +2,11 @@ import { createContext, useContext, useEffect, useState, ReactNode, useCallback 
 import {
   HRState, Employee, Shift, Task, JobOffer, Candidate, LeaveRequest, ReplacementRequest,
   PayrollEntry, PerformanceReview, OnboardingItem, Contract, Benefit, FAQItem, Pharmacy,
-  CandidateStatus, RequestStatus, TaskStatus, PayrollStatus, ReplacementStatus,
+  CandidateStatus, RequestStatus, TaskStatus, PayrollStatus, ReplacementStatus, ShiftSwapRequest,
 } from '@/types';
 import { SEED_STATE } from '@/context/seedData';
 
-const STATE_KEY = 'luminahr_state_v1';
+const STATE_KEY = 'luminahr_state_v2';
 
 export const uid = (): string => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 
@@ -17,7 +17,10 @@ interface HRContextValue {
   updateEmployee: (id: string, patch: Partial<Employee>) => void;
   deleteEmployee: (id: string) => void;
   addShift: (s: Omit<Shift, 'id'>) => void;
+  updateShift: (id: string, patch: Partial<Shift>) => void;
   deleteShift: (id: string) => void;
+  addShiftSwap: (s: Omit<ShiftSwapRequest, 'id'>) => void;
+  setShiftSwapStatus: (id: string, status: RequestStatus) => void;
   addTask: (t: Omit<Task, 'id'>) => void;
   setTaskStatus: (id: string, status: TaskStatus) => void;
   addJobOffer: (o: Omit<JobOffer, 'id'>) => void;
@@ -82,7 +85,12 @@ export const HRProvider = ({ children }: { children: ReactNode }) => {
     deleteEmployee: (id) =>
       patchList('employees', (items) => items.filter((i) => i.id !== id)),
     addShift: (s) => patchList('shifts', (items) => [...items, { ...s, id: uid() }]),
+    updateShift: (id, patch) =>
+      patchList('shifts', (items) => items.map((i) => (i.id === id ? { ...i, ...patch } : i))),
     deleteShift: (id) => patchList('shifts', (items) => items.filter((i) => i.id !== id)),
+    addShiftSwap: (s) => patchList('shiftSwaps', (items) => [{ ...s, id: uid() }, ...items]),
+    setShiftSwapStatus: (id, status) =>
+      patchList('shiftSwaps', (items) => items.map((i) => (i.id === id ? { ...i, status } : i))),
     addTask: (t) => patchList('tasks', (items) => [...items, { ...t, id: uid() }]),
     setTaskStatus: (id, status) =>
       patchList('tasks', (items) => items.map((i) => (i.id === id ? { ...i, status } : i))),

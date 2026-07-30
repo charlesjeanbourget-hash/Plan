@@ -2,8 +2,8 @@ import { createContext, useContext, useEffect, useState, ReactNode } from 'react
 import { User } from '@/types';
 import { SEED_USERS } from '@/context/seedData';
 
-const USERS_KEY = 'luminahr_users_v1';
-const SESSION_KEY = 'luminahr_session_v1';
+const USERS_KEY = 'luminahr_users_v2';
+const SESSION_KEY = 'luminahr_session_v2';
 
 interface AuthContextValue {
   currentUser: User | null;

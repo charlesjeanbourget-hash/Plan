@@ -2,7 +2,9 @@ import { useHR } from '@/context/HRContext';
 import { PayrollStatus } from '@/types';
 import { ModuleHeader, StatCard, StatusBadge } from '@/components/modules/shared';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Wallet, TrendingDown, Banknote } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Wallet, TrendingDown, Banknote, Download } from 'lucide-react';
+import { downloadPayStub } from '@/lib/paystub';
 import { toast } from 'sonner';
 
 const PAYROLL_STATUSES: PayrollStatus[] = ['En préparation', 'Validée', 'Payée'];
@@ -37,6 +39,7 @@ export default function PayrollModule(): JSX.Element {
               <th className="p-4 text-right">Déductions</th>
               <th className="p-4 text-right">Net</th>
               <th className="p-4">Statut</th>
+              <th className="p-4 text-right">Relevé</th>
             </tr>
           </thead>
           <tbody>
@@ -62,6 +65,19 @@ export default function PayrollModule(): JSX.Element {
                         {PAYROLL_STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                       </SelectContent>
                     </Select>
+                  </td>
+                  <td className="p-4 text-right">
+                    {emp && (
+                      <Button
+                        data-testid={`payroll-pdf-${p.id}`}
+                        size="sm"
+                        variant="outline"
+                        className="rounded-full text-xs"
+                        onClick={() => { downloadPayStub(emp, p, state.pharmacies[0]?.name ?? 'LuminaHR'); toast.success('Relevé PDF téléchargé.'); }}
+                      >
+                        <Download className="w-3.5 h-3.5 mr-1" /> PDF
+                      </Button>
+                    )}
                   </td>
                 </tr>
               );

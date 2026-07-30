@@ -7,26 +7,34 @@ const d = (offset: number): string => {
 };
 
 export const SEED_USERS: User[] = [
-  { id: 'u1', name: 'Dr. Sophie Lavoie', email: 'admin@luminahr.ca', password: 'admin123', role: 'admin', employeeId: 'e1' },
-  { id: 'u2', name: 'Julie Gagnon', email: 'julie@luminahr.ca', password: 'employe123', role: 'employee', employeeId: 'e2' },
-  { id: 'u3', name: 'Super Admin', email: 'super@luminahr.ca', password: 'super123', role: 'superadmin' },
+  { id: 'u1', name: 'Dr. Sophie Lavoie', email: 'admin@luminahr.ca', password: 'admin123', role: 'admin', employeeId: 'e1', pharmacyId: 'ph1' },
+  { id: 'u2', name: 'Julie Gagnon', email: 'julie@luminahr.ca', password: 'employe123', role: 'employee', employeeId: 'e2', pharmacyId: 'ph1' },
+  { id: 'u3', name: 'Jeff Ménard', email: 'jeffmenard78@hotmail.com', password: 'jeff2026', role: 'superadmin' },
+  { id: 'u4', name: 'Charles-J. Bourget', email: 'charles-jbourget@hotmail.com', password: 'charles2026', role: 'superadmin' },
 ];
 
 export const SEED_STATE: HRState = {
+  branches: [
+    { id: 'br1', pharmacyId: 'ph1', name: 'Succursale Centre-Ville', address: '1200 rue Sainte-Catherine, Montréal' },
+    { id: 'br2', pharmacyId: 'ph1', name: 'Succursale Plateau', address: '88 av. du Parc, Montréal' },
+  ],
+  shiftSwaps: [
+    { id: 'sw1', shiftId: 's5', requesterId: 'e2', targetEmployeeId: 'e3', reason: 'Rendez-vous personnel impossible à déplacer', status: 'En attente' },
+  ],
   employees: [
     {
       id: 'e1', firstName: 'Sophie', lastName: 'Lavoie', email: 'admin@luminahr.ca', phone: '514-555-0101',
-      position: 'Pharmacien(ne)', status: 'Actif', hireDate: '2019-03-11', hourlyRate: 62, weeklyHours: 40,
+      position: 'Pharmacien(ne)', branchId: 'br1', status: 'Actif', hireDate: '2019-03-11', hourlyRate: 62, weeklyHours: 40,
       address: '1200 rue Sainte-Catherine, Montréal', emergencyContact: 'Marc Lavoie — 514-555-0199', avatarColor: 'bg-emerald-600',
     },
     {
       id: 'e2', firstName: 'Julie', lastName: 'Gagnon', email: 'julie@luminahr.ca', phone: '514-555-0102',
-      position: 'ATP', status: 'Actif', hireDate: '2021-09-07', hourlyRate: 26.5, weeklyHours: 35,
+      position: 'ATP', branchId: 'br1', status: 'Actif', hireDate: '2021-09-07', hourlyRate: 26.5, weeklyHours: 35,
       address: '88 av. du Parc, Montréal', emergencyContact: 'Lise Gagnon — 514-555-0188', avatarColor: 'bg-orange-500',
     },
     {
       id: 'e3', firstName: 'Karim', lastName: 'Benali', email: 'karim@luminahr.ca', phone: '514-555-0103',
-      position: 'ATP', status: 'Actif', hireDate: d(-21), hourlyRate: 24, weeklyHours: 30,
+      position: 'ATP', branchId: 'br2', status: 'Actif', hireDate: d(-21), hourlyRate: 24, weeklyHours: 30,
       address: '45 rue Ontario, Montréal', emergencyContact: 'Nadia Benali — 514-555-0177', avatarColor: 'bg-sky-600',
     },
   ],
@@ -113,8 +121,8 @@ export const SEED_STATE: HRState = {
     { id: 'f4', question: 'Qui contacter en cas d\'accident de travail ?', answer: 'Avisez immédiatement le pharmacien en service, puis remplissez le formulaire CNESST disponible auprès de votre gestionnaire.', category: 'Santé et sécurité' },
   ],
   pharmacies: [
-    { id: 'ph1', name: 'Pharmacie Lavoie & Associés', address: '1200 rue Sainte-Catherine', city: 'Montréal', ownerName: 'Dr. Sophie Lavoie', employeeCount: 3, plan: 'Pro', active: true },
-    { id: 'ph2', name: 'Pharmacie du Vieux-Port', address: '45 rue de la Commune', city: 'Montréal', ownerName: 'Dr. Jean Fortin', employeeCount: 12, plan: 'Entreprise', active: true },
-    { id: 'ph3', name: 'Pharmacie Beaulieu', address: '780 boul. Laurier', city: 'Québec', ownerName: 'Dr. Anne Beaulieu', employeeCount: 6, plan: 'Essentiel', active: false },
+    { id: 'ph1', name: 'Pharmacie Lavoie & Associés', address: '1200 rue Sainte-Catherine', city: 'Montréal', ownerName: 'Dr. Sophie Lavoie', adminEmail: 'admin@luminahr.ca', employeeCount: 3, plan: 'Pro', active: true },
+    { id: 'ph2', name: 'Pharmacie du Vieux-Port', address: '45 rue de la Commune', city: 'Montréal', ownerName: 'Dr. Jean Fortin', adminEmail: 'jean.fortin@pharmavp.ca', employeeCount: 12, plan: 'Entreprise', active: true },
+    { id: 'ph3', name: 'Pharmacie Beaulieu', address: '780 boul. Laurier', city: 'Québec', ownerName: 'Dr. Anne Beaulieu', adminEmail: 'anne.beaulieu@pharmab.ca', employeeCount: 6, plan: 'Essentiel', active: false },
   ],
 };

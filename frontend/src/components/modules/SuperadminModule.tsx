@@ -30,7 +30,7 @@ export default function SuperadminModule(): JSX.Element {
 
   const handleAdd = (e: FormEvent<HTMLFormElement>): void => {
     e.preventDefault();
-    addPharmacy({ name, address: '', city, ownerName, employeeCount: 0, plan, active: true });
+    addPharmacy({ name, address: '', city, ownerName, adminEmail: '', employeeCount: 0, plan, active: true });
     toast.success('Pharmacie ajoutée à la plateforme.');
     setDialogOpen(false);
     setName(''); setCity(''); setOwnerName('');

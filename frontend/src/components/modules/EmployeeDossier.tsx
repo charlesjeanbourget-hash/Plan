@@ -20,6 +20,7 @@ export default function EmployeeDossier(): JSX.Element {
   const [phone, setPhone] = useState('');
   const [position, setPosition] = useState<Position>('ATP');
   const [hourlyRate, setHourlyRate] = useState('25');
+  const [branchId, setBranchId] = useState(state.branches[0]?.id ?? '');
 
   const selected: Employee | undefined = state.employees.find((e) => e.id === selectedId);
 
@@ -27,6 +28,7 @@ export default function EmployeeDossier(): JSX.Element {
     e.preventDefault();
     const emp = addEmployee({
       firstName, lastName, email, phone, position,
+      branchId,
       status: 'Actif',
       hireDate: new Date().toISOString().slice(0, 10),
       hourlyRate: Number(hourlyRate),
@@ -104,6 +106,7 @@ export default function EmployeeDossier(): JSX.Element {
                   <p className="flex items-center gap-2 text-slate-600"><MapPin className="w-4 h-4 text-slate-400" /> {selected.address || '—'}</p>
                 </div>
                 <div className="space-y-2">
+                  <p className="text-slate-500">Succursale : <span className="font-semibold text-slate-800">{state.branches.find((b) => b.id === selected.branchId)?.name ?? '—'}</span></p>
                   <p className="text-slate-500">Embauche : <span className="font-semibold text-slate-800">{selected.hireDate}</span></p>
                   <p className="text-slate-500">Taux horaire : <span className="font-semibold text-slate-800">{selected.hourlyRate.toFixed(2)} $ / h</span></p>
                   <p className="text-slate-500">Heures / semaine : <span className="font-semibold text-slate-800">{selected.weeklyHours} h</span></p>
@@ -173,6 +176,15 @@ export default function EmployeeDossier(): JSX.Element {
                 <Label>Taux horaire ($)</Label>
                 <Input data-testid="employee-rate-input" type="number" step="0.5" min="15" value={hourlyRate} onChange={(e) => setHourlyRate(e.target.value)} required />
               </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Succursale</Label>
+              <Select value={branchId} onValueChange={setBranchId}>
+                <SelectTrigger data-testid="employee-branch-select"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {state.branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
             <Button data-testid="employee-submit-button" type="submit" className="w-full rounded-full bg-emerald-600 hover:bg-emerald-700">
               Ajouter l'employé

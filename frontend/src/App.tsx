@@ -21,10 +21,14 @@ import ContractsModule from '@/components/modules/ContractsModule';
 import BenefitsModule from '@/components/modules/BenefitsModule';
 import FAQModule from '@/components/modules/FAQModule';
 import SuperadminModule from '@/components/modules/SuperadminModule';
+import LicensesModule from '@/components/modules/LicensesModule';
+import MySpaceModule from '@/components/modules/MySpaceModule';
 
 const MODULES: Record<ModuleKey, () => JSX.Element> = {
   dashboard: DashboardModule,
+  myspace: MySpaceModule,
   employees: EmployeeDossier,
+  licenses: LicensesModule,
   scheduling: SchedulingModule,
   recruitment: RecruitmentModule,
   payroll: PayrollModule,

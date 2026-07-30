@@ -1,0 +1,27 @@
+{
+  "summary": "Iteration 2 tested end-to-end. Backend: 14/14 pytest passed — Root, Chat SSE, auth on /api/licenses* (403 without headers, 403 for employee, 403 admin on /api/audit-logs), Licences CRUD (POST/GET list, PDF upload+download roundtrip via Emergent Object Store, PUT update), multi-pharmacy isolation (admin ph1 does NOT see ph2 licence created by superadmin), droit à l'oubli (DELETE /api/licenses/employee/{id} returns {deleted:N} then 0 on retry), report /api/licenses/report returns days_remaining≤60, POST /api/report-settings persists, POST /api/licenses/report/send correctly returns 400 with French 'Clé API Resend manquante' message (expected, no key), GET /api/audit-logs as superadmin returns CREATION/CONSULTATION_LISTE/CONSULTATION_CERTIFICAT/DROIT_A_L_OUBLI actions. Frontend Playwright: admin sees licences module with 3 employee statuses + report panel + NO audit-trail-panel; adding a licence via edit-license-e1 updates status ('Expire bientôt') and populates report panel ('TEST-UI-999 · exp. 2026-08-19 · 20 jours'); saving report settings + send button produces the French Resend-missing error toast; droit à l'oubli e3 works and audit is invisible in admin UI; scheduling shows swap-requests-panel with sw1 (Julie→Karim s5) and approve-swap-sw1 removes it and reassigns; vacation-calendar navigates juillet 2026 → août 2026; payroll PDF downloaded (releve-paie-lavoie-période-courante.pdf); superadmin login shows audit-trail-panel populated with real actions incl. jeffmenard78@hotmail.com/CONSULTATION_LISTE etc.; julie sidebar has myspace but NOT licenses nor employees; julie downloads paystub PDF (releve-paie-gagnon-période-courante.pdf); julie submits a leave (2026-09-13→2026-09-18 'TEST vacance interconnexion') and, after logout+admin login, this exact leave is visible in admin Vacations page = interconnexion confirmed; julie's swap dialog opens shift/target selects with 2 shifts, submission works. Non-regression: landing loads with 3 portal cards.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py: `resend.api_key = RESEND_API_KEY` is set once at import time from the env-var snapshot; if RESEND_API_KEY is later populated (hot reload of .env or scheduler run) the client would still hold the empty value until the process restarts. Consider reading the key inside send_report_email() or reloading before each send.",
+    "server.py: /api/licenses PUT does not accept pharmacy_id override for superadmin; only license_scope(principal) is applied (empty scope) which lets superadmin edit any licence — OK — but admin cannot move a licence across branches of the same ph. Minor; behavior is fine, just worth documenting.",
+    "server.py monthly_reports_job errors are logged but not re-raised nor captured to audit_logs, so a failed monthly delivery leaves no persistent trace visible to admins. Consider adding an audit_logs entry (action=ENVOI_RAPPORT_ECHEC) on failure.",
+    "LicensesModule.tsx enumerates the licence table from HRContext employees; if an employee is removed from Dossiers separately, existing backend licence documents for that employee_id become orphans (still returned by GET /api/licenses but no matching row) — currently only cleaned via explicit droit-à-l'oubli."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/iteration_2.json"
+  ],
+  "success_rate": {"backend": "100% (14/14)", "frontend": "100% (14/14 flows)"},
+  "seed_data_creation": "Backend Mongo db.licenses: 4 TEST_ licences created (one in ph2 via superadmin, then cleaned up in module teardown via /api/licenses/employee/{id}). db.report_settings ph1 upserted to admin_email=test@example.com (kept — non-destructive). db.audit_logs accumulated ~20 test-related entries. Frontend localStorage was reset before each session; test candidate leaves and swap left behind in the running localStorage of the browser (ephemeral).",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "admin@luminahr.ca/admin123 (ph1), julie@luminahr.ca/employe123, jeffmenard78@hotmail.com/jeff2026 (superadmin) — from /app/memory/test_credentials.md. Backend headers X-User-Email/X-User-Role/X-Pharmacy-Id used for /api/licenses*.",
+  "context_for_next_testing_agent": "All iteration-2 flows verified. If retesting: (1) landing has no /login route — click [data-testid=header-login-button] to reach LoginPage. (2) Use [data-testid=sidebar-logout-button] to logout instead of localStorage.clear(), otherwise state built up in localStorage is lost between users (this caused an initial false-fail on the julie→admin leave interconnexion; the second run using logout button passed). (3) sidebar link is [data-testid=sidebar-link-vacations] (plural), not `vacation`. (4) After clearing local db.licenses between test runs the seed doesn't auto-recreate backend licences — the frontend creates them on-demand via LicensesModule. (5) RESEND_API_KEY intentionally empty → 400 with 'Clé API Resend manquante…' is the expected pass condition. (6) db.audit_logs is append-only; nothing prunes it — safe to inspect.",
+  "rca_of_the_issue": "N/A — no blocking issues found."
+}
