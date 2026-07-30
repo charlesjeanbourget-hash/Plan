@@ -87,41 +87,61 @@ class TestAuthJWT:
         assert r.json()["role"] == "superadmin"
         assert r.json()["is_temporary_password"] is True
 
-    def test_brute_force_lockout_localhost(self):
-        # Dedicated fictitious email to NOT lock real accounts.
-        # NOTE: We call the internal backend directly. Behind the k8s ingress
-        # the public URL rotates upstream client IPs (request.client.host
-        # varies per request), and since the lockout identifier is
-        # "ip:email", brute-force protection is effectively bypassed in
-        # production. Reported as a critical security bug.
-        local = "http://localhost:8001"
+    def test_brute_force_lockout_via_public_url(self):
+        # Iteration 3 fix re-test: identifier is now email-only (no IP),
+        # so brute-force protection must work through the k8s ingress via
+        # the public URL (REACT_APP_BACKEND_URL). We use a dedicated
+        # fictitious email to avoid locking real accounts.
         sess = requests.Session()
-        email = f"lockme_{uuid.uuid4().hex[:8]}@test.ca"
-        for _ in range(5):
-            r = sess.post(f"{local}/api/auth/login",
-                          json={"email": email, "password": "wrong"}, timeout=10)
-            assert r.status_code == 401
-        r = sess.post(f"{local}/api/auth/login",
-                      json={"email": email, "password": "wrong"}, timeout=10)
-        assert r.status_code == 429, f"Expected 429 after 5 fails, got {r.status_code}: {r.text}"
-        assert "tentatives" in r.json().get("detail", "").lower()
+        email = f"retest-lock-{uuid.uuid4().hex[:8]}@test.ca"
 
-    def test_brute_force_ineffective_behind_ingress(self, s):
-        # Documents the production security gap: 6 consecutive bad logins
-        # via the public URL still return 401 (never 429) because the
-        # identifier includes request.client.host which rotates across
-        # ingress upstream IPs.
-        email = f"ingress_bf_{uuid.uuid4().hex[:8]}@test.ca"
-        statuses = []
-        for _ in range(7):
-            r = login(s, email, "wrong")
-            statuses.append(r.status_code)
-        # This assertion INTENTIONALLY documents the bug (all 401, never 429).
-        # If the identifier is fixed (e.g. email-only or X-Forwarded-For),
-        # this test will start failing → update it then.
-        assert 429 not in statuses, (
-            f"Ingress lockout now triggers correctly ({statuses}) — "
-            f"update this documenting test.")
+        # 4 first failed attempts → 401
+        for i in range(4):
+            r = sess.post(f"{BASE_URL}/api/auth/login",
+                          json={"email": email, "password": "wrong"}, timeout=30)
+            assert r.status_code == 401, f"Attempt {i+1}: expected 401, got {r.status_code}: {r.text}"
+
+        # 5th attempt → 429 with Retry-After header
+        r5 = sess.post(f"{BASE_URL}/api/auth/login",
+                       json={"email": email, "password": "wrong"}, timeout=30)
+        assert r5.status_code == 429, f"5th attempt: expected 429, got {r5.status_code}: {r5.text}"
+        assert "tentatives" in r5.json().get("detail", "").lower()
+        assert "Retry-After" in r5.headers, f"Missing Retry-After header. Headers: {dict(r5.headers)}"
+        retry_after = int(r5.headers["Retry-After"])
+        assert 0 < retry_after <= 15 * 60, f"Retry-After out of range: {retry_after}"
+
+        # Follow-up attempts during lockout window → still 429
+        for i in range(2):
+            r = sess.post(f"{BASE_URL}/api/auth/login",
+                          json={"email": email, "password": "wrong"}, timeout=30)
+            assert r.status_code == 429, f"Follow-up {i+1}: expected 429, got {r.status_code}"
+            assert "Retry-After" in r.headers
+
+        # Even a login attempt with the *correct* password during lockout should be 429
+        # (identifier is email-only, so lockout blocks the account regardless of pwd).
+        r_correct = sess.post(f"{BASE_URL}/api/auth/login",
+                              json={"email": email, "password": "irrelevant"}, timeout=30)
+        assert r_correct.status_code == 429
+
+    def test_valid_login_unaffected_by_other_email_lockout(self, s):
+        # While a fictitious email is locked out, admin@luminahr.ca must
+        # still be able to log in normally (200), because the identifier is
+        # per-email, not global/IP-based.
+        lock_email = f"retest-isolation-{uuid.uuid4().hex[:8]}@test.ca"
+        lock_sess = requests.Session()
+        # Trigger lockout on the fictitious email
+        for _ in range(5):
+            lock_sess.post(f"{BASE_URL}/api/auth/login",
+                           json={"email": lock_email, "password": "wrong"}, timeout=30)
+        # Confirm it's actually locked
+        r_locked = lock_sess.post(f"{BASE_URL}/api/auth/login",
+                                  json={"email": lock_email, "password": "wrong"}, timeout=30)
+        assert r_locked.status_code == 429
+
+        # Legitimate admin login must still succeed
+        r_admin = login(s, "admin@luminahr.ca", "admin123")
+        assert r_admin.status_code == 200, r_admin.text
+        assert "access_token" in r_admin.json()
 
 
 # ---------------------- Change password ----------------------

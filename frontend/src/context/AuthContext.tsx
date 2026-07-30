@@ -73,7 +73,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     axios
       .get<BackendUser>(`${API}/auth/me`, { headers: { Authorization: `Bearer ${stored.token}` } })
       .then((res) => setAuth({ token: stored.token, user: mapUser(res.data) }))
-      .catch(() => setAuth(null));
+      .catch((err) => {
+        if (axios.isAxiosError(err) && err.response && (err.response.status === 401 || err.response.status === 403)) {
+          setAuth(null);
+        }
+      });
   }, []);
 
   const login = async (email: string, password: string): Promise<string | null> => {

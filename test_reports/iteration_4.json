@@ -1,0 +1,34 @@
+{
+  "summary": "Iteration 4 — targeted re-test of the brute-force lockout fix via the PUBLIC URL (REACT_APP_BACKEND_URL). The lockout identifier is now email-only (server.py:184 `identifier = email`), so per-email lockout works correctly through the k8s ingress. Updated /app/backend/tests/backend_test.py: replaced the two previous tests (test_brute_force_lockout_localhost + test_brute_force_ineffective_behind_ingress that documented the bug) with two new tests exercising the correct behavior through the public URL. All 17/17 backend tests pass, including the new brute-force cases. Frontend NOT retested per request.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py:184 — brute-force key is now email-only. This correctly closes the ingress-bypass bug but introduces a small DoS-on-a-real-user risk (an attacker can lock any known email for 15 min). Acceptable tradeoff for now; consider adding a CAPTCHA or an X-Forwarded-For CIDR secondary counter if abuse is observed.",
+    "server.py:194-200 — On the 5th failed attempt, the code now returns 429 directly (with Retry-After) AND resets count to 0 while setting locked_until. Behavior is coherent (verified by test), but note: subsequent attempts during the lockout window enter the 'attempt.locked_until > now' short-circuit at line 187 which does NOT increment count — good, prevents indefinite extension of the window.",
+    "server.py:202 — On successful login, login_attempts document is deleted. Confirmed by test_valid_login_unaffected_by_other_email_lockout that another email's lockout does not affect a legitimate login."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/iteration_4.json",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "success_rate": {"backend": "100% (17/17)", "frontend": "not retested (per request)"},
+  "seed_data_creation": "login_attempts collection: fictitious retest-lock-*@test.ca and retest-isolation-*@test.ca entries created during brute-force tests (harmless — 15-min TTL via locked_until). No real accounts locked.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": false,
+  "test_credentials": "admin@luminahr.ca/admin123 (verified 200 during another email's lockout). Fictitious emails used for brute-force scenarios: retest-lock-<uuid>@test.ca, retest-isolation-<uuid>@test.ca.",
+  "context_for_next_testing_agent": "Brute-force lockout fix is verified end-to-end via the public URL. Tests to be aware of: (1) TestAuthJWT::test_brute_force_lockout_via_public_url — expects 4×401 then 5th→429 with Retry-After header (0<value<=900s) then subsequent attempts also 429 (including with a would-be correct password since identifier is email-only). (2) TestAuthJWT::test_valid_login_unaffected_by_other_email_lockout — locks a fictitious email then confirms admin@luminahr.ca still gets 200. Each test uses a fresh uuid-suffixed email so the tests are re-runnable without cleanup. Total suite: 17/17 pass in ~7s.",
+  "rca_of_the_issue": "Previous bug (iteration_3): identifier keyed on `request.client.host + email`, and k8s ingress rotates upstream IPs so the counter never reached 5 in production. Fix applied by main agent: identifier = email (server.py:184). Re-test via REACT_APP_BACKEND_URL now consistently triggers 429 on the 5th attempt with a proper Retry-After header, and the lockout is properly scoped to the offending email (other users unaffected)."
+}
