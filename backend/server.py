@@ -68,20 +68,26 @@ async def chat_endpoint(req: ChatRequest):
 
     async def gen():
         parts = []
-        async for ev in llm.stream_message(UserMessage(text=req.message)):
-            if isinstance(ev, TextDelta):
-                parts.append(ev.content)
-                yield f"data: {json.dumps({'delta': ev.content})}\n\n"
-            elif isinstance(ev, StreamDone):
-                break
-        await db.chat_messages.insert_one({
-            "id": str(uuid.uuid4()),
-            "session_id": req.session_id,
-            "role": "assistant",
-            "content": "".join(parts),
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        })
-        yield "data: [DONE]\n\n"
+        try:
+            async for ev in llm.stream_message(UserMessage(text=req.message)):
+                if isinstance(ev, TextDelta):
+                    parts.append(ev.content)
+                    yield f"data: {json.dumps({'delta': ev.content})}\n\n"
+                elif isinstance(ev, StreamDone):
+                    break
+            if parts:
+                await db.chat_messages.insert_one({
+                    "id": str(uuid.uuid4()),
+                    "session_id": req.session_id,
+                    "role": "assistant",
+                    "content": "".join(parts),
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                })
+        except Exception as exc:
+            logger.error(f"Chat stream error: {exc}")
+            yield f"data: {json.dumps({'error': 'Le service IA est momentanément indisponible.'})}\n\n"
+        finally:
+            yield "data: [DONE]\n\n"
 
     return StreamingResponse(
         gen(),

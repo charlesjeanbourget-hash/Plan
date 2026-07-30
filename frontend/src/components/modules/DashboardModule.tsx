@@ -17,7 +17,7 @@ export default function DashboardModule(): JSX.Element {
   return (
     <div data-testid="dashboard-module">
       <ModuleHeader
-        title={`Bonjour, ${currentUser?.name.split(' ')[0] ?? ''}`}
+        title={`Bonjour, ${currentUser?.name ?? ''}`}
         subtitle="Voici l'état de votre pharmacie aujourd'hui."
       />
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-10">
