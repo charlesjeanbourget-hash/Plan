@@ -94,6 +94,17 @@ export default function TasksModule(): JSX.Element {
 
   useEffect(() => { void refresh(); }, [refresh]);
 
+  useEffect(() => {
+    if (!isAdmin) return;
+    axios.get<{ employee_id: string; capacities?: string[] }[]>(`${API}/profiles`, { headers: { Authorization: `Bearer ${token ?? ''}` } })
+      .then((r) => {
+        const m: Record<string, string[]> = {};
+        r.data.forEach((p) => { m[p.employee_id] = p.capacities ?? []; });
+        setCaps(m);
+      })
+      .catch(() => undefined);
+  }, [token, isAdmin]);
+
   const doneCount = tasks.filter((t) => t.done).length;
   const progress = tasks.length > 0 ? Math.round((doneCount / tasks.length) * 100) : 0;
 
