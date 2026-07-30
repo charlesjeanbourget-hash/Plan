@@ -9,7 +9,7 @@ import { toast } from 'sonner';
 import {
   LayoutDashboard, Users, CalendarClock, Briefcase, Wallet, RefreshCw, TreePalm,
   TrendingUp, ClipboardCheck, FileText, HeartHandshake, HelpCircle, ShieldCheck,
-  LogOut, Pill, Menu, X, LucideIcon, BadgeCheck, UserRound, KeyRound,
+  LogOut, Pill, Menu, X, LucideIcon, BadgeCheck, UserRound, KeyRound, Eye, EyeOff,
 } from 'lucide-react';
 
 interface Props {
@@ -48,6 +48,8 @@ export default function Sidebar({ active, onSelect, onLogout }: Props): JSX.Elem
   const { currentUser, changePassword } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [pwdOpen, setPwdOpen] = useState(false);
+  const [showCurrentPwd, setShowCurrentPwd] = useState(false);
+  const [showNewPwd, setShowNewPwd] = useState(false);
   const [currentPwd, setCurrentPwd] = useState('');
   const [newPwd, setNewPwd] = useState('');
   const [pwdError, setPwdError] = useState('');
@@ -156,11 +158,21 @@ export default function Sidebar({ active, onSelect, onLogout }: Props): JSX.Elem
           <form onSubmit={(e) => void submitPassword(e)} className="space-y-4">
             <div className="space-y-2">
               <Label>Mot de passe actuel</Label>
-              <Input data-testid="current-password-input" type="password" value={currentPwd} onChange={(e) => setCurrentPwd(e.target.value)} required />
+              <div className="relative">
+                <Input data-testid="current-password-input" type={showCurrentPwd ? 'text' : 'password'} className="pr-10" value={currentPwd} onChange={(e) => setCurrentPwd(e.target.value)} required />
+                <button type="button" data-testid="current-password-toggle" onClick={() => setShowCurrentPwd((v) => !v)} aria-label={showCurrentPwd ? 'Masquer le mot de passe' : 'Afficher le mot de passe'} className="absolute inset-y-0 right-0 flex items-center px-3 text-slate-400 hover:text-slate-700 transition-colors">
+                  {showCurrentPwd ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
             </div>
             <div className="space-y-2">
               <Label>Nouveau mot de passe (min. 8 caractères)</Label>
-              <Input data-testid="new-password-input" type="password" value={newPwd} onChange={(e) => setNewPwd(e.target.value)} minLength={8} required />
+              <div className="relative">
+                <Input data-testid="new-password-input" type={showNewPwd ? 'text' : 'password'} className="pr-10" value={newPwd} onChange={(e) => setNewPwd(e.target.value)} minLength={8} required />
+                <button type="button" data-testid="new-password-toggle" onClick={() => setShowNewPwd((v) => !v)} aria-label={showNewPwd ? 'Masquer le mot de passe' : 'Afficher le mot de passe'} className="absolute inset-y-0 right-0 flex items-center px-3 text-slate-400 hover:text-slate-700 transition-colors">
+                  {showNewPwd ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
             </div>
             {pwdError && <p data-testid="password-error" className="text-sm text-red-600">{pwdError}</p>}
             <Button data-testid="password-submit-button" type="submit" className="w-full rounded-full bg-emerald-600 hover:bg-emerald-700">

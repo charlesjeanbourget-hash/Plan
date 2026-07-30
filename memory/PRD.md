@@ -60,6 +60,7 @@ admin@luminahr.ca/admin123 · julie@luminahr.ca/employe123 · super@luminahr.ca/
 - **Relevés PDF historiques** : sélecteur de périodes de paie passées dans Paie (admin) et Mon espace (employé), cumulatifs annuels (YTD) réels calculés sur les périodes de l'année.
 - Fix : import `Branch` manquant dans HRContext.tsx (tsc --noEmit propre).
 - Mots de passe temporaires superadmin communiqués à l'utilisateur.
+- Bouton œil (afficher/masquer) sur les champs mot de passe : page de connexion + dialogue « Changer mon mot de passe » (30 juin 2026).
 
 ## Backlog technique (suggestions revue de code, non bloquant)
 - Throttle sur POST /api/licenses/reminders/run (1 exécution/min) et plafond de reprises Resend en cas d'échec transitoire (éviter renvois en boucle).

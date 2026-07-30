@@ -4,7 +4,7 @@ import { useAuth } from '@/context/AuthContext';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Pill } from 'lucide-react';
+import { ArrowLeft, Pill, Eye, EyeOff } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Props {
@@ -17,6 +17,7 @@ export default function LoginPage({ onNavigate, onSuccess }: Props): JSX.Element
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
@@ -68,15 +69,27 @@ export default function LoginPage({ onNavigate, onSuccess }: Props): JSX.Element
             </div>
             <div className="space-y-2">
               <Label htmlFor="password">Mot de passe</Label>
-              <Input
-                id="password"
-                data-testid="login-password-input"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                required
-              />
+              <div className="relative">
+                <Input
+                  id="password"
+                  data-testid="login-password-input"
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="pr-10"
+                  required
+                />
+                <button
+                  type="button"
+                  data-testid="login-password-toggle"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+                  className="absolute inset-y-0 right-0 flex items-center px-3 text-slate-400 hover:text-slate-700 transition-colors"
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
             </div>
             {error && (
               <p data-testid="login-error-message" className="text-sm text-red-600">{error}</p>
