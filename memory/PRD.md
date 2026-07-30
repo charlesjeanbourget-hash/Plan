@@ -47,6 +47,13 @@ admin@luminahr.ca/admin123 · julie@luminahr.ca/employe123 · super@luminahr.ca/
 - **Relevés PDF** : jsPDF format québécois (brut, impôts féd./prov., RRQ, AE, RQAP, net) dans Paie (admin) et Mon espace.
 - **Échange de quarts** : demande employé → panneau dans Horaires → approbation 1 clic réassigne le quart partout (interconnexion HRContext).
 
+## Itération 3 (30 juin 2026) — testée (backend 17/17 + re-test lockout, frontend 12/12)
+- **Authentification JWT serveur** : users MongoDB + bcrypt, POST /api/auth/login (jeton 7 jours), GET /api/auth/me, POST /api/auth/change-password, verrouillage anti-brute-force par email (5 échecs → 429 15 min, Retry-After), seed idempotent de 5 comptes. Routes licences protégées par Bearer (fini les headers X-User-*). AuthContext v3 (localStorage luminahr_auth_v3, revalidation /auth/me au montage, déconnexion seulement sur 401/403). Dialog « Mot de passe » dans la sidebar avec pastille ambre si mot de passe temporaire.
+- **Comptes** : admin@luminahr.ca/admin123 · julie@luminahr.ca/employe123 · superadmins temporaires : jeffmenard78@hotmail.com/Lumina-Jeff!2941, charles-jbourget@hotmail.com/Lumina-Charles!7358, charlesjeanbourget@gmail.com/Lumina-Owner!5127
+- **Alertes licences** : bannière + pastille animée sur le tableau de bord (admin/superadmin) si licences ≤60 jours.
+- **Filtres succursales** : Horaires, Paie (totaux recalculés) et Dossiers employés.
+- **Resend ACTIVÉ** : clé réelle dans backend/.env, envoi de rapport testé avec succès vers charlesjeanbourget@gmail.com. Attention mode test Resend : livraison limitée à l'adresse du propriétaire du compte tant qu'aucun domaine n'est vérifié.
+
 ## Notes techniques
 - Ne jamais recréer `jsconfig.json` (conflit CRA avec tsconfig.json)
 - npm interdit — yarn uniquement
