@@ -196,6 +196,12 @@ admin@luminahr.ca/admin123 · julie@luminahr.ca/employe123 · super@luminahr.ca/
 - **Footer riche** : colonnes Marque / Fonctionnalités (ancres scroll vers sec-{id} des 10 sections vitrines) / Espaces / Support (Réserver une démo) + bande badges « Conforme Loi 25 » (ShieldCheck vert) et « Fait au Québec » (Leaf bronze). Pas d'icônes sociales (choix client). Anciens testids footer-*-link conservés.
 - LandingShowcase : sections avec id `sec-{id}` pour le scroll. Ordre de page : hero → ROI → vitrines → paie → témoignages → temps → démo → portails → footer.
 
+## Itération 24 (31 juillet 2026) — Suivi des demandes de démo (superadmin) — testée (curl complet + E2E navigateur)
+- **Panneau « Demandes de démo »** (`SuperadminDemoRequests.tsx`, testid demo-requests-panel) dans le module Superadmin (entre Vue d'ensemble et Comptes) : liste des demandes du formulaire public avec date, nom, pharmacie, courriel (mailto:), téléphone (tel:), message, compteurs par statut, bouton Actualiser, suppression.
+- **Statuts** : nouvelle (bronze, défaut) → contactee (bleu ciel) → planifiee (violet) → convertie (vert) via Select coloré (demo-status-select-{id}). Backend : GET /api/demo-requests (superadmin, 403 admin — vérifié), PUT /{id}/status (400 statut invalide, 404 introuvable, audit MODIF_STATUT_DEMO), DELETE /{id} (audit SUPPRESSION_DEMO).
+- Donnée démo conservée : demande « Sophie Démo » (Pharmacie Belle-Rive, statut convertie après tests E2E).
+- **QuickBooks (EN ATTENTE DES CLÉS CLIENT)** : playbook complet obtenu via integration_expert (OAuth2 intuit-oauth/intuitlib + httpx, POST /v3/company/{realmId}/timeactivity minorversion=75, Hours+Minutes pas StartTime/EndTime, refresh token 100 j à rotation, sandbox pour Accounting mais PAS pour Payroll). Le client doit créer un compte sur developer.intuit.com → créer une app → fournir Client ID + Client Secret (clés Development d'abord). NE PAS implémenter avant réception des clés.
+
 ## Notes techniques
 - Ne jamais recréer `jsconfig.json` (conflit CRA avec tsconfig.json)
 - npm interdit — yarn uniquement

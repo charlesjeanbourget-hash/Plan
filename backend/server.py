@@ -4341,6 +4341,43 @@ async def create_demo_request(payload: DemoRequestIn, request: Request):
     return {"ok": True, "email_sent": sent}
 
 
+DEMO_STATUSES = ("nouvelle", "contactee", "planifiee", "convertie")
+
+
+class DemoStatusIn(BaseModel):
+    status: str
+
+
+@api_router.get("/demo-requests")
+async def list_demo_requests(su: dict = Depends(require_superadmin)):
+    docs = await db.demo_requests.find({}, {"_id": 0, "ip": 0}).sort("created_at", -1).to_list(500)
+    for d in docs:
+        d.setdefault("status", "nouvelle")
+    return docs
+
+
+@api_router.put("/demo-requests/{req_id}/status")
+async def update_demo_request_status(req_id: str, payload: DemoStatusIn, su: dict = Depends(require_superadmin)):
+    if payload.status not in DEMO_STATUSES:
+        raise HTTPException(status_code=400, detail="Statut invalide.")
+    res = await db.demo_requests.update_one({"id": req_id}, {"$set": {"status": payload.status}})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Demande introuvable.")
+    await log_audit(su["email"], su["role"], "MODIF_STATUT_DEMO", "demo", req_id,
+                    f"Statut de la demande de démo : {payload.status}", "")
+    return {"ok": True, "status": payload.status}
+
+
+@api_router.delete("/demo-requests/{req_id}")
+async def delete_demo_request(req_id: str, su: dict = Depends(require_superadmin)):
+    res = await db.demo_requests.delete_one({"id": req_id})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Demande introuvable.")
+    await log_audit(su["email"], su["role"], "SUPPRESSION_DEMO", "demo", req_id,
+                    "Demande de démo supprimée", "")
+    return {"ok": True}
+
+
 app.include_router(api_router)
 
 app.add_middleware(

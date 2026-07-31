@@ -6,6 +6,7 @@ import { ModuleHeader, StatCard } from '@/components/modules/shared';
 import { SuperadminUsers } from '@/components/modules/SuperadminUsers';
 import { SuperadminOverview } from '@/components/modules/SuperadminOverview';
 import { SuperadminPartners } from '@/components/SuperadminPartners';
+import { SuperadminDemoRequests } from '@/components/modules/SuperadminDemoRequests';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -100,6 +101,8 @@ export default function SuperadminModule(): JSX.Element {
       </div>
 
       <SuperadminOverview />
+
+      <SuperadminDemoRequests />
 
       <SuperadminUsers />
 
