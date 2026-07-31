@@ -108,15 +108,22 @@ export default function SchedulingModule(): JSX.Element {
     setSelectedResources((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   };
 
-  const handleDrop = (empId: string, d: string): void => {
+  const handleDrop = (empId: string, d: string, copy: boolean): void => {
     if (!isAdmin || !dragShiftId) return;
     const shift = state.shifts.find((s) => s.id === dragShiftId);
     setDragShiftId(null);
     setDropTarget(null);
-    if (!shift || (shift.employeeId === empId && shift.date === d)) return;
-    updateShift(shift.id, { employeeId: empId, date: d });
+    if (!shift) return;
     const emp = getEmployee(empId);
-    toast.success(`Quart ${shift.startTime}–${shift.endTime} déplacé vers ${emp ? `${emp.firstName} ${emp.lastName}` : 'l\'employé'} le ${d}.`);
+    const empName = emp ? `${emp.firstName} ${emp.lastName}` : 'l\'employé';
+    if (copy) {
+      addShift({ employeeId: empId, date: d, startTime: shift.startTime, endTime: shift.endTime, resourceIds: [...(shift.resourceIds ?? [])] });
+      toast.success(`Quart ${shift.startTime}–${shift.endTime} dupliqué pour ${empName} le ${d}.`);
+      return;
+    }
+    if (shift.employeeId === empId && shift.date === d) return;
+    updateShift(shift.id, { employeeId: empId, date: d });
+    toast.success(`Quart ${shift.startTime}–${shift.endTime} déplacé vers ${empName} le ${d}.`);
   };
 
   const pendingSwaps = state.shiftSwaps.filter(
@@ -297,7 +304,7 @@ export default function SchedulingModule(): JSX.Element {
         )}
         {isAdmin && (
           <span data-testid="dnd-hint" className="hidden lg:inline-flex items-center gap-1.5 text-xs text-slate-400">
-            <Hand className="w-3.5 h-3.5" /> Glissez-déposez un quart vers une autre case pour le déplacer
+            <Hand className="w-3.5 h-3.5" /> Glissez-déposez un quart pour le déplacer · maintenez <kbd className="px-1 py-0.5 rounded border border-slate-300 bg-slate-50 text-[10px] font-semibold text-slate-600">Alt</kbd> pour le dupliquer
           </span>
         )}
         <div className="ml-auto w-full sm:w-auto">
@@ -340,9 +347,9 @@ export default function SchedulingModule(): JSX.Element {
                     <td
                       key={d}
                       data-testid={`schedule-cell-${emp.id}-${d}`}
-                      onDragOver={(e) => { if (isAdmin && dragShiftId) { e.preventDefault(); setDropTarget(cellKey); } }}
+                      onDragOver={(e) => { if (isAdmin && dragShiftId) { e.preventDefault(); e.dataTransfer.dropEffect = e.altKey ? 'copy' : 'move'; setDropTarget(cellKey); } }}
                       onDragLeave={() => setDropTarget((t) => (t === cellKey ? null : t))}
-                      onDrop={(e) => { e.preventDefault(); handleDrop(emp.id, d); }}
+                      onDrop={(e) => { e.preventDefault(); handleDrop(emp.id, d, e.altKey); }}
                       className={`p-2 border-b border-r border-slate-200 last:border-r-0 align-top transition-colors ${d === today ? 'bg-emerald-50/50' : ''} ${dropTarget === cellKey && dragShiftId ? 'bg-bronze-50 ring-2 ring-inset ring-bronze-400' : ''}`}
                     >
                       {shifts.map((s) => (
@@ -350,7 +357,7 @@ export default function SchedulingModule(): JSX.Element {
                           key={s.id}
                           data-testid={`shift-chip-${s.id}`}
                           draggable={isAdmin}
-                          onDragStart={(e) => { setDragShiftId(s.id); e.dataTransfer.effectAllowed = 'move'; }}
+                          onDragStart={(e) => { setDragShiftId(s.id); e.dataTransfer.effectAllowed = 'copyMove'; }}
                           onDragEnd={() => { setDragShiftId(null); setDropTarget(null); }}
                           className={`group relative bg-emerald-600 text-white rounded-lg px-2 py-1.5 mb-1 text-xs font-semibold text-center ${isAdmin ? 'cursor-grab active:cursor-grabbing' : ''} ${dragShiftId === s.id ? 'opacity-40' : ''}`}
                         >

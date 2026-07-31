@@ -222,6 +222,9 @@ admin@luminahr.ca/admin123 · julie@luminahr.ca/employe123 · super@luminahr.ca/
 - **Punch géolocalisé** : `lib/geo.ts` getPunchGeo (navigator.geolocation best-effort, timeout 4 s, échec silencieux). PunchKiosk POST /punch {code, lat, lng, accuracy}; MyPunchCard POST /punch/me {lat…}. Backend : PunchCodeIn étendu + PunchGeoIn + geo_dict + do_punch(location) → punch_in_location/punch_out_location stockés. Admin : liens « Position entrée/sortie » (punch-in-geo-{id}) vers Google Maps dans le dialogue Détails du panneau Paie.
 - NOTE testing agent : NIP Julie = 7068. Punchs géo de test (45.5,-73.56) restent dans Mongo (valides).
 
+## Itération 28 (31 juillet 2026) — Duplication de quart par Alt + glisser-déposer — testée E2E (Playwright : Alt+drag 4→5 quarts avec toast « dupliqué », drag simple = déplacement)
+- SchedulingModule : handleDrop(empId, date, copy) — copy=e.altKey au drop. Alt maintenu → addShift (copie avec resourceIds clonés), sinon updateShift (déplacement). dropEffect 'copy'/'move' selon Alt, effectAllowed 'copyMove'. Indice mis à jour : « … maintenez Alt pour le dupliquer » (kbd stylisé).
+
 ## Notes techniques
 - Ne jamais recréer `jsconfig.json` (conflit CRA avec tsconfig.json)
 - npm interdit — yarn uniquement
