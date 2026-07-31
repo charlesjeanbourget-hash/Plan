@@ -9,9 +9,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ChevronLeft, ChevronRight, Plus, X, ArrowLeftRight, Check, Stethoscope } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, X, ArrowLeftRight, Check, Stethoscope, CopyPlus } from 'lucide-react';
 import { ScheduleProposals } from '@/components/ScheduleProposals';
 import { AppointmentDialog } from '@/components/AppointmentDialog';
+import { DuplicateWeekDialog } from '@/components/DuplicateWeekDialog';
 import { toast } from 'sonner';
 
 const DAY_LABELS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
@@ -42,6 +43,7 @@ export default function SchedulingModule(): JSX.Element {
   const [replacements, setReplacements] = useState<ReplacementRequestDoc[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [apptOpen, setApptOpen] = useState(false);
+  const [dupOpen, setDupOpen] = useState(false);
 
   useEffect(() => {
     if (!isAdmin || !token) return;
@@ -111,6 +113,11 @@ export default function SchedulingModule(): JSX.Element {
             {(isNurse || isAdmin) && (
               <Button data-testid="add-appointment-button" variant="outline" onClick={() => setApptOpen(true)} className="rounded-full border-sky-300 text-sky-800 hover:bg-sky-50">
                 <Stethoscope className="w-4 h-4 mr-1" /> Rendez-vous
+              </Button>
+            )}
+            {isAdmin && (
+              <Button data-testid="duplicate-week-button" variant="outline" onClick={() => setDupOpen(true)} className="rounded-full border-bronze-300 text-bronze-800 hover:bg-bronze-50">
+                <CopyPlus className="w-4 h-4 mr-1" /> Dupliquer la semaine
               </Button>
             )}
             <Button data-testid="add-shift-button" onClick={() => setDialogOpen(true)} className="rounded-full bg-emerald-600 hover:bg-emerald-700">
@@ -283,6 +290,7 @@ export default function SchedulingModule(): JSX.Element {
       </div>
 
       <AppointmentDialog open={apptOpen} onOpenChange={setApptOpen} onCreated={() => void refreshAppointments()} />
+      {isAdmin && <DuplicateWeekDialog open={dupOpen} onClose={() => setDupOpen(false)} days={days} />}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent data-testid="add-shift-dialog">

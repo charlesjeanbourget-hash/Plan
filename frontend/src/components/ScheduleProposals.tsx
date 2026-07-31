@@ -4,7 +4,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useHR } from '@/context/HRContext';
 import { ScheduleProposal, ProposalStatus, ProposalWarning, ProposalAlert } from '@/types';
 import { requestNavigate } from '@/lib/nav';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -354,6 +354,9 @@ export const ScheduleProposals = (): JSX.Element => {
         <DialogContent data-testid="generate-schedule-dialog" className="max-h-[85vh] overflow-y-auto sm:max-w-xl">
           <DialogHeader>
             <DialogTitle className="font-heading">Générer l'horaire par IA</DialogTitle>
+            <DialogDescription>
+              L'IA compose l'horaire selon le budget, l'achalandage, les tâches, les absences et les profils des employés.
+            </DialogDescription>
           </DialogHeader>
           <form onSubmit={(e) => void generate(e)} className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

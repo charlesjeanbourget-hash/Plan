@@ -155,6 +155,19 @@ admin@luminahr.ca/admin123 · julie@luminahr.ca/employe123 · super@luminahr.ca/
 - **« Ma tournée du jour »** (livreur avec livraisons actives) : GET /api/deliveries/route — géocodage Nominatim (cache Mongo geocache, throttle 1 req/s), ordre urgences d'abord puis plus proche voisin, km par étape (vol d'oiseau ×1,3) + total, adresses non localisées en fin de tournée, lien Google Maps multi-étapes. Manager : ?courier_employee_id=. Adresse de départ configurable par pharmacie : GET/PUT /api/pharmacy/settings (défaut « 5090 Rue Sherbrooke Est, Montréal, QC », bouton « Adresse de départ » module Livraisons, audit MODIF_ADRESSE_PHARMACIE).
 - Correctif post-test : boutons delete-shift/delete-appointment visibles sans survol sur écrans tactiles (<md).
 
+## Itération 18 (31 juillet 2026) — Horaire IA selon budget + achalandage — testée 100 % (iteration_21.json : backend 14/14, frontend 11/11)
+- **Budget salarial hebdomadaire** : champ $ dans le dialogue de génération (gen-budget-input, vide = sans limite), persisté par pharmacie (Mongo `schedule_settings`), pré-rempli à la prochaine ouverture. L'IA reçoit les taux horaires des profils et doit respecter le budget (compromis expliqués dans le summary).
+- **Grille d'achalandage** : 7 jours × 3 plages (Matin 8h-12h / Après-midi 12h-17h / Soir 17h-21h30) en clients/heure (gen-traffic-{day}-{block}, borné 0-500), sauvegardée, transmise à l'IA (≈1 employé/12-15 clients/h en plus du pharmacien).
+- **Endpoints** : GET/PUT /api/schedule/settings {weekly_budget, traffic} (PUT admin/manager, 400 invalide, 403 employé). POST /schedule/generate accepte weekly_budget (persisté).
+- **Vérifications déterministes post-génération** : estimated_cost (Σ heures × taux) + weekly_budget stockés sur la proposition ; badge « Coût estimé : X $ / Budget : Y $ » (proposal-cost-{id}, vert/rouge) ; alertes kind='budget' (dépassement, rouge, statique), kind='profile' (« Taux horaire manquant » par employé planifié sans taux, cliquable → dossier), kind='traffic' (plage achalandée sans couverture, statique). alert-static-* vs alert-link-*.
+- Vérifié E2E réel : budget 1500 $ → 4 quarts, coût 621,60 $ exact (3×8h×25,90 $ Julie), alertes taux manquant + 2 plages Soir non couvertes.
+- Fix a11y : DialogDescription ajouté au dialogue de génération.
+
+## Itération 19 (31 juillet 2026) — Duplication de semaine d'horaire — testée (self-test E2E navigateur complet)
+- **« Dupliquer la semaine »** (module Horaires, admin/gestionnaire, duplicate-week-button) : copie tous les quarts de la semaine affichée vers 1 à 16 semaines futures cochées (DuplicateWeekDialog.tsx, duplicate-week-checkbox-{1..16}, « Tout cocher », badge « X quart(s) déjà présents » par semaine cible).
+- **Mode intelligent** : ignore les quarts identiques déjà présents (idempotent, vérifié : re-duplication → 0 doublon) et les quarts tombant sur une absence approuvée ; toast résumé « X copiés · Y ignorés — déjà présents · Z ignorés — absence approuvée ».
+- 100 % frontend (quarts dans HRContext/localStorage), aucun endpoint requis.
+
 ## Notes techniques
 - Ne jamais recréer `jsconfig.json` (conflit CRA avec tsconfig.json)
 - npm interdit — yarn uniquement
