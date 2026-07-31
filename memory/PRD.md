@@ -144,6 +144,10 @@ admin@luminahr.ca/admin123 · julie@luminahr.ca/employe123 · super@luminahr.ca/
 - **Objectif d'équipe hebdo** (TeamGoalBar.tsx dans Tâches vue Semaine, visible par tous) : /api/tasks/goal (GET tous rôles, POST admin/manager 50-100 %), barre de progression pharmacy-wide avec marqueur d'objectif, état « Objectif atteint ! ». Objectif ph1 : 80 %.
 - Données démo conservées : livraison livrée « M. Robert Sirois », partenaire PharmaStaff Québec.
 
+## Itération 16 (31 juillet 2026) — Preuve de livraison + AUDIT EXHAUSTIF — testée 100 % (iteration_18.json : backend 5/5, frontend tous flux, audit complet 0 défaut)
+- **Preuve de livraison** : au clic « Marquer livrée », dialogue (DeliveryProofDialog.tsx) avec 2 modes — PHOTO (upload/caméra, compression canvas max 1200px JPEG 0.75) ou SIGNATURE (canvas dessinable pointer events, bouton effacer) ; preuve optionnelle (« Confirmer la livraison » sans preuve). Backend : PUT /api/deliveries/{id}/status accepte proof_image (data:image/*, max ~3 Mo, 400 sinon) + proof_type photo|signature ; stockés en base64 dans Mongo. Carte : miniature cliquable (delivery-proof-thumb-*) → proof-view-dialog agrandi. Audit journalisé « avec preuve (type) ».
+- **Audit exhaustif demandé par le client** (« aucun bouton non fonctionnel, aucun endroit qui mène nulle part ») : pages publiques (landing, carrières, borne punch), 16 modules admin, 9 modules employé, gestionnaire, superadmin — RÉSULTAT : 0 bouton mort, 0 écran vide, 0 lien cassé, 0 erreur console. Seul point mineur trouvé (warning a11y Radix aria-describedby) corrigé ensuite : DialogDescription ajouté aux 3 dialogues livraisons.
+
 ## Notes techniques
 - Ne jamais recréer `jsconfig.json` (conflit CRA avec tsconfig.json)
 - npm interdit — yarn uniquement

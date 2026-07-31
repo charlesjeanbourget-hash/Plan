@@ -5,7 +5,7 @@ import { useHR } from '@/context/HRContext';
 import { Delivery } from '@/types';
 import { ModuleHeader } from '@/components/modules/shared';
 import { DeliveryProofDialog, DeliveryProof } from '@/components/DeliveryProofDialog';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -259,14 +259,14 @@ export default function DeliveriesModule(): JSX.Element {
         <DialogContent data-testid="proof-view-dialog">
           <DialogHeader>
             <DialogTitle className="font-heading">Preuve de livraison — {viewProof?.client_name}</DialogTitle>
+            <DialogDescription>
+              {viewProof?.proof_type === 'signature' ? 'Signature du client' : 'Photo prise à la livraison'}
+              {viewProof?.delivered_at ? ` · ${fmtTime(viewProof.delivered_at)}` : ''}
+            </DialogDescription>
           </DialogHeader>
           {viewProof?.proof_image && (
             <img src={viewProof.proof_image} alt="Preuve de livraison" className="w-full rounded-lg border border-slate-200" />
           )}
-          <p className="text-xs text-slate-500">
-            {viewProof?.proof_type === 'signature' ? 'Signature du client' : 'Photo prise à la livraison'}
-            {viewProof?.delivered_at ? ` · ${fmtTime(viewProof.delivered_at)}` : ''}
-          </p>
         </DialogContent>
       </Dialog>
 
@@ -274,6 +274,7 @@ export default function DeliveriesModule(): JSX.Element {
         <DialogContent data-testid="create-delivery-dialog" className="max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-heading">Nouvelle livraison</DialogTitle>
+            <DialogDescription>Le livreur recevra les directives instantanément dans son compte et par courriel.</DialogDescription>
           </DialogHeader>
           <form onSubmit={(e) => void submitCreate(e)} className="space-y-4">
             <div className="space-y-2">

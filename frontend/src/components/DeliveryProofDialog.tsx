@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, PointerEvent as ReactPointerEvent, ChangeEvent } from 'react';
 import { Delivery } from '@/types';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Camera, PenLine, Eraser, CircleCheck } from 'lucide-react';
 import { toast } from 'sonner';
@@ -134,10 +134,10 @@ export const DeliveryProofDialog = ({ delivery, busy, onClose, onConfirm }: {
       <DialogContent data-testid="proof-dialog" className="max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="font-heading">Livraison chez {delivery?.client_name}</DialogTitle>
+          <DialogDescription>
+            Ajoutez une preuve de livraison : une photo du colis déposé ou la signature du client.
+          </DialogDescription>
         </DialogHeader>
-        <p className="text-sm text-slate-500 -mt-1">
-          Ajoutez une preuve de livraison : une photo du colis déposé ou la signature du client.
-        </p>
         <div className="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1 self-start">
           <button
             type="button"
