@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Plus, ChevronLeft, ChevronRight, Trash2, CopyPlus, Sunrise, Sun, Moon, Repeat, LayoutTemplate, BarChart3, CalendarDays, AlertTriangle, LucideIcon } from 'lucide-react';
 import { toast } from 'sonner';
+import { consumeNavPayload } from '@/lib/nav';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -30,6 +31,14 @@ const mondayOf = (offset: number): Date => {
   const d = new Date(now);
   d.setDate(now.getDate() - ((now.getDay() + 6) % 7) + offset * 7);
   return d;
+};
+
+const weekOffsetFor = (iso: string): number => {
+  const target = new Date(`${iso}T00:00:00`);
+  target.setDate(target.getDate() - ((target.getDay() + 6) % 7));
+  const cur = mondayOf(0);
+  cur.setHours(0, 0, 0, 0);
+  return Math.round((target.getTime() - cur.getTime()) / 604800000);
 };
 
 const apiError = (err: unknown): string => {
@@ -60,7 +69,9 @@ export default function TasksModule(): JSX.Element {
   const { state } = useHR();
   const isAdmin = currentUser?.role !== 'employee';
   const headers = { Authorization: `Bearer ${token ?? ''}` };
-  const [weekOffset, setWeekOffset] = useState(0);
+  const [navPayload] = useState(() => consumeNavPayload());
+  const [weekOffset, setWeekOffset] = useState(navPayload?.taskDate ? weekOffsetFor(navPayload.taskDate) : 0);
+  const highlightId = navPayload?.taskId ?? '';
   const [tasks, setTasks] = useState<ShiftTask[]>([]);
   const [view, setView] = useState<'week' | 'stats'>('week');
   const [templatesOpen, setTemplatesOpen] = useState(false);
@@ -278,7 +289,7 @@ export default function TasksModule(): JSX.Element {
                       </p>
                       <div className="space-y-1.5">
                         {dayTasks.filter((t) => t.shift === s).map((t) => (
-                          <div key={t.id} data-testid={`task-item-${t.id}`} className={`flex items-start gap-2.5 rounded-lg border px-3 py-2 transition-colors ${t.done ? 'border-emerald-200 bg-emerald-50/60' : 'border-slate-200'}`}>
+                          <div key={t.id} data-testid={`task-item-${t.id}`} className={`flex items-start gap-2.5 rounded-lg border px-3 py-2 transition-colors ${t.done ? 'border-emerald-200 bg-emerald-50/60' : 'border-slate-200'} ${t.id === highlightId ? 'ring-2 ring-bronze-400' : ''}`}>
                             <Checkbox
                               data-testid={`task-checkbox-${t.id}`}
                               checked={t.done}

@@ -1,4 +1,5 @@
 import { useState, FormEvent } from 'react';
+import { consumeNavPayload } from '@/lib/nav';
 import { useHR } from '@/context/HRContext';
 import { Position, POSITIONS, Employee } from '@/types';
 import { ModuleHeader, StatusBadge, EmptyState } from '@/components/modules/shared';
@@ -14,7 +15,8 @@ import { toast } from 'sonner';
 
 export default function EmployeeDossier(): JSX.Element {
   const { state, addEmployee, deleteEmployee, updateEmployee } = useHR();
-  const [selectedId, setSelectedId] = useState<string | null>(state.employees[0]?.id ?? null);
+  const [navPayload] = useState(() => consumeNavPayload());
+  const [selectedId, setSelectedId] = useState<string | null>(navPayload?.employeeId ?? state.employees[0]?.id ?? null);
   const [branchFilter, setBranchFilter] = useState('all');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [firstName, setFirstName] = useState('');

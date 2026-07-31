@@ -2,17 +2,24 @@ import { useState, useEffect, useCallback, FormEvent } from 'react';
 import axios from 'axios';
 import { useAuth } from '@/context/AuthContext';
 import { useHR } from '@/context/HRContext';
-import { ScheduleProposal, ProposalStatus } from '@/types';
+import { ScheduleProposal, ProposalStatus, ProposalWarning, ProposalAlert } from '@/types';
+import { requestNavigate } from '@/lib/nav';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Sparkles, Loader2, Check, X, Trash2, CalendarPlus, AlertTriangle } from 'lucide-react';
+import { Sparkles, Loader2, Check, X, Trash2, CalendarPlus, AlertTriangle, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+
+const normWarning = (w: string | ProposalWarning): ProposalWarning =>
+  typeof w === 'string' ? { text: w, kind: 'profile' } : w;
+
+const normAlert = (a: string | ProposalAlert): ProposalAlert =>
+  typeof a === 'string' ? { text: a, kind: 'task' } : a;
 
 const STATUS_META: Record<ProposalStatus, { label: string; cls: string }> = {
   generating: { label: 'Génération par l\'IA…', cls: 'bg-sky-100 text-sky-800' },
@@ -230,9 +237,27 @@ export const ScheduleProposals = (): JSX.Element => {
                       <p className="text-xs font-bold text-amber-800 mb-1.5 inline-flex items-center gap-1.5">
                         <AlertTriangle className="w-3.5 h-3.5" /> Points à vérifier avant d'approuver
                       </p>
-                      <ul className="space-y-1">
-                        {(p.alerts ?? []).map((a, i) => <li key={i} className="text-xs text-amber-800">— {a}</li>)}
+                      <ul className="space-y-1.5">
+                        {(p.alerts ?? []).map((raw, i) => {
+                          const a = normAlert(raw);
+                          return (
+                            <li key={i}>
+                              <button
+                                type="button"
+                                data-testid={`alert-link-${p.id}-${i}`}
+                                onClick={() => a.kind === 'profile'
+                                  ? requestNavigate('employees', { employeeId: a.employee_id })
+                                  : requestNavigate('tasks', { taskDate: a.task_date, taskId: a.task_id })}
+                                className="group text-left text-xs text-amber-800 hover:text-amber-950 inline-flex items-start gap-1.5"
+                              >
+                                <span className="group-hover:underline">— {a.text}</span>
+                                <ExternalLink className="w-3 h-3 mt-0.5 shrink-0 opacity-50 group-hover:opacity-100 transition-opacity" />
+                              </button>
+                            </li>
+                          );
+                        })}
                       </ul>
+                      <p className="text-[11px] text-amber-700/80 mt-2">Cliquez sur un point pour ouvrir directement la tâche ou le profil concerné.</p>
                     </div>
                   )}
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
@@ -246,9 +271,22 @@ export const ScheduleProposals = (): JSX.Element => {
                               {s.role && <span className="text-slate-400"> · {s.role}</span>}
                               {(s.warnings ?? []).length > 0 && <AlertTriangle data-testid={`shift-warning-icon-${s.id}`} className="w-3 h-3 text-amber-600 inline ml-1.5 align-[-1px]" />}
                             </p>
-                            {(s.warnings ?? []).map((w, i) => (
-                              <p key={i} className="text-[11px] text-amber-700 font-semibold pl-2">{w}</p>
-                            ))}
+                            {(s.warnings ?? []).map((raw, i) => {
+                              const w = normWarning(raw);
+                              return (
+                                <button
+                                  key={i}
+                                  type="button"
+                                  data-testid={`shift-warning-link-${s.id}-${i}`}
+                                  onClick={() => w.kind === 'absence'
+                                    ? requestNavigate('vacations')
+                                    : requestNavigate('employees', { employeeId: s.employee_id })}
+                                  className="block text-left text-[11px] text-amber-700 font-semibold pl-2 hover:underline"
+                                >
+                                  {w.text}
+                                </button>
+                              );
+                            })}
                           </div>
                         ))}
                       </div>

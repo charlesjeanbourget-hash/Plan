@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import '@/App.css';
 import { View, ModuleKey } from '@/types';
 import { useAuth } from '@/context/AuthContext';
@@ -55,6 +55,17 @@ function App(): JSX.Element {
   const [activeModule, setActiveModule] = useState<ModuleKey>('dashboard');
 
   const navigate = useCallback((v: View) => setView(v), []);
+
+  useEffect(() => {
+    const handler = (e: Event): void => {
+      const detail = (e as CustomEvent).detail as { module: ModuleKey; payload?: unknown };
+      if (detail.payload) sessionStorage.setItem('ap_nav_payload', JSON.stringify(detail.payload));
+      setView('dashboard');
+      setActiveModule(detail.module);
+    };
+    window.addEventListener('ap-navigate', handler);
+    return () => window.removeEventListener('ap-navigate', handler);
+  }, []);
 
   const replacementToken = new URLSearchParams(window.location.search).get('remplacement');
   if (replacementToken) {

@@ -500,6 +500,19 @@ export interface PaySettings {
   anchor: string;
 }
 
+export interface ProposalWarning {
+  text: string;
+  kind: 'absence' | 'profile';
+}
+
+export interface ProposalAlert {
+  text: string;
+  kind: 'task' | 'profile';
+  task_id?: string;
+  task_date?: string;
+  employee_id?: string;
+}
+
 export interface ProposalShift {
   id: string;
   employee_id: string;
@@ -508,7 +521,7 @@ export interface ProposalShift {
   start: string;
   end: string;
   role: string;
-  warnings?: string[];
+  warnings?: (string | ProposalWarning)[];
 }
 
 export interface ApprovalSlot {
@@ -529,7 +542,7 @@ export interface ScheduleProposal {
   summary: string;
   instructions: string;
   shifts: ProposalShift[];
-  alerts?: string[];
+  alerts?: (string | ProposalAlert)[];
   warnings_count?: number;
   employee_approvals: Record<string, ApprovalSlot>;
   admin_status: 'pending' | 'approved' | 'rejected';

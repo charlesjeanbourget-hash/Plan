@@ -1835,13 +1835,15 @@ async def generate_schedule_content(proposal_id: str, pharmacy_id: str, week_sta
             warnings = []
             for a in absences:
                 if a["employee_id"] == s["employee_id"] and a["start"] <= s["date"] <= a["end"]:
-                    warnings.append(
-                        f"Conflit d'absence : {a.get('type') or 'congé'} approuvé du {a['start']} au {a['end']}")
+                    warnings.append({
+                        "text": f"Conflit d'absence : {a.get('type') or 'congé'} approuvé du {a['start']} au {a['end']}",
+                        "kind": "absence"})
             prof = prof_by_id.get(s["employee_id"]) or {}
             known = (prof.get("roles") or []) + (prof.get("capacities") or [])
             if s["role"] and known and not any(_norm_words(s["role"]) & _norm_words(k) for k in known):
-                warnings.append(
-                    f"Rôle « {s['role']} » absent des rôles/capacités du profil — qualification à vérifier")
+                warnings.append({
+                    "text": f"Rôle « {s['role']} » absent des rôles/capacités du profil — qualification à vérifier",
+                    "kind": "profile"})
             s["warnings"] = warnings
         alerts = []
         for t in week_tasks:
@@ -1849,19 +1851,23 @@ async def generate_schedule_content(proposal_id: str, pharmacy_id: str, week_sta
             if not eid or eid not in prof_by_id:
                 continue
             who = t.get("assignee_name") or eid
+            base = {"task_id": t["id"], "task_date": t["date"], "employee_id": eid}
             day_shifts = [s for s in shifts if s["employee_id"] == eid and s["date"] == t["date"]]
             if not day_shifts:
-                alerts.append(f"Tâche « {t['title']} » assignée à {who} le {t['date']} (quart {t['shift']}), "
-                              "mais aucun quart prévu ce jour-là")
+                alerts.append({**base, "kind": "task",
+                               "text": f"Tâche « {t['title']} » assignée à {who} le {t['date']} (quart {t['shift']}), "
+                                       "mais aucun quart prévu ce jour-là"})
                 continue
             span = shift_hours.get(t["shift"])
             if span and not any(s["start"] < span[1] and s["end"] > span[0] for s in day_shifts):
-                alerts.append(f"Tâche « {t['title']} » ({t['shift']} du {t['date']}) : "
-                              f"le quart de {who} ne couvre pas cette plage horaire")
+                alerts.append({**base, "kind": "task",
+                               "text": f"Tâche « {t['title']} » ({t['shift']} du {t['date']}) : "
+                                       f"le quart de {who} ne couvre pas cette plage horaire"})
             prof = prof_by_id.get(eid) or {}
             if not task_qualification_ok(t["title"], prof.get("capacities") or []):
-                alerts.append(f"Tâche « {t['title']} » ({t['date']}) : {who} n'a pas cette capacité "
-                              "dans son profil — qualification à vérifier")
+                alerts.append({**base, "kind": "profile",
+                               "text": f"Tâche « {t['title']} » ({t['date']}) : {who} n'a pas cette capacité "
+                                       "dans son profil — qualification à vérifier"})
         warnings_count = sum(len(s["warnings"]) for s in shifts) + len(alerts)
         approvals = {eid: {"status": "pending", "responded_at": None, "comment": ""}
                      for eid in sorted({s["employee_id"] for s in shifts})}
@@ -2530,6 +2536,130 @@ async def shift_task_reminders_job(shift: str):
     logger.info(f"Rappels tâches non faites ({shift}) : {sent} courriel(s) envoyé(s)")
 
 
+# ---------------------- Rapport hebdomadaire des tâches (gestionnaires) ----------------------
+
+def weekly_report_html(week_start: str, week_end: str, by_shift: list, by_emp: list, team: dict, watch: list) -> str:
+    def color(rate: int) -> str:
+        return "#059669" if rate >= 85 else ("#b45309" if rate >= 60 else "#dc2626")
+    td = "padding:6px 12px;border-bottom:1px solid #e2e8f0"
+    shift_rows = "".join(
+        f"<tr><td style='{td}'>{s['shift']}</td><td style='{td}'>{s['done']}/{s['total']}</td>"
+        f"<td style='{td};color:{color(s['rate'])};font-weight:bold'>{s['rate']} %</td></tr>"
+        for s in by_shift)
+    emp_rows = "".join(
+        f"<tr><td style='{td}'>{e['name']}</td><td style='{td}'>{e['done']}/{e['total']}</td>"
+        f"<td style='{td};color:{color(e['rate'])};font-weight:bold'>{e['rate']} %</td></tr>"
+        for e in by_emp) or f"<tr><td style='{td}' colspan='3'>Aucune tâche assignée individuellement.</td></tr>"
+    watch_html = ("<ul>" + "".join(f"<li style='color:#b45309'>{w}</li>" for w in watch) + "</ul>") if watch \
+        else "<p style='color:#059669'>Rien à signaler — belle semaine, tout roule.</p>"
+    header = "<tr style='text-align:left;color:#64748b;font-size:12px;text-transform:uppercase'>"
+    return (
+        "<div style='font-family:Arial,sans-serif;max-width:640px;margin:0 auto;color:#0f172a'>"
+        "<h2 style='color:#059669'>Arrière Plan — Rapport hebdomadaire des tâches</h2>"
+        f"<p>Semaine du <strong>{week_start}</strong> au <strong>{week_end}</strong> — "
+        f"tâches d'équipe : <strong>{team['done']}/{team['total']}</strong> complétées ({team['rate']} %).</p>"
+        "<h3 style='color:#0f172a'>Taux de complétion par quart</h3>"
+        f"<table style='border-collapse:collapse;width:100%'>{header}<th style='{td}'>Quart</th>"
+        f"<th style='{td}'>Tâches</th><th style='{td}'>Taux</th></tr>{shift_rows}</table>"
+        "<h3 style='color:#0f172a'>Par employé(e)</h3>"
+        f"<table style='border-collapse:collapse;width:100%'>{header}<th style='{td}'>Employé(e)</th>"
+        f"<th style='{td}'>Tâches</th><th style='{td}'>Taux</th></tr>{emp_rows}</table>"
+        "<h3 style='color:#b45309'>Quarts et employés à surveiller (&lt;60 %)</h3>"
+        f"{watch_html}"
+        "<p style='font-size:12px;color:#94a3b8;margin-top:24px'>Rapport automatique envoyé chaque lundi matin par Arrière Plan.</p>"
+        "</div>")
+
+
+async def send_weekly_task_reports(week_start: str = "", only_pharmacy: str = "") -> int:
+    api_key = os.environ.get("RESEND_API_KEY", "")
+    if not api_key:
+        logger.warning("Rapport hebdo tâches : RESEND_API_KEY manquante, envoi ignoré.")
+        return 0
+    if week_start:
+        ws = date.fromisoformat(week_start)
+        ws = ws - timedelta(days=ws.weekday())
+    else:
+        today = datetime.now(timezone.utc).astimezone(MONTREAL_TZ).date()
+        ws = today - timedelta(days=today.weekday() + 7)
+    we = ws + timedelta(days=6)
+    query: dict = {"date": {"$gte": ws.isoformat(), "$lte": we.isoformat()}}
+    if only_pharmacy:
+        query["pharmacy_id"] = only_pharmacy
+    docs = await db.shift_tasks.find(query, {"_id": 0}).to_list(5000)
+    if not docs:
+        return 0
+    resend.api_key = api_key
+    sender = await get_sender()
+    by_pharmacy: dict = {}
+    for t in docs:
+        by_pharmacy.setdefault(t["pharmacy_id"], []).append(t)
+    total_sent = 0
+    for pid, tasks in by_pharmacy.items():
+        by_shift: dict = {}
+        by_emp: dict = {}
+        team = {"total": 0, "done": 0}
+        for t in tasks:
+            s = by_shift.setdefault(t["shift"], {"shift": t["shift"], "total": 0, "done": 0})
+            s["total"] += 1
+            done = bool(t.get("done"))
+            if done:
+                s["done"] += 1
+            name = t.get("assignee_name") or ""
+            if name:
+                e = by_emp.setdefault(name, {"name": name, "total": 0, "done": 0})
+                e["total"] += 1
+                if done:
+                    e["done"] += 1
+            else:
+                team["total"] += 1
+                if done:
+                    team["done"] += 1
+        for coll in (by_shift, by_emp):
+            for v in coll.values():
+                v["rate"] = _rate(v["done"], v["total"])
+        team["rate"] = _rate(team["done"], team["total"])
+        shifts_sorted = [by_shift[k] for k in TASK_SHIFTS if k in by_shift] + \
+                        [v for k, v in by_shift.items() if k not in TASK_SHIFTS]
+        emp_sorted = sorted(by_emp.values(), key=lambda x: x["rate"])
+        watch = [f"Quart {s['shift']} : seulement {s['rate']} % de complétion" for s in shifts_sorted if s["rate"] < 60]
+        watch += [f"{e['name']} : {e['rate']} % de ses tâches complétées" for e in emp_sorted if e["rate"] < 60]
+        html = weekly_report_html(ws.isoformat(), we.isoformat(), shifts_sorted, emp_sorted, team, watch)
+        admins = await db.users.find({"role": "admin", "pharmacy_id": pid}, {"_id": 0}).to_list(50)
+        sent = 0
+        for a in admins:
+            if not a.get("email"):
+                continue
+            try:
+                await asyncio.to_thread(resend.Emails.send, {
+                    "from": sender, "to": [a["email"]],
+                    "subject": f"Rapport hebdo des tâches — semaine du {ws.isoformat()}",
+                    "html": html})
+                sent += 1
+            except Exception as exc:
+                logger.error(f"Rapport hebdo vers {a['email']} échoué : {exc}")
+        await log_audit("système", "system", "RAPPORT_HEBDO_TACHES", "tâche", ws.isoformat(),
+                        f"Rapport hebdomadaire des tâches : {sent} courriel(s) envoyé(s) (semaine du {ws.isoformat()})", pid)
+        total_sent += sent
+    return total_sent
+
+
+@api_router.post("/tasks/weekly-report/run")
+async def run_weekly_task_report(week_start: str = Query(""), principal: dict = Depends(get_principal)):
+    if week_start:
+        try:
+            date.fromisoformat(week_start)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Date de semaine invalide.")
+    only = principal["pharmacy_id"] if principal["role"] == "admin" else ""
+    sent = await send_weekly_task_reports(week_start, only or "")
+    return {"sent": sent}
+
+
+async def weekly_task_report_job():
+    sent = await send_weekly_task_reports()
+    logger.info(f"Rapport hebdo tâches : {sent} courriel(s) envoyé(s)")
+
+
 # ---------------------- Modèles de tâches + statistiques ----------------------
 
 class TaskBulkItem(BaseModel):
@@ -2579,6 +2709,41 @@ def _rate(done: int, total: int) -> int:
     return round(done / total * 100) if total else 0
 
 
+TASK_BADGE_DEFS = {
+    "perfect_week": ("Semaine parfaite", "Toutes les tâches d'une semaine complétées"),
+    "streak_2": ("Sur une lancée", "2 semaines parfaites d'affilée"),
+    "streak_4": ("Régularité exemplaire", "4 semaines parfaites d'affilée"),
+    "streak_8": ("Légende de la pharmacie", "8 semaines parfaites d'affilée"),
+    "team_5": ("Esprit d'équipe", "5 tâches d'équipe cochées"),
+    "team_20": ("Pilier de l'équipe", "20 tâches d'équipe cochées"),
+}
+
+
+def compute_task_badges(week_map: dict, team_checks: int, current_week: str) -> dict:
+    weeks_desc = sorted((wk for wk, v in week_map.items() if v["total"] > 0), reverse=True)
+    perfect_weeks = sum(1 for wk in weeks_desc if week_map[wk]["done"] == week_map[wk]["total"])
+    streak = 0
+    for i, wk in enumerate(weeks_desc):
+        is_perfect = week_map[wk]["done"] == week_map[wk]["total"]
+        if i == 0 and wk == current_week and not is_perfect:
+            continue
+        if is_perfect:
+            streak += 1
+        else:
+            break
+    keys = []
+    if perfect_weeks >= 1:
+        keys.append("perfect_week")
+    for n in (2, 4, 8):
+        if streak >= n:
+            keys.append(f"streak_{n}")
+    for n in (5, 20):
+        if team_checks >= n:
+            keys.append(f"team_{n}")
+    badges = [{"key": k, "label": TASK_BADGE_DEFS[k][0], "description": TASK_BADGE_DEFS[k][1]} for k in keys]
+    return {"current_streak": streak, "perfect_weeks": perfect_weeks, "badges": badges}
+
+
 @api_router.get("/tasks/stats")
 async def task_stats(weeks: int = Query(8, ge=1, le=26), user: dict = Depends(get_current_user)):
     pid = user.get("pharmacy_id") or "ph1"
@@ -2594,6 +2759,7 @@ async def task_stats(weeks: int = Query(8, ge=1, le=26), user: dict = Depends(ge
     weekly: dict = {}
     by_shift: dict = {}
     by_employee: dict = {}
+    emp_weeks: dict = {}
     team = {"total": 0, "done": 0}
     for t in docs:
         assigned = t.get("assignee_employee_id") or ""
@@ -2625,10 +2791,17 @@ async def task_stats(weeks: int = Query(8, ge=1, le=26), user: dict = Depends(ge
             e["total"] += 1
             if done:
                 e["done"] += 1
+            c = emp_weeks.setdefault(name, {}).setdefault(wk, {"total": 0, "done": 0})
+            c["total"] += 1
+            if done:
+                c["done"] += 1
     for coll in (weekly, by_shift, by_employee):
         for v in coll.values():
             v["rate"] = _rate(v.get("done", 0), v.get("total", 0))
     team["rate"] = _rate(team["done"], team["total"])
+    current_week = monday.isoformat()
+    for name, e in by_employee.items():
+        e.update(compute_task_badges(emp_weeks.get(name, {}), e.get("team_checks", 0), current_week))
     shifts_sorted = [by_shift[s] for s in TASK_SHIFTS if s in by_shift] + \
                     [v for k, v in by_shift.items() if k not in TASK_SHIFTS]
     return {
@@ -2984,6 +3157,7 @@ async def startup_tasks():
     scheduler.add_job(shift_task_reminders_job, CronTrigger(hour=12, minute=0), args=["Matin"])
     scheduler.add_job(shift_task_reminders_job, CronTrigger(hour=17, minute=0), args=["Après-midi"])
     scheduler.add_job(shift_task_reminders_job, CronTrigger(hour=21, minute=30), args=["Soir"])
+    scheduler.add_job(weekly_task_report_job, CronTrigger(day_of_week="mon", hour=7, minute=0))
     scheduler.start()
 
 
