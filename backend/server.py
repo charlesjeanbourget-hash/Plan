@@ -6,6 +6,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import io
 import re
+import math
 import unicodedata
 import json
 import logging
@@ -2666,6 +2667,132 @@ async def weekly_task_report_job():
 
 DELIVERY_STATUSES = ("a_ramasser", "en_route", "livree")
 
+DEFAULT_PHARMACY_ADDRESS = "5090 Rue Sherbrooke Est, Montréal, QC"
+
+
+class PharmacySettingsIn(BaseModel):
+    address: str
+
+
+@api_router.get("/pharmacy/settings")
+async def get_pharmacy_settings(user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    doc = await db.pharmacy_settings.find_one({"pharmacy_id": pid}, {"_id": 0})
+    return {"address": (doc or {}).get("address") or DEFAULT_PHARMACY_ADDRESS}
+
+
+@api_router.put("/pharmacy/settings")
+async def set_pharmacy_settings(payload: PharmacySettingsIn, principal: dict = Depends(get_principal)):
+    if not payload.address.strip():
+        raise HTTPException(status_code=400, detail="Adresse requise.")
+    pid = principal["pharmacy_id"] or "ph1"
+    await db.pharmacy_settings.update_one(
+        {"pharmacy_id": pid},
+        {"$set": {"pharmacy_id": pid, "address": payload.address.strip(),
+                  "updated_by": principal["email"], "updated_at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True)
+    await log_audit(principal["email"], principal["role"], "MODIF_ADRESSE_PHARMACIE", "livraison", pid,
+                    f"Adresse de départ des tournées : {payload.address.strip()}", pid)
+    return {"address": payload.address.strip()}
+
+
+async def geocode_address(address: str):
+    key = address.strip().lower()
+    cached = await db.geocache.find_one({"query": key}, {"_id": 0})
+    if cached:
+        return (cached["lat"], cached["lon"]) if cached.get("lat") is not None else None
+
+    def fetch():
+        try:
+            r = requests.get("https://nominatim.openstreetmap.org/search",
+                             params={"q": address, "format": "json", "limit": 1, "countrycodes": "ca"},
+                             headers={"User-Agent": "ArrierePlan-HR/1.0"}, timeout=8)
+            data = r.json()
+            return (float(data[0]["lat"]), float(data[0]["lon"])) if data else None
+        except Exception:
+            return None
+
+    result = await asyncio.to_thread(fetch)
+    await asyncio.sleep(1.05)
+    await db.geocache.update_one({"query": key}, {"$set": {
+        "query": key, "lat": result[0] if result else None, "lon": result[1] if result else None,
+        "cached_at": datetime.now(timezone.utc).isoformat()}}, upsert=True)
+    return result
+
+
+def haversine_km(a, b) -> float:
+    lat1, lon1, lat2, lon2 = map(math.radians, [a[0], a[1], b[0], b[1]])
+    dlat, dlon = lat2 - lat1, lon2 - lon1
+    h = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
+    return 6371 * 2 * math.asin(math.sqrt(h))
+
+
+def _tour_order(start, items):
+    ordered = []
+    total = 0.0
+    current = start
+    remaining = items[:]
+    while remaining:
+        if current is None:
+            d, coords = remaining.pop(0)
+            leg = None
+        else:
+            idx = min(range(len(remaining)), key=lambda i: haversine_km(current, remaining[i][1]))
+            d, coords = remaining.pop(idx)
+            leg = round(haversine_km(current, coords) * 1.3, 1)
+            total += leg
+        current = coords or current
+        ordered.append((d, leg))
+    return ordered, total, current
+
+
+@api_router.get("/deliveries/route")
+async def delivery_route(courier_employee_id: str = Query(""), user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    is_manager = user["role"] in ("admin", "manager", "superadmin")
+    eid = courier_employee_id if (is_manager and courier_employee_id) else (user.get("employee_id") or "")
+    if not eid:
+        raise HTTPException(status_code=400, detail="Aucun livreur ciblé.")
+    active = await db.deliveries.find(
+        {"pharmacy_id": pid, "courier_employee_id": eid, "status": {"$ne": "livree"}},
+        {"_id": 0, "proof_image": 0}).to_list(100)
+    settings = await db.pharmacy_settings.find_one({"pharmacy_id": pid}, {"_id": 0})
+    start_address = (settings or {}).get("address") or DEFAULT_PHARMACY_ADDRESS
+    if not active:
+        return {"start_address": start_address, "stops": [], "total_km": 0, "maps_url": ""}
+    start = await geocode_address(start_address)
+    located_urgent, located_normal, unlocated = [], [], []
+    for d in active:
+        coords = await geocode_address(d["address"])
+        if coords is None:
+            unlocated.append(d)
+        elif d["priority"] == "urgent":
+            located_urgent.append((d, coords))
+        else:
+            located_normal.append((d, coords))
+    ordered_urgent, km_u, current = _tour_order(start, located_urgent)
+    ordered_normal, km_n, _ = _tour_order(current, located_normal)
+    stops = []
+    for d, leg in ordered_urgent + ordered_normal:
+        stops.append({"delivery_id": d["id"], "client_name": d["client_name"], "address": d["address"],
+                      "priority": d["priority"], "status": d["status"], "leg_km": leg, "located": True})
+    for d in unlocated:
+        stops.append({"delivery_id": d["id"], "client_name": d["client_name"], "address": d["address"],
+                      "priority": d["priority"], "status": d["status"], "leg_km": None, "located": False})
+    parts = [start_address] + [s["address"] for s in stops]
+    maps_url = "https://www.google.com/maps/dir/" + "/".join(requests.utils.quote(p) for p in parts)
+    return {"start_address": start_address, "stops": stops,
+            "total_km": round(km_u + km_n, 1), "maps_url": maps_url}
+
+
+@api_router.get("/deliveries/proofs")
+async def delivery_proofs(client: str = Query(""), principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    query: dict = {"pharmacy_id": pid, "status": "livree", "proof_image": {"$nin": [None, ""]}}
+    if client.strip():
+        query["client_name"] = {"$regex": re.escape(client.strip()), "$options": "i"}
+    return await db.deliveries.find(query, {"_id": 0}).sort("delivered_at", -1).to_list(200)
+
 
 class DeliveryIn(BaseModel):
     client_name: str
@@ -2796,6 +2923,66 @@ async def delete_delivery(delivery_id: str, principal: dict = Depends(get_princi
     await log_audit(principal["email"], principal["role"], "SUPPRESSION_LIVRAISON", "livraison", delivery_id,
                     f"Livraison {doc['client_name']} supprimée", doc["pharmacy_id"])
     return {"status": "supprimée"}
+
+
+# ==================== Rendez-vous (infirmière) ====================
+
+class AppointmentIn(BaseModel):
+    employee_id: str
+    employee_name: str = ""
+    date: str
+    start: str
+    end: str
+    client_name: str
+    reason: str = ""
+    notes: str = ""
+
+
+@api_router.get("/appointments")
+async def list_appointments(start: str = Query(""), end: str = Query(""), user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    query: dict = {"pharmacy_id": pid}
+    if start and end:
+        query["date"] = {"$gte": start, "$lte": end}
+    return await db.appointments.find(query, {"_id": 0}).sort([("date", 1), ("start", 1)]).to_list(1000)
+
+
+@api_router.post("/appointments")
+async def create_appointment(payload: AppointmentIn, user: dict = Depends(get_current_user)):
+    if not payload.client_name.strip():
+        raise HTTPException(status_code=400, detail="Le nom du client est requis.")
+    if payload.end <= payload.start:
+        raise HTTPException(status_code=400, detail="L'heure de fin doit suivre l'heure de début.")
+    is_manager = user["role"] in ("admin", "manager", "superadmin")
+    if not is_manager and payload.employee_id != (user.get("employee_id") or ""):
+        raise HTTPException(status_code=403, detail="Vous ne pouvez ajouter des rendez-vous que pour vous-même.")
+    doc = {
+        "id": str(uuid.uuid4()), "pharmacy_id": user.get("pharmacy_id") or "ph1",
+        "employee_id": payload.employee_id, "employee_name": payload.employee_name,
+        "date": payload.date, "start": payload.start, "end": payload.end,
+        "client_name": payload.client_name.strip(), "reason": payload.reason.strip(),
+        "notes": payload.notes.strip(),
+        "created_by": user["email"], "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.appointments.insert_one({**doc})
+    await log_audit(user["email"], user["role"], "CREATION_RDV", "rendez-vous", doc["id"],
+                    f"RDV {doc['client_name']} ({doc['reason'] or 'consultation'}) le {doc['date']} "
+                    f"{doc['start']}-{doc['end']} pour {doc['employee_name']}", doc["pharmacy_id"])
+    return doc
+
+
+@api_router.delete("/appointments/{appointment_id}")
+async def delete_appointment(appointment_id: str, user: dict = Depends(get_current_user)):
+    doc = await db.appointments.find_one({"id": appointment_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Rendez-vous introuvable.")
+    is_manager = user["role"] in ("admin", "manager", "superadmin")
+    if not is_manager and doc["employee_id"] != (user.get("employee_id") or ""):
+        raise HTTPException(status_code=403, detail="Ce rendez-vous appartient à un autre employé.")
+    await db.appointments.delete_one({"id": appointment_id})
+    await log_audit(user["email"], user["role"], "SUPPRESSION_RDV", "rendez-vous", appointment_id,
+                    f"RDV {doc['client_name']} du {doc['date']} supprimé", doc["pharmacy_id"])
+    return {"status": "supprimé"}
 
 
 # ==================== Partenaires de remplacement globaux (superadmin) ====================

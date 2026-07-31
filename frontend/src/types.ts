@@ -36,6 +36,8 @@ export type Position =
   | 'Pharmacien(ne)'
   | 'ATP'
   | 'Technicien(ne) de laboratoire'
+  | 'Infirmier(ère)'
+  | 'Gestionnaire'
   | 'Commis'
   | 'Caissier(ère)'
   | "Commis d'entrepôt"
@@ -45,6 +47,8 @@ export const POSITIONS: Position[] = [
   'Pharmacien(ne)',
   'ATP',
   'Technicien(ne) de laboratoire',
+  'Infirmier(ère)',
+  'Gestionnaire',
   'Commis',
   'Caissier(ère)',
   "Commis d'entrepôt",
@@ -652,6 +656,21 @@ export interface Delivery {
   created_at: string;
   picked_up_at: string | null;
   delivered_at: string | null;
+}
+
+export interface Appointment {
+  id: string;
+  pharmacy_id: string;
+  employee_id: string;
+  employee_name: string;
+  date: string;
+  start: string;
+  end: string;
+  client_name: string;
+  reason: string;
+  notes: string;
+  created_by: string;
+  created_at: string;
 }
 
 export interface ReplacementSlotT {

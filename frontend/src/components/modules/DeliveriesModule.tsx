@@ -5,12 +5,14 @@ import { useHR } from '@/context/HRContext';
 import { Delivery } from '@/types';
 import { ModuleHeader } from '@/components/modules/shared';
 import { DeliveryProofDialog, DeliveryProof } from '@/components/DeliveryProofDialog';
+import { DeliveryProofsPanel } from '@/components/DeliveryProofsPanel';
+import { DeliveryTourDialog } from '@/components/DeliveryTourDialog';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, Truck, MapPin, Phone, Package, Trash2, CircleCheck, Navigation } from 'lucide-react';
+import { Plus, Truck, MapPin, Phone, Package, Trash2, CircleCheck, Navigation, Route, Store, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -41,6 +43,7 @@ export default function DeliveriesModule(): JSX.Element {
   const isManager = currentUser?.role !== 'employee';
   const headers = { Authorization: `Bearer ${token ?? ''}` };
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
+  const [view, setView] = useState<'list' | 'proofs'>('list');
   const [createOpen, setCreateOpen] = useState(false);
   const [client, setClient] = useState('');
   const [address, setAddress] = useState('');
@@ -54,6 +57,10 @@ export default function DeliveriesModule(): JSX.Element {
   const [proofFor, setProofFor] = useState<Delivery | null>(null);
   const [proofBusy, setProofBusy] = useState(false);
   const [viewProof, setViewProof] = useState<Delivery | null>(null);
+  const [tourOpen, setTourOpen] = useState(false);
+  const [addrOpen, setAddrOpen] = useState(false);
+  const [pharmAddr, setPharmAddr] = useState('');
+  const [addrBusy, setAddrBusy] = useState(false);
 
   const refresh = useCallback(async (): Promise<void> => {
     try {
@@ -71,6 +78,30 @@ export default function DeliveriesModule(): JSX.Element {
     const id = window.setInterval(() => void refresh(), 20000);
     return () => window.clearInterval(id);
   }, [isManager, refresh]);
+
+  useEffect(() => {
+    if (!addrOpen) return;
+    axios.get<{ address: string }>(`${API}/pharmacy/settings`, { headers: { Authorization: `Bearer ${token ?? ''}` } })
+      .then((r) => setPharmAddr(r.data.address))
+      .catch(() => undefined);
+  }, [addrOpen, token]);
+
+  const saveAddr = async (): Promise<void> => {
+    if (!pharmAddr.trim()) {
+      toast.error('Adresse requise.');
+      return;
+    }
+    setAddrBusy(true);
+    try {
+      await axios.put(`${API}/pharmacy/settings`, { address: pharmAddr }, { headers });
+      toast.success('Adresse de départ des tournées enregistrée.');
+      setAddrOpen(false);
+    } catch {
+      toast.error('Enregistrement impossible.');
+    } finally {
+      setAddrBusy(false);
+    }
+  };
 
   const couriers = [...state.employees].filter((e) => e.status === 'Actif')
     .sort((a, b) => Number(b.position === 'Livreur(se)') - Number(a.position === 'Livreur(se)'));
@@ -222,31 +253,67 @@ export default function DeliveriesModule(): JSX.Element {
           ? 'Envoyez les directives de livraison directement dans le compte des livreurs — ils reçoivent aussi un courriel avec l\'adresse et les détails.'
           : 'Vos livraisons du jour : ramassez le colis à la pharmacie, l\'adresse et l\'itinéraire sont à un clic.'}
         action={isManager ? (
-          <Button data-testid="add-delivery-button" onClick={() => setCreateOpen(true)} className="rounded-full bg-emerald-600 hover:bg-emerald-700">
-            <Plus className="w-4 h-4 mr-1" /> Nouvelle livraison
+          <div className="flex flex-wrap gap-2">
+            <Button data-testid="pharmacy-address-button" variant="outline" onClick={() => setAddrOpen(true)} className="rounded-full">
+              <Store className="w-4 h-4 mr-1" /> Adresse de départ
+            </Button>
+            <Button data-testid="add-delivery-button" onClick={() => setCreateOpen(true)} className="rounded-full bg-emerald-600 hover:bg-emerald-700">
+              <Plus className="w-4 h-4 mr-1" /> Nouvelle livraison
+            </Button>
+          </div>
+        ) : (active.length > 0 ? (
+          <Button data-testid="my-tour-button" onClick={() => setTourOpen(true)} className="rounded-full bg-bronze-600 hover:bg-bronze-700 text-white">
+            <Route className="w-4 h-4 mr-1" /> Ma tournée du jour
           </Button>
-        ) : undefined}
+        ) : undefined)}
       />
 
-      <h2 className="font-heading text-base font-bold text-slate-900 mb-3 inline-flex items-center gap-2">
-        <Truck className="w-4 h-4 text-bronze-600" /> En cours ({active.length})
-      </h2>
-      {active.length === 0 ? (
-        <div className="bg-white rounded-xl border border-slate-200 p-10 text-center mb-8">
-          <p data-testid="deliveries-empty" className="text-sm text-slate-500">Aucune livraison en cours.</p>
+      {isManager && (
+        <div className="inline-flex rounded-full border border-slate-200 bg-white p-1 mb-6">
+          <button
+            data-testid="deliveries-view-list"
+            onClick={() => setView('list')}
+            className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-semibold transition-colors ${view === 'list' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:text-emerald-700'}`}
+          >
+            <Truck className="w-3.5 h-3.5" /> Livraisons
+          </button>
+          <button
+            data-testid="deliveries-view-proofs"
+            onClick={() => setView('proofs')}
+            className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-semibold transition-colors ${view === 'proofs' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:text-emerald-700'}`}
+          >
+            <ShieldCheck className="w-3.5 h-3.5" /> Preuves clients
+          </button>
         </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-8">{active.map(card)}</div>
       )}
 
-      {done.length > 0 && (
+      {view === 'proofs' && isManager ? (
+        <DeliveryProofsPanel />
+      ) : (
         <>
           <h2 className="font-heading text-base font-bold text-slate-900 mb-3 inline-flex items-center gap-2">
-            <CircleCheck className="w-4 h-4 text-emerald-600" /> Livrées récemment
+            <Truck className="w-4 h-4 text-bronze-600" /> En cours ({active.length})
           </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 opacity-80">{done.map(card)}</div>
+          {active.length === 0 ? (
+            <div className="bg-white rounded-xl border border-slate-200 p-10 text-center mb-8">
+              <p data-testid="deliveries-empty" className="text-sm text-slate-500">Aucune livraison en cours.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-8">{active.map(card)}</div>
+          )}
+
+          {done.length > 0 && (
+            <>
+              <h2 className="font-heading text-base font-bold text-slate-900 mb-3 inline-flex items-center gap-2">
+                <CircleCheck className="w-4 h-4 text-emerald-600" /> Livrées récemment
+              </h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 opacity-80">{done.map(card)}</div>
+            </>
+          )}
         </>
       )}
+
+      <DeliveryTourDialog open={tourOpen} onClose={() => setTourOpen(false)} />
 
       <DeliveryProofDialog
         delivery={proofFor}
@@ -267,6 +334,24 @@ export default function DeliveriesModule(): JSX.Element {
           {viewProof?.proof_image && (
             <img src={viewProof.proof_image} alt="Preuve de livraison" className="w-full rounded-lg border border-slate-200" />
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={addrOpen} onOpenChange={setAddrOpen}>
+        <DialogContent data-testid="pharmacy-address-dialog">
+          <DialogHeader>
+            <DialogTitle className="font-heading">Adresse de départ des tournées</DialogTitle>
+            <DialogDescription>
+              L'adresse de votre pharmacie — point de départ pour ordonner les tournées des livreurs et estimer les kilomètres.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label>Adresse complète</Label>
+            <Input data-testid="pharmacy-address-input" value={pharmAddr} onChange={(e) => setPharmAddr(e.target.value)} placeholder="Ex. 5090 Rue Sherbrooke Est, Montréal, QC" />
+          </div>
+          <Button data-testid="pharmacy-address-save" disabled={addrBusy} onClick={() => void saveAddr()} className="w-full rounded-full bg-emerald-600 hover:bg-emerald-700">
+            {addrBusy ? 'Enregistrement…' : 'Enregistrer'}
+          </Button>
         </DialogContent>
       </Dialog>
 

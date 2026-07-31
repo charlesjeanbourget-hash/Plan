@@ -1,16 +1,17 @@
-import { useState, useEffect, FormEvent } from 'react';
+import { useState, useEffect, useCallback, FormEvent } from 'react';
 import axios from 'axios';
 import { useHR } from '@/context/HRContext';
 import { useAuth } from '@/context/AuthContext';
-import { ReplacementRequestDoc } from '@/types';
-import { ModuleHeader, StatusBadge } from '@/components/modules/shared';
+import { ReplacementRequestDoc, Appointment } from '@/types';
+import { ModuleHeader } from '@/components/modules/shared';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ChevronLeft, ChevronRight, Plus, X, ArrowLeftRight, Check } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, X, ArrowLeftRight, Check, Stethoscope } from 'lucide-react';
 import { ScheduleProposals } from '@/components/ScheduleProposals';
+import { AppointmentDialog } from '@/components/AppointmentDialog';
 import { toast } from 'sonner';
 
 const DAY_LABELS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
@@ -39,6 +40,8 @@ export default function SchedulingModule(): JSX.Element {
   const [startTime, setStartTime] = useState('09:00');
   const [endTime, setEndTime] = useState('17:00');
   const [replacements, setReplacements] = useState<ReplacementRequestDoc[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [apptOpen, setApptOpen] = useState(false);
 
   useEffect(() => {
     if (!isAdmin || !token) return;
@@ -54,6 +57,31 @@ export default function SchedulingModule(): JSX.Element {
     return iso(d);
   });
   const today = iso(new Date());
+
+  const refreshAppointments = useCallback(async (): Promise<void> => {
+    try {
+      const res = await axios.get<Appointment[]>(`${API}/appointments?start=${days[0]}&end=${days[6]}`, { headers: { Authorization: `Bearer ${token ?? ''}` } });
+      setAppointments(res.data);
+    } catch {
+      setAppointments([]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, days[0], days[6]]);
+
+  useEffect(() => { void refreshAppointments(); }, [refreshAppointments]);
+
+  const removeAppointment = async (id: string): Promise<void> => {
+    try {
+      await axios.delete(`${API}/appointments/${id}`, { headers: { Authorization: `Bearer ${token ?? ''}` } });
+      toast.success('Rendez-vous supprimé.');
+      await refreshAppointments();
+    } catch {
+      toast.error('Suppression impossible.');
+    }
+  };
+
+  const myEmp = state.employees.find((e) => e.id === currentUser?.employeeId);
+  const isNurse = myEmp?.position === 'Infirmier(ère)';
 
   const handleAdd = (e: FormEvent<HTMLFormElement>): void => {
     e.preventDefault();
@@ -79,9 +107,16 @@ export default function SchedulingModule(): JSX.Element {
         title="Horaires"
         subtitle="Planifiez les quarts de travail de la semaine."
         action={
-          <Button data-testid="add-shift-button" onClick={() => setDialogOpen(true)} className="rounded-full bg-emerald-600 hover:bg-emerald-700">
-            <Plus className="w-4 h-4 mr-1" /> Nouveau quart
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {(isNurse || isAdmin) && (
+              <Button data-testid="add-appointment-button" variant="outline" onClick={() => setApptOpen(true)} className="rounded-full border-sky-300 text-sky-800 hover:bg-sky-50">
+                <Stethoscope className="w-4 h-4 mr-1" /> Rendez-vous
+              </Button>
+            )}
+            <Button data-testid="add-shift-button" onClick={() => setDialogOpen(true)} className="rounded-full bg-emerald-600 hover:bg-emerald-700">
+              <Plus className="w-4 h-4 mr-1" /> Nouveau quart
+            </Button>
+          </div>
         }
       />
       {isAdmin && <ScheduleProposals />}
@@ -173,6 +208,7 @@ export default function SchedulingModule(): JSX.Element {
                 </td>
                 {days.map((d) => {
                   const shifts = state.shifts.filter((s) => s.employeeId === emp.id && s.date === d);
+                  const appts = appointments.filter((a) => a.employee_id === emp.id && a.date === d);
                   return (
                     <td key={d} className={`p-2 border-b border-r border-slate-200 last:border-r-0 align-top ${d === today ? 'bg-emerald-50/50' : ''}`}>
                       {shifts.map((s) => (
@@ -185,6 +221,26 @@ export default function SchedulingModule(): JSX.Element {
                           >
                             <X className="w-2.5 h-2.5" />
                           </button>
+                        </div>
+                      ))}
+                      {appts.map((a) => (
+                        <div
+                          key={a.id}
+                          data-testid={`appointment-chip-${a.id}`}
+                          className="group relative bg-sky-100 border border-sky-300 text-sky-900 rounded-lg px-2 py-1 mb-1 text-[11px] font-semibold"
+                          title={`${a.client_name}${a.reason ? ` — ${a.reason}` : ''}${a.notes ? ` · ${a.notes}` : ''}`}
+                        >
+                          <span className="inline-flex items-center gap-1"><Stethoscope className="w-3 h-3" /> {a.start}–{a.end}</span>
+                          <span className="block text-[10px] font-normal truncate">{a.client_name}{a.reason ? ` · ${a.reason}` : ''}</span>
+                          {(isAdmin || currentUser?.employeeId === a.employee_id) && (
+                            <button
+                              data-testid={`delete-appointment-${a.id}`}
+                              onClick={() => void removeAppointment(a.id)}
+                              className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 text-white hidden group-hover:flex items-center justify-center"
+                            >
+                              <X className="w-2.5 h-2.5" />
+                            </button>
+                          )}
                         </div>
                       ))}
                     </td>
@@ -225,6 +281,8 @@ export default function SchedulingModule(): JSX.Element {
           </tbody>
         </table>
       </div>
+
+      <AppointmentDialog open={apptOpen} onOpenChange={setApptOpen} onCreated={() => void refreshAppointments()} />
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent data-testid="add-shift-dialog">
