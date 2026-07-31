@@ -217,7 +217,7 @@ export default function SchedulingModule(): JSX.Element {
                           <button
                             data-testid={`delete-shift-${s.id}`}
                             onClick={() => { deleteShift(s.id); toast.success('Quart supprimé.'); }}
-                            className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 text-white hidden group-hover:flex items-center justify-center"
+                            className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 text-white flex md:hidden md:group-hover:flex items-center justify-center"
                           >
                             <X className="w-2.5 h-2.5" />
                           </button>
@@ -236,7 +236,7 @@ export default function SchedulingModule(): JSX.Element {
                             <button
                               data-testid={`delete-appointment-${a.id}`}
                               onClick={() => void removeAppointment(a.id)}
-                              className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 text-white hidden group-hover:flex items-center justify-center"
+                              className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 text-white flex md:hidden md:group-hover:flex items-center justify-center"
                             >
                               <X className="w-2.5 h-2.5" />
                             </button>
