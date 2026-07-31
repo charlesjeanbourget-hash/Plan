@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState, ReactNode, useCallback 
 import {
   HRState, Employee, Shift, Task, JobOffer, Candidate, LeaveRequest, ReplacementRequest,
   PayrollEntry, PerformanceReview, OnboardingItem, Contract, Benefit, FAQItem, Pharmacy,
-  CandidateStatus, RequestStatus, TaskStatus, PayrollStatus, ReplacementStatus, ShiftSwapRequest, Branch,
+  CandidateStatus, RequestStatus, TaskStatus, PayrollStatus, ReplacementStatus, ShiftSwapRequest, Branch, Resource,
 } from '@/types';
 import { SEED_STATE } from '@/context/seedData';
 
@@ -47,6 +47,9 @@ interface HRContextValue {
   updatePharmacy: (id: string, patch: Partial<Pharmacy>) => void;
   addBranch: (b: Omit<Branch, 'id'>) => void;
   deleteBranch: (id: string) => void;
+  addResource: (r: Omit<Resource, 'id'>) => void;
+  updateResource: (id: string, patch: Partial<Resource>) => void;
+  deleteResource: (id: string) => void;
   resetData: () => void;
 }
 
@@ -55,7 +58,8 @@ const HRContext = createContext<HRContextValue | undefined>(undefined);
 const loadState = (): HRState => {
   const raw = localStorage.getItem(STATE_KEY);
   if (raw) {
-    return JSON.parse(raw) as HRState;
+    const parsed = JSON.parse(raw) as Partial<HRState>;
+    return { ...SEED_STATE, ...parsed } as HRState;
   }
   localStorage.setItem(STATE_KEY, JSON.stringify(SEED_STATE));
   return SEED_STATE;
@@ -145,6 +149,14 @@ export const HRProvider = ({ children }: { children: ReactNode }) => {
       patchList('pharmacies', (items) => items.map((i) => (i.id === id ? { ...i, ...patch } : i))),
     addBranch: (b) => patchList('branches', (items) => [...items, { ...b, id: uid() }]),
     deleteBranch: (id) => patchList('branches', (items) => items.filter((i) => i.id !== id)),
+    addResource: (r) => patchList('resources', (items) => [...items, { ...r, id: uid() }]),
+    updateResource: (id, patch) =>
+      patchList('resources', (items) => items.map((i) => (i.id === id ? { ...i, ...patch } : i))),
+    deleteResource: (id) => {
+      patchList('resources', (items) => items.filter((i) => i.id !== id));
+      patchList('shifts', (items) => items.map((s) =>
+        s.resourceIds ? { ...s, resourceIds: s.resourceIds.filter((rid) => rid !== id) } : s));
+    },
     resetData: () => {
       localStorage.setItem(STATE_KEY, JSON.stringify(SEED_STATE));
       setState(SEED_STATE);

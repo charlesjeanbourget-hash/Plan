@@ -10,7 +10,7 @@ import { toast } from 'sonner';
 import {
   LayoutDashboard, Users, CalendarClock, Briefcase, Wallet, RefreshCw, TreePalm,
   TrendingUp, ClipboardCheck, FileText, HeartHandshake, HelpCircle, ShieldCheck,
-  LogOut, Menu, X, LucideIcon, BadgeCheck, UserRound, KeyRound, Eye, EyeOff, GraduationCap, ListChecks, Truck, MessagesSquare,
+  LogOut, Menu, X, LucideIcon, BadgeCheck, UserRound, KeyRound, Eye, EyeOff, GraduationCap, ListChecks, Truck, MessagesSquare, Boxes,
 } from 'lucide-react';
 
 interface Props {
@@ -32,6 +32,7 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'employees', label: 'Employés', icon: Users },
   { key: 'licenses', label: 'Licences pro.', icon: BadgeCheck },
   { key: 'scheduling', label: 'Horaires', icon: CalendarClock },
+  { key: 'resources', label: 'Ressources', icon: Boxes },
   { key: 'tasks', label: 'Tâches par quart', icon: ListChecks },
   { key: 'deliveries', label: 'Livraisons', icon: Truck },
   { key: 'recruitment', label: 'Recrutement', icon: Briefcase },

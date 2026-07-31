@@ -11,6 +11,12 @@ export const SEED_STATE: HRState = {
     { id: 'br1', pharmacyId: 'ph1', name: 'Succursale Centre-Ville', address: '1200 rue Sainte-Catherine, Montréal' },
     { id: 'br2', pharmacyId: 'ph1', name: 'Succursale Plateau', address: '88 av. du Parc, Montréal' },
   ],
+  resources: [
+    { id: 'res1', type: 'lieu', name: 'Succursale Centre-Ville', address: '1200 rue Sainte-Catherine, Montréal' },
+    { id: 'res2', type: 'lieu', name: 'Succursale Plateau', address: '88 av. du Parc, Montréal' },
+    { id: 'res3', type: 'equipement', name: 'Véhicule de livraison #1', description: 'Toyota Corolla — plaque FLW 204' },
+    { id: 'res4', type: 'equipement', name: 'Tablette borne de punch', description: 'iPad du comptoir laboratoire' },
+  ],
   shiftSwaps: [
     { id: 'sw1', shiftId: 's5', requesterId: 'e2', targetEmployeeId: 'e3', reason: 'Rendez-vous personnel impossible à déplacer', status: 'En attente' },
   ],

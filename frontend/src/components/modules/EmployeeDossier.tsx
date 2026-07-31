@@ -8,9 +8,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, Mail, Phone, MapPin, Trash2 } from 'lucide-react';
+import { Plus, Mail, Phone, MapPin, Trash2, Hash } from 'lucide-react';
 import { ProfileEditor } from '@/components/ProfileEditor';
 import { SalaryHistory } from '@/components/SalaryHistory';
+import { PayrollNumbersDialog } from '@/components/PayrollNumbersDialog';
 import { toast } from 'sonner';
 
 export default function EmployeeDossier(): JSX.Element {
@@ -26,6 +27,7 @@ export default function EmployeeDossier(): JSX.Element {
   const [position, setPosition] = useState<Position>('ATP');
   const [hourlyRate, setHourlyRate] = useState('25');
   const [branchId, setBranchId] = useState(state.branches[0]?.id ?? '');
+  const [payrollNumbersOpen, setPayrollNumbersOpen] = useState(false);
 
   const selected: Employee | undefined = state.employees.find((e) => e.id === selectedId);
 
@@ -60,11 +62,17 @@ export default function EmployeeDossier(): JSX.Element {
         title="Dossiers Employés"
         subtitle={`${state.employees.length} membres dans votre équipe.`}
         action={
-          <Button data-testid="add-employee-button" onClick={() => setDialogOpen(true)} className="rounded-full bg-emerald-600 hover:bg-emerald-700">
-            <Plus className="w-4 h-4 mr-1" /> Nouvel employé
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button data-testid="payroll-numbers-button" variant="outline" onClick={() => setPayrollNumbersOpen(true)} className="rounded-full border-bronze-300 text-bronze-800 hover:bg-bronze-50">
+              <Hash className="w-4 h-4 mr-1" /> Matricules paie
+            </Button>
+            <Button data-testid="add-employee-button" onClick={() => setDialogOpen(true)} className="rounded-full bg-emerald-600 hover:bg-emerald-700">
+              <Plus className="w-4 h-4 mr-1" /> Nouvel employé
+            </Button>
+          </div>
         }
       />
+      <PayrollNumbersDialog open={payrollNumbersOpen} onClose={() => setPayrollNumbersOpen(false)} />
       {state.employees.length === 0 ? (
         <EmptyState text="Aucun employé. Ajoutez votre premier membre d'équipe." />
       ) : (

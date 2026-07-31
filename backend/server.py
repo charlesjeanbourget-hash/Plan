@@ -1411,14 +1411,31 @@ async def generate_punch_code(employee_id: str, principal: dict = Depends(get_pr
 
 class PunchCodeIn(BaseModel):
     code: str
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    accuracy: Optional[float] = None
 
 
-async def do_punch(pharmacy_id: str, employee_id: str, employee_name: str, source: str, actor: str) -> dict:
+class PunchGeoIn(BaseModel):
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    accuracy: Optional[float] = None
+
+
+def geo_dict(lat: Optional[float], lng: Optional[float], accuracy: Optional[float]) -> Optional[dict]:
+    if lat is None or lng is None:
+        return None
+    return {"lat": lat, "lng": lng, "accuracy": accuracy}
+
+
+async def do_punch(pharmacy_id: str, employee_id: str, employee_name: str, source: str, actor: str,
+                   location: Optional[dict] = None) -> dict:
     now = datetime.now(timezone.utc)
     open_p = await db.punches.find_one(
         {"pharmacy_id": pharmacy_id, "employee_id": employee_id, "punch_out": None}, {"_id": 0})
     if open_p:
-        await db.punches.update_one({"id": open_p["id"]}, {"$set": {"punch_out": now.isoformat()}})
+        await db.punches.update_one({"id": open_p["id"]},
+                                    {"$set": {"punch_out": now.isoformat(), "punch_out_location": location}})
         duration = round((now - datetime.fromisoformat(open_p["punch_in"])).total_seconds() / 3600, 2)
         await log_audit(actor, "system" if source == "punch" else "admin", "PUNCH_SORTIE", "punch", open_p["id"],
                         f"{employee_name} — sortie ({duration} h)", pharmacy_id)
@@ -1428,7 +1445,7 @@ async def do_punch(pharmacy_id: str, employee_id: str, employee_name: str, sourc
         "id": str(uuid.uuid4()), "pharmacy_id": pharmacy_id, "employee_id": employee_id,
         "employee_name": employee_name, "date": now.astimezone(MONTREAL_TZ).date().isoformat(),
         "punch_in": now.isoformat(), "punch_out": None, "source": source,
-        "created_by": actor, "note": "",
+        "created_by": actor, "note": "", "punch_in_location": location, "punch_out_location": None,
     }
     await db.punches.insert_one({**doc})
     await log_audit(actor, "system" if source == "punch" else "admin", "PUNCH_ENTREE", "punch", doc["id"],
@@ -1481,14 +1498,17 @@ async def punch_preview(payload: PunchCodeIn, request: Request):
 async def punch_by_code(payload: PunchCodeIn, request: Request):
     identifier = await punch_throttle_check(request)
     prof = await resolve_punch_code(payload.code.strip(), identifier)
-    return await do_punch(prof["pharmacy_id"], prof["employee_id"], prof.get("employee_name", ""), "punch", "borne")
+    return await do_punch(prof["pharmacy_id"], prof["employee_id"], prof.get("employee_name", ""), "punch", "borne",
+                          geo_dict(payload.lat, payload.lng, payload.accuracy))
 
 
 @api_router.post("/punch/me")
-async def punch_me(user: dict = Depends(get_current_user)):
+async def punch_me(payload: Optional[PunchGeoIn] = None, user: dict = Depends(get_current_user)):
     if not user.get("employee_id"):
         raise HTTPException(status_code=400, detail="Aucun dossier employé associé à votre compte.")
-    return await do_punch(user.get("pharmacy_id") or "", user["employee_id"], user["name"], "punch", user["email"])
+    location = geo_dict(payload.lat, payload.lng, payload.accuracy) if payload else None
+    return await do_punch(user.get("pharmacy_id") or "", user["employee_id"], user["name"], "punch", user["email"],
+                          location)
 
 
 @api_router.get("/punch/me/status")

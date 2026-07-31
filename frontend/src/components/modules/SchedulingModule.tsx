@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ChevronLeft, ChevronRight, Plus, X, ArrowLeftRight, Check, Stethoscope, CopyPlus, LayoutTemplate, FileDown, Megaphone, Hourglass, BookOpenCheck } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, X, ArrowLeftRight, Check, Stethoscope, CopyPlus, LayoutTemplate, FileDown, Megaphone, Hourglass, BookOpenCheck, MapPin, Wrench, Hand } from 'lucide-react';
 import { ScheduleProposals } from '@/components/ScheduleProposals';
 import { AppointmentDialog } from '@/components/AppointmentDialog';
 import { DuplicateWeekDialog } from '@/components/DuplicateWeekDialog';
@@ -19,7 +19,6 @@ import { ReadReceiptsDialog } from '@/components/ReadReceiptsDialog';
 import { downloadSchedulePdf } from '@/lib/schedulePdf';
 import { hoursBetween } from '@/lib/schedule';
 import { toast } from 'sonner';
-
 const DAY_LABELS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -52,6 +51,9 @@ export default function SchedulingModule(): JSX.Element {
   const [tplOpen, setTplOpen] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [receiptsOpen, setReceiptsOpen] = useState(false);
+  const [selectedResources, setSelectedResources] = useState<string[]>([]);
+  const [dragShiftId, setDragShiftId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isAdmin || !token) return;
@@ -96,9 +98,25 @@ export default function SchedulingModule(): JSX.Element {
   const handleAdd = (e: FormEvent<HTMLFormElement>): void => {
     e.preventDefault();
     if (!employeeId) return;
-    addShift({ employeeId, date, startTime, endTime });
+    addShift({ employeeId, date, startTime, endTime, resourceIds: selectedResources });
     toast.success('Quart de travail ajouté à l\'horaire.');
+    setSelectedResources([]);
     setDialogOpen(false);
+  };
+
+  const toggleResource = (id: string): void => {
+    setSelectedResources((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const handleDrop = (empId: string, d: string): void => {
+    if (!isAdmin || !dragShiftId) return;
+    const shift = state.shifts.find((s) => s.id === dragShiftId);
+    setDragShiftId(null);
+    setDropTarget(null);
+    if (!shift || (shift.employeeId === empId && shift.date === d)) return;
+    updateShift(shift.id, { employeeId: empId, date: d });
+    const emp = getEmployee(empId);
+    toast.success(`Quart ${shift.startTime}–${shift.endTime} déplacé vers ${emp ? `${emp.firstName} ${emp.lastName}` : 'l\'employé'} le ${d}.`);
   };
 
   const pendingSwaps = state.shiftSwaps.filter(
@@ -277,6 +295,11 @@ export default function SchedulingModule(): JSX.Element {
             Cette semaine
           </button>
         )}
+        {isAdmin && (
+          <span data-testid="dnd-hint" className="hidden lg:inline-flex items-center gap-1.5 text-xs text-slate-400">
+            <Hand className="w-3.5 h-3.5" /> Glissez-déposez un quart vers une autre case pour le déplacer
+          </span>
+        )}
         <div className="ml-auto w-full sm:w-auto">
           <Select value={branchFilter} onValueChange={setBranchFilter}>
             <SelectTrigger data-testid="scheduling-branch-filter" className="w-full sm:w-56">
@@ -312,11 +335,40 @@ export default function SchedulingModule(): JSX.Element {
                 {days.map((d) => {
                   const shifts = state.shifts.filter((s) => s.employeeId === emp.id && s.date === d);
                   const appts = appointments.filter((a) => a.employee_id === emp.id && a.date === d);
+                  const cellKey = `${emp.id}|${d}`;
                   return (
-                    <td key={d} className={`p-2 border-b border-r border-slate-200 last:border-r-0 align-top ${d === today ? 'bg-emerald-50/50' : ''}`}>
+                    <td
+                      key={d}
+                      data-testid={`schedule-cell-${emp.id}-${d}`}
+                      onDragOver={(e) => { if (isAdmin && dragShiftId) { e.preventDefault(); setDropTarget(cellKey); } }}
+                      onDragLeave={() => setDropTarget((t) => (t === cellKey ? null : t))}
+                      onDrop={(e) => { e.preventDefault(); handleDrop(emp.id, d); }}
+                      className={`p-2 border-b border-r border-slate-200 last:border-r-0 align-top transition-colors ${d === today ? 'bg-emerald-50/50' : ''} ${dropTarget === cellKey && dragShiftId ? 'bg-bronze-50 ring-2 ring-inset ring-bronze-400' : ''}`}
+                    >
                       {shifts.map((s) => (
-                        <div key={s.id} className="group relative bg-emerald-600 text-white rounded-lg px-2 py-1.5 mb-1 text-xs font-semibold text-center">
+                        <div
+                          key={s.id}
+                          data-testid={`shift-chip-${s.id}`}
+                          draggable={isAdmin}
+                          onDragStart={(e) => { setDragShiftId(s.id); e.dataTransfer.effectAllowed = 'move'; }}
+                          onDragEnd={() => { setDragShiftId(null); setDropTarget(null); }}
+                          className={`group relative bg-emerald-600 text-white rounded-lg px-2 py-1.5 mb-1 text-xs font-semibold text-center ${isAdmin ? 'cursor-grab active:cursor-grabbing' : ''} ${dragShiftId === s.id ? 'opacity-40' : ''}`}
+                        >
                           {s.startTime}–{s.endTime}
+                          {(s.resourceIds ?? []).length > 0 && (
+                            <span className="mt-1 flex flex-wrap justify-center gap-1">
+                              {(s.resourceIds ?? []).map((rid) => {
+                                const r = (state.resources ?? []).find((x) => x.id === rid);
+                                if (!r) return null;
+                                return (
+                                  <span key={rid} data-testid={`shift-resource-chip-${s.id}-${rid}`} className="inline-flex items-center gap-0.5 bg-white/25 rounded px-1 py-px text-[9px] font-medium max-w-full truncate">
+                                    {r.type === 'lieu' ? <MapPin className="w-2.5 h-2.5 shrink-0" /> : <Wrench className="w-2.5 h-2.5 shrink-0" />}
+                                    <span className="truncate">{r.name}</span>
+                                  </span>
+                                );
+                              })}
+                            </span>
+                          )}
                           <button
                             data-testid={`delete-shift-${s.id}`}
                             onClick={() => { deleteShift(s.id); toast.success('Quart supprimé.'); }}
@@ -421,6 +473,25 @@ export default function SchedulingModule(): JSX.Element {
                 <Input data-testid="shift-end-input" type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} required />
               </div>
             </div>
+            {(state.resources ?? []).length > 0 && (
+              <div className="space-y-2">
+                <Label>Ressources — lieu de travail, équipement (optionnel)</Label>
+                <div className="max-h-36 overflow-y-auto space-y-1 rounded-lg border border-slate-200 p-2.5">
+                  {(state.resources ?? []).map((r) => (
+                    <label key={r.id} data-testid={`shift-resource-option-${r.id}`} className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer rounded-md px-1.5 py-1 hover:bg-slate-50">
+                      <input
+                        type="checkbox"
+                        checked={selectedResources.includes(r.id)}
+                        onChange={() => toggleResource(r.id)}
+                        className="accent-emerald-600 w-4 h-4"
+                      />
+                      {r.type === 'lieu' ? <MapPin className="w-3.5 h-3.5 text-emerald-600 shrink-0" /> : <Wrench className="w-3.5 h-3.5 text-bronze-600 shrink-0" />}
+                      <span className="truncate">{r.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
             <Button data-testid="shift-submit-button" type="submit" className="w-full rounded-full bg-emerald-600 hover:bg-emerald-700">
               Ajouter le quart
             </Button>

@@ -12,6 +12,7 @@ import Sidebar from '@/components/Sidebar';
 import ChatWidget from '@/components/ChatWidget';
 import DashboardModule from '@/components/modules/DashboardModule';
 import EmployeeDossier from '@/components/modules/EmployeeDossier';
+import ResourcesModule from '@/components/modules/ResourcesModule';
 import SchedulingModule from '@/components/modules/SchedulingModule';
 import RecruitmentModule from '@/components/modules/RecruitmentModule';
 import PayrollModule from '@/components/modules/PayrollModule';
@@ -40,6 +41,7 @@ const MODULES: Record<ModuleKey, () => JSX.Element> = {
   employees: EmployeeDossier,
   licenses: LicensesModule,
   scheduling: SchedulingModule,
+  resources: ResourcesModule,
   recruitment: RecruitmentModule,
   payroll: PayrollModule,
   replacements: ReplacementModule,

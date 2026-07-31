@@ -21,6 +21,7 @@ export type ModuleKey =
   | 'faq'
   | 'training'
   | 'deliveries'
+  | 'resources'
   | 'superadmin';
 
 export interface User {
@@ -82,6 +83,23 @@ export interface Shift {
   startTime: string;
   endTime: string;
   notes?: string;
+  resourceIds?: string[];
+}
+
+export type ResourceType = 'lieu' | 'equipement';
+
+export interface Resource {
+  id: string;
+  type: ResourceType;
+  name: string;
+  address?: string;
+  description?: string;
+}
+
+export interface GeoPoint {
+  lat: number;
+  lng: number;
+  accuracy?: number | null;
 }
 
 export type TaskStatus = 'À faire' | 'En cours' | 'Terminée';
@@ -455,6 +473,8 @@ export interface Punch {
   source: 'punch' | 'manual';
   created_by: string;
   note: string;
+  punch_in_location?: GeoPoint | null;
+  punch_out_location?: GeoPoint | null;
 }
 
 export interface OpenPunch extends Punch {
@@ -729,6 +749,7 @@ export interface PublicReplacementRequest {
 export interface HRState {
   employees: Employee[];
   branches: Branch[];
+  resources: Resource[];
   shifts: Shift[];
   shiftSwaps: ShiftSwapRequest[];
   tasks: Task[];

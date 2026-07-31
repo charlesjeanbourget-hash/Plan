@@ -5,6 +5,7 @@ import { PunchStatus, PunchActionResult } from '@/types';
 import { fmtTime } from '@/lib/pharmacy';
 import { Button } from '@/components/ui/button';
 import { Timer, LogIn, LogOut } from 'lucide-react';
+import { getPunchGeo } from '@/lib/geo';
 import { toast } from 'sonner';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -30,7 +31,8 @@ export const MyPunchCard = (): JSX.Element => {
   const punch = async (): Promise<void> => {
     setBusy(true);
     try {
-      const res = await axios.post<PunchActionResult>(`${API}/punch/me`, {}, { headers });
+      const geo = await getPunchGeo();
+      const res = await axios.post<PunchActionResult>(`${API}/punch/me`, geo ?? {}, { headers });
       toast.success(res.data.action === 'in'
         ? `Entrée punchée à ${fmtTime(res.data.time)}. Bon quart !`
         : `Sortie punchée à ${fmtTime(res.data.time)} — durée ${res.data.duration_hours} h.`);

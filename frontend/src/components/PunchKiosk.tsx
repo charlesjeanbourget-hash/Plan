@@ -3,6 +3,7 @@ import axios from 'axios';
 import { View, PunchActionResult, PunchPreview } from '@/types';
 import { fmtTime } from '@/lib/pharmacy';
 import { BrandLogo } from '@/components/BrandLogo';
+import { getPunchGeo } from '@/lib/geo';
 import { ArrowLeft, Delete, LogIn, LogOut, UserCheck } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -55,7 +56,8 @@ export default function PunchKiosk({ onNavigate }: Props): JSX.Element {
     setBusy(true);
     setError('');
     try {
-      const res = await axios.post<PunchActionResult>(`${API}/punch`, { code });
+      const geo = await getPunchGeo();
+      const res = await axios.post<PunchActionResult>(`${API}/punch`, { code, ...(geo ?? {}) });
       setResult(res.data);
       setCode('');
       setPreview(null);

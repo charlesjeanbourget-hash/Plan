@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
-import { Timer, ChevronLeft, ChevronRight, Plus, Trash2, Wallet, Settings2, Download, AlertTriangle, ChevronDown, FileSpreadsheet } from 'lucide-react';
+import { Timer, ChevronLeft, ChevronRight, Plus, Trash2, Wallet, Settings2, Download, AlertTriangle, ChevronDown, FileSpreadsheet, MapPin } from 'lucide-react';
 import { toast } from 'sonner';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -381,6 +381,30 @@ export const PunchHoursPanel = (): JSX.Element => {
                   <p className="text-xs text-slate-500">
                     {p.source === 'manual' ? `Saisie manuelle par ${p.created_by}` : 'Punch'}{p.note && ` — ${p.note}`}
                   </p>
+                  {(p.punch_in_location || p.punch_out_location) && (
+                    <p className="text-xs mt-0.5 flex flex-wrap gap-3">
+                      {p.punch_in_location && (
+                        <a
+                          data-testid={`punch-in-geo-${p.id}`}
+                          href={`https://www.google.com/maps?q=${p.punch_in_location.lat},${p.punch_in_location.lng}`}
+                          target="_blank" rel="noreferrer"
+                          className="inline-flex items-center gap-1 text-emerald-700 font-semibold hover:underline"
+                        >
+                          <MapPin className="w-3 h-3" /> Position entrée
+                        </a>
+                      )}
+                      {p.punch_out_location && (
+                        <a
+                          data-testid={`punch-out-geo-${p.id}`}
+                          href={`https://www.google.com/maps?q=${p.punch_out_location.lat},${p.punch_out_location.lng}`}
+                          target="_blank" rel="noreferrer"
+                          className="inline-flex items-center gap-1 text-sky-700 font-semibold hover:underline"
+                        >
+                          <MapPin className="w-3 h-3" /> Position sortie
+                        </a>
+                      )}
+                    </p>
+                  )}
                 </div>
                 <Button data-testid={`delete-punch-${p.id}`} size="sm" variant="outline" onClick={() => void deletePunch(p.id)} className="rounded-full text-xs text-red-600 border-red-200 hover:bg-red-50">
                   <Trash2 className="w-3.5 h-3.5" />
