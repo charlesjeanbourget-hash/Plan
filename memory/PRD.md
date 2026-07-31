@@ -168,6 +168,11 @@ admin@luminahr.ca/admin123 · julie@luminahr.ca/employe123 · super@luminahr.ca/
 - **Mode intelligent** : ignore les quarts identiques déjà présents (idempotent, vérifié : re-duplication → 0 doublon) et les quarts tombant sur une absence approuvée ; toast résumé « X copiés · Y ignorés — déjà présents · Z ignorés — absence approuvée ».
 - 100 % frontend (quarts dans HRContext/localStorage), aucun endpoint requis.
 
+## Itération 20 (31 juillet 2026) — Modèles de semaine + Alerte heures sup — testée 100 % (iteration_22.json : backend 12/12, frontend tous scénarios)
+- **Modèles de semaine** (bouton « Modèles », module Horaires, admin/gestionnaire) : sauvegarde de la semaine affichée sous un nom (« Été », « Fêtes »…) — partagés par pharmacie (Mongo `schedule_templates`, GET/POST/DELETE /api/schedule/templates, validations name/entries/weekday/heures, 403 employé, audit). Application en un clic à la semaine affichée : quarts identiques ignorés (idempotent) + absences approuvées ignorées, toast résumé. WeekTemplatesDialog.tsx (template-name-input, template-apply-{id}, template-delete-{id}).
+- **Alerte heures sup** (lib/schedule.ts computeOvertimeWarnings) : dans « Dupliquer la semaine » (encadré rouge LIVE duplicate-overtime-warning selon les semaines cochées) ET à l'application d'un modèle (flux 2 clics : 1er clic → encadré rouge template-overtime-warning-{id} + bouton « Appliquer quand même », 2e clic → applique). Calcul : heures existantes de la semaine cible + heures ajoutées vs max_hours_week du profil Mongo — ex. « Julie Gagnon : 40 h > max 32 h — semaine du X ». Confirmation possible en connaissance de cause (boutons rouges).
+- LEÇON : après création d'un nouveau fichier composant, le dev server CRA peut ne pas le résoudre (« Cannot find module ») → sudo supervisorctl restart frontend.
+
 ## Notes techniques
 - Ne jamais recréer `jsconfig.json` (conflit CRA avec tsconfig.json)
 - npm interdit — yarn uniquement
