@@ -202,6 +202,10 @@ admin@luminahr.ca/admin123 · julie@luminahr.ca/employe123 · super@luminahr.ca/
 - Donnée démo conservée : demande « Sophie Démo » (Pharmacie Belle-Rive, statut convertie après tests E2E).
 - **QuickBooks (EN ATTENTE DES CLÉS CLIENT)** : playbook complet obtenu via integration_expert (OAuth2 intuit-oauth/intuitlib + httpx, POST /v3/company/{realmId}/timeactivity minorversion=75, Hours+Minutes pas StartTime/EndTime, refresh token 100 j à rotation, sandbox pour Accounting mais PAS pour Payroll). Le client doit créer un compte sur developer.intuit.com → créer une app → fournir Client ID + Client Secret (clés Development d'abord). NE PAS implémenter avant réception des clés.
 
+## Itération 25 (31 juillet 2026) — FAQ publique sur la landing — testée (screenshot + accordéon + CTA scroll + mobile 0 débordement, tsc propre)
+- **Section FAQ publique** (`FaqSection.tsx`, id="faq", testid faq-section) placée entre « Votre temps vaut plus » et le formulaire démo : 8 questions/réponses rassurantes (sécurité Loi 25, mise en place, facilité employés, compatibilité paie Nethris/EmployeurD/ADP/QuickBooks, mobile PWA, contrôle sur l'horaire IA, remplacements de dernière minute, démo sans engagement) en accordéon shadcn + CTA « Réserver une démo » (faq-demo-cta, scroll vers #demo). Lien « Questions fréquentes » ajouté au footer (footer-faq-link).
+- **RECHERCHE intégrations paie (réponse au client)** : ADP = API gated (ADP API Central côté client payant OU partenariat Marketplace + certificat SSL mutuel — pas self-serve). Nethris/Employeur D (Desjardins) = PAS d'API publique ouverte, MAIS un connecteur Service Web existe pour les clients (activé par le support Desjardins : numéro client + code utilisateur API + code entreprise + mot de passe Service Web). Alternative pragmatique utilisée par les concurrents (Agendrix) : formats d'export dédiés par logiciel (ex. « Desjardins (Excel) ») importés dans Paie > Importer les transactions. PISTE BACKLOG : ajouter des formats d'export spécifiques Nethris/EmployeurD/ADP sans clés API.
+
 ## Notes techniques
 - Ne jamais recréer `jsconfig.json` (conflit CRA avec tsconfig.json)
 - npm interdit — yarn uniquement

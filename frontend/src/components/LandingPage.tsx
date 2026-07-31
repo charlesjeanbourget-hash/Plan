@@ -4,6 +4,7 @@ import { LandingShowcase } from '@/components/LandingShowcase';
 import { PayrollSection } from '@/components/PayrollSection';
 import { TestimonialsSection } from '@/components/TestimonialsSection';
 import { DemoSection } from '@/components/DemoSection';
+import { FaqSection } from '@/components/FaqSection';
 import { Users, Briefcase, Building2, ArrowRight, CheckCircle2, ShieldCheck, Leaf } from 'lucide-react';
 
 interface Props {
@@ -157,6 +158,8 @@ export default function LandingPage({ onNavigate }: Props): JSX.Element {
         </div>
       </section>
 
+      <FaqSection />
+
       <DemoSection />
 
       <section className="max-w-7xl mx-auto px-4 sm:px-6 py-16 sm:py-24 border-t border-slate-100">
@@ -260,6 +263,7 @@ export default function LandingPage({ onNavigate }: Props): JSX.Element {
             <p className="text-xs uppercase tracking-[0.15em] text-slate-400 font-bold mb-4">Support</p>
             <div className="flex flex-col gap-2.5 text-sm text-slate-600">
               <button data-testid="footer-demo-link" onClick={() => scrollToId('demo')} className="text-left hover:text-emerald-700 transition-colors">Réserver une démo</button>
+              <button data-testid="footer-faq-link" onClick={() => scrollToId('faq')} className="text-left hover:text-emerald-700 transition-colors">Questions fréquentes</button>
               <button data-testid="footer-testimonials-link" onClick={() => scrollToId('demo')} className="text-left hover:text-emerald-700 transition-colors">Nous joindre</button>
             </div>
           </div>
