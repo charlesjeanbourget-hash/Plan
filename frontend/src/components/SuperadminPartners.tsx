@@ -125,7 +125,7 @@ export const SuperadminPartners = (): JSX.Element => {
       ) : (
         <div className="space-y-2.5">
           {partners.map((p) => (
-            <div key={p.id} data-testid={`partner-card-${p.id}`} className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 px-4 py-3">
+            <div key={p.id} data-testid={`partner-row-${p.id}`} className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 px-4 py-3">
               <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${p.partner_type === 'agency' ? 'bg-sky-100 text-sky-800' : 'bg-bronze-100 text-bronze-800'}`}>
                 {p.partner_type === 'agency' ? <Building2 className="w-3 h-3" /> : <UserRound className="w-3 h-3" />}
                 {p.partner_type === 'agency' ? 'Agence' : 'Remplaçant(e)'}

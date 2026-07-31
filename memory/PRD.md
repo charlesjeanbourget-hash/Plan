@@ -136,6 +136,14 @@ admin@luminahr.ca/admin123 · julie@luminahr.ca/employe123 · super@luminahr.ca/
 - Données démo : Julie a 2 semaines parfaites (streak 2, badges perfect_week + streak_2) ; proposition IA 2002ec16-bd6d-430f-8048-484414ad1fe0 (semaine 2026-08-03) avec 2 alertes cliquables (tâches 35baf74b du 05-08 et c8abbb14 du 04-08).
 - RE-LEÇON confirmée : les search_replace parallèles sur le MÊME fichier s'écrasent (2 edits perdus puis réappliqués) — toujours séquentiel par fichier.
 
+## Itération 15 (31 juillet 2026) — Rôle Gestionnaire, Livraisons, Partenaires globaux, Tableau d'honneur, Objectif d'équipe — testée 100 % (iteration_17.json : backend 26/26, frontend tous flux)
+- **Rôle Gestionnaire (`manager`)** : exactement les mêmes accès que l'admin (choix client) — intégré partout backend (tuples admin/manager/superadmin, rapports courriels envoyés aux 2 rôles) et frontend (sidebar identique sauf Superadmin, libellé « Gestionnaire », option dans Superadmin → Comptes). Compte seed : gestion@luminahr.ca / gestion123.
+- **Module Livraisons** : admin/gestionnaire crée des directives (client, adresse, tél., # commande, produits, notes, priorité urgent/normal, livreur) → le livreur (compte employé) les voit instantanément (polling 20s + notifs cloche) avec statuts À ramasser → En route → Livrée, lien Google Maps, tel:, horodatage ramassage/livraison. Courriel automatique au livreur (tenté ; bloqué mode test Resend). Endpoints /api/deliveries (scoping livreur, 403 non-assigné). Nouveaux postes : Caissier(ère), Commis d'entrepôt.
+- **Partenaires de remplacement globaux** : superadmin gère /api/superadmin/partners (agences OU remplaçants individuels, postes couverts) — inclus automatiquement dans les courriels de demandes de remplacement de TOUTES les pharmacies (dédup par courriel), visibles chez les admins (GET /agencies, badge « Partenaire global », non supprimables par eux). Panneau dans le module Superadmin. Démo : « PharmaStaff Québec ».
+- **Tableau d'honneur mensuel** (HonorRoll.tsx sur le dashboard, visible par tous) : classement /api/tasks/honor-roll par taux de complétion + coups de main, icônes trophée/médailles top 3.
+- **Objectif d'équipe hebdo** (TeamGoalBar.tsx dans Tâches vue Semaine, visible par tous) : /api/tasks/goal (GET tous rôles, POST admin/manager 50-100 %), barre de progression pharmacy-wide avec marqueur d'objectif, état « Objectif atteint ! ». Objectif ph1 : 80 %.
+- Données démo conservées : livraison livrée « M. Robert Sirois », partenaire PharmaStaff Québec.
+
 ## Notes techniques
 - Ne jamais recréer `jsconfig.json` (conflit CRA avec tsconfig.json)
 - npm interdit — yarn uniquement
