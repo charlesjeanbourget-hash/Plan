@@ -1712,17 +1712,24 @@ def task_qualification_ok(title: str, capacities: list) -> bool:
 
 SCHEDULE_SYSTEM = (
     "Tu es un expert en planification d'horaires pour les pharmacies du Québec. À partir de la liste des employés, "
-    "de leurs profils (rôles, capacités, disponibilités par jour, restrictions, heures minimales et maximales par semaine), "
-    "des absences approuvées, des tâches à faire durant la semaine "
+    "de leurs profils (rôles, capacités, disponibilités par jour, restrictions, heures minimales et maximales par semaine, taux horaire), "
+    "des absences approuvées, des tâches à faire durant la semaine, du budget salarial hebdomadaire, "
+    "de l'achalandage estimé (clients à l'heure par jour et par plage) "
     "et des consignes du gestionnaire, tu crées l'horaire de la semaine demandée.\n\n"
     "Règles impératives :\n"
     "- RESPECTE STRICTEMENT les disponibilités (jour et plage horaire) et les restrictions de chaque employé.\n"
     "- Ne planifie JAMAIS un employé pendant une absence approuvée (vacances, maladie, congé, formation).\n"
+    "- RESPECTE le budget salarial hebdomadaire s'il est fourni : la somme (durée du quart en heures × taux horaire de "
+    "l'employé) de TOUS les quarts ne doit pas dépasser le budget. Calcule mentalement le coût total avant de répondre. "
+    "Si le budget rend la couverture complète impossible, privilégie les plages les plus achalandées et explique le compromis dans le summary.\n"
+    "- ADAPTE le nombre d'employés présents à l'achalandage fourni (clients/heure) pour chaque jour et plage : "
+    "plus de personnel aux plages achalandées, personnel réduit aux plages calmes. Règle pratique : environ 1 employé "
+    "au service pour 12 à 15 clients/heure, en plus du pharmacien au laboratoire.\n"
     "- Tiens compte des tâches à faire : si une tâche est assignée à un employé un jour donné, planifie-le ce jour-là "
     "sur une plage couvrant le quart de la tâche (Matin ≈ 8h-12h, Après-midi ≈ 12h-17h, Soir ≈ 17h-21h30), "
     "si ses disponibilités le permettent; sinon explique pourquoi dans le summary.\n"
     "- N'attribue à un employé qu'un rôle figurant dans ses rôles ou capacités; s'il faut faire autrement, signale-le dans le summary.\n"
-    "- Ne dépasse jamais le maximum d'heures hebdomadaires d'un employé; vise au moins son minimum.\n"
+    "- Ne dépasse jamais le maximum d'heures hebdomadaires d'un employé; vise au moins son minimum si le budget le permet.\n"
     "- Assure une couverture adéquate pendant les heures d'ouverture (par défaut lun-ven 8h-21h, sam-dim 9h-17h, "
     "sauf indication contraire dans les consignes), en priorité un pharmacien présent en tout temps si disponible.\n"
     "- Répartis équitablement les quarts et attribue à chacun un rôle cohérent avec ses rôles/capacités.\n"
@@ -1744,6 +1751,55 @@ class RosterEmployee(BaseModel):
     position: str
 
 
+TRAFFIC_DAY_KEYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+TRAFFIC_DAY_LABELS = ("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche")
+TRAFFIC_BLOCKS = {
+    "matin": ("Matin (8h-12h)", "08:00", "12:00"),
+    "apres_midi": ("Après-midi (12h-17h)", "12:00", "17:00"),
+    "soir": ("Soir (17h-21h30)", "17:00", "21:30"),
+}
+
+
+class ScheduleSettingsIn(BaseModel):
+    weekly_budget: float = 0
+    traffic: dict = {}
+
+
+@api_router.get("/schedule/settings")
+async def get_schedule_settings(user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    doc = await db.schedule_settings.find_one({"pharmacy_id": pid}, {"_id": 0})
+    return {"weekly_budget": (doc or {}).get("weekly_budget", 0),
+            "traffic": (doc or {}).get("traffic", {})}
+
+
+@api_router.put("/schedule/settings")
+async def set_schedule_settings(payload: ScheduleSettingsIn, principal: dict = Depends(get_principal)):
+    if not (0 <= payload.weekly_budget <= 1_000_000):
+        raise HTTPException(status_code=400, detail="Budget hebdomadaire invalide.")
+    traffic = {}
+    try:
+        for day in TRAFFIC_DAY_KEYS:
+            blocks = (payload.traffic or {}).get(day) or {}
+            traffic[day] = {b: max(0, min(500, int(float(blocks.get(b) or 0)))) for b in TRAFFIC_BLOCKS}
+    except (ValueError, TypeError, AttributeError):
+        raise HTTPException(status_code=400, detail="Valeurs d'achalandage invalides.")
+    pid = principal["pharmacy_id"] or "ph1"
+    await db.schedule_settings.update_one(
+        {"pharmacy_id": pid},
+        {"$set": {"pharmacy_id": pid, "weekly_budget": round(payload.weekly_budget, 2), "traffic": traffic,
+                  "updated_by": principal["email"], "updated_at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True)
+    await log_audit(principal["email"], principal["role"], "MODIF_PARAMS_HORAIRE", "horaire", pid,
+                    f"Budget hebdo : {payload.weekly_budget:.2f} $, achalandage mis à jour", pid)
+    return {"weekly_budget": round(payload.weekly_budget, 2), "traffic": traffic}
+
+
+def _time_to_minutes(t: str) -> int:
+    h, m = t.split(":")
+    return int(h) * 60 + int(m)
+
+
 class AbsenceIn(BaseModel):
     employee_id: str
     employee_name: str = ""
@@ -1758,6 +1814,7 @@ class ScheduleGenIn(BaseModel):
     approval_deadline_hours: int = 48
     employees: list[RosterEmployee]
     absences: list[AbsenceIn] = []
+    weekly_budget: float = -1
 
 
 def proposal_view(doc: dict) -> dict:
@@ -1786,7 +1843,8 @@ def proposal_view(doc: dict) -> dict:
 
 
 async def generate_schedule_content(proposal_id: str, pharmacy_id: str, week_start: str,
-                                    instructions: str, roster: list, profiles: list, absences: list):
+                                    instructions: str, roster: list, profiles: list, absences: list,
+                                    weekly_budget: float = 0):
     try:
         start = date.fromisoformat(week_start)
         week_days = [(start + timedelta(days=i)).isoformat() for i in range(7)]
@@ -1794,9 +1852,22 @@ async def generate_schedule_content(proposal_id: str, pharmacy_id: str, week_sta
         week_tasks = await db.shift_tasks.find(
             {"pharmacy_id": pharmacy_id, "date": {"$gte": week_days[0], "$lte": week_days[-1]}},
             {"_id": 0}).to_list(1000)
+        settings = await db.schedule_settings.find_one({"pharmacy_id": pharmacy_id}, {"_id": 0}) or {}
+        traffic = settings.get("traffic") or {}
+        traffic_payload = {}
+        for i, d in enumerate(week_days):
+            day_blocks = traffic.get(TRAFFIC_DAY_KEYS[i]) or {}
+            if any((day_blocks.get(k) or 0) > 0 for k in TRAFFIC_BLOCKS):
+                traffic_payload[f"{d} ({TRAFFIC_DAY_LABELS[i]})"] = {
+                    label: f"{day_blocks.get(key) or 0} client(s)/heure"
+                    for key, (label, _, _) in TRAFFIC_BLOCKS.items()}
         payload = {
             "semaine": week_days,
             "consignes_du_gestionnaire": instructions or "Aucune consigne particulière.",
+            "budget_salarial_hebdomadaire": (
+                f"{weekly_budget:.2f} $ — masse salariale MAXIMALE pour l'ensemble des quarts de la semaine"
+                if weekly_budget > 0 else "Aucun budget imposé."),
+            "achalandage_estime": traffic_payload or "Aucune donnée d'achalandage fournie.",
             "absences_approuvees": [{
                 "employee_id": a["employee_id"], "nom": a.get("employee_name", ""),
                 "du": a["start"], "au": a["end"], "type": a.get("type", ""),
@@ -1808,6 +1879,8 @@ async def generate_schedule_content(proposal_id: str, pharmacy_id: str, week_sta
             } for t in week_tasks] or "Aucune tâche planifiée cette semaine.",
             "employes": [{
                 "employee_id": e["id"], "nom": e["name"], "poste": e["position"],
+                "taux_horaire": next((p.get("hourly_rate") for p in profiles if p["employee_id"] == e["id"]
+                                      and p.get("hourly_rate")), "inconnu"),
                 "profil": next((p for p in profiles if p["employee_id"] == e["id"]), None),
             } for e in roster],
         }
@@ -1871,6 +1944,40 @@ async def generate_schedule_content(proposal_id: str, pharmacy_id: str, week_sta
                 alerts.append({**base, "kind": "profile",
                                "text": f"Tâche « {t['title']} » ({t['date']}) : {who} n'a pas cette capacité "
                                        "dans son profil — qualification à vérifier"})
+        estimated_cost = 0.0
+        missing_rate_ids = set()
+        for s in shifts:
+            try:
+                hours = max(0, _time_to_minutes(s["end"]) - _time_to_minutes(s["start"])) / 60
+            except (ValueError, AttributeError):
+                continue
+            rate = (prof_by_id.get(s["employee_id"]) or {}).get("hourly_rate")
+            if rate:
+                estimated_cost += hours * float(rate)
+            else:
+                missing_rate_ids.add(s["employee_id"])
+        estimated_cost = round(estimated_cost, 2)
+        if weekly_budget > 0 and estimated_cost > weekly_budget:
+            alerts.append({"kind": "budget",
+                           "text": f"Budget dépassé : coût estimé {estimated_cost:.2f} $ > budget "
+                                   f"{weekly_budget:.2f} $ (écart +{estimated_cost - weekly_budget:.2f} $)"})
+        for eid in sorted(missing_rate_ids):
+            who = next((e["name"] for e in roster if e["id"] == eid), eid)
+            alerts.append({"kind": "profile", "employee_id": eid,
+                           "text": f"Taux horaire manquant au profil de {who} — le coût estimé est sous-évalué"})
+        traffic_settings = (await db.schedule_settings.find_one(
+            {"pharmacy_id": pharmacy_id}, {"_id": 0}) or {}).get("traffic") or {}
+        for i, d in enumerate(week_days):
+            day_blocks = traffic_settings.get(TRAFFIC_DAY_KEYS[i]) or {}
+            for key, (label, bs, be) in TRAFFIC_BLOCKS.items():
+                expected = day_blocks.get(key) or 0
+                if expected <= 0:
+                    continue
+                covered = any(s["date"] == d and s["start"] < be and s["end"] > bs for s in shifts)
+                if not covered:
+                    alerts.append({"kind": "traffic",
+                                   "text": f"Aucune couverture le {d} ({TRAFFIC_DAY_LABELS[i]}) en {label} "
+                                           f"malgré ~{expected} client(s)/heure attendu(s)"})
         warnings_count = sum(len(s["warnings"]) for s in shifts) + len(alerts)
         approvals = {eid: {"status": "pending", "responded_at": None, "comment": ""}
                      for eid in sorted({s["employee_id"] for s in shifts})}
@@ -1878,6 +1985,7 @@ async def generate_schedule_content(proposal_id: str, pharmacy_id: str, week_sta
             "status": "pending_approval", "shifts": shifts, "summary": str(data.get("summary", "")),
             "employee_approvals": approvals, "error": None,
             "alerts": alerts, "warnings_count": warnings_count,
+            "estimated_cost": estimated_cost, "weekly_budget": weekly_budget,
             "updated_at": datetime.now(timezone.utc).isoformat()}})
         await log_audit("système", "system", "GENERATION_HORAIRE", "horaire", proposal_id,
                         f"Horaire IA généré : {len(shifts)} quart(s), {warnings_count} point(s) à vérifier "
@@ -1905,12 +2013,22 @@ async def schedule_generate(payload: ScheduleGenIn, principal: dict = Depends(ge
     for e in roster:
         profiles.append(await get_or_create_profile(pid, e["id"], e["name"]))
     profiles = [{k: v for k, v in p.items() if k not in ("punch_code",)} for p in profiles]
+    settings = await db.schedule_settings.find_one({"pharmacy_id": pid}, {"_id": 0}) or {}
+    if payload.weekly_budget >= 0:
+        if payload.weekly_budget > 1_000_000:
+            raise HTTPException(status_code=400, detail="Budget hebdomadaire invalide.")
+        weekly_budget = round(payload.weekly_budget, 2)
+        await db.schedule_settings.update_one(
+            {"pharmacy_id": pid}, {"$set": {"pharmacy_id": pid, "weekly_budget": weekly_budget}}, upsert=True)
+    else:
+        weekly_budget = settings.get("weekly_budget", 0)
     now = datetime.now(timezone.utc)
     doc = {
         "id": str(uuid.uuid4()), "pharmacy_id": pid, "week_start": payload.week_start,
         "status": "generating", "error": None, "summary": "", "shifts": [],
         "instructions": payload.instructions, "absences": absences,
         "alerts": [], "warnings_count": 0,
+        "estimated_cost": None, "weekly_budget": weekly_budget,
         "employee_approvals": {}, "admin_status": "pending", "admin_decided_by": None,
         "approval_deadline": (now + timedelta(hours=payload.approval_deadline_hours)).isoformat(),
         "approval_deadline_hours": payload.approval_deadline_hours,
@@ -1919,9 +2037,10 @@ async def schedule_generate(payload: ScheduleGenIn, principal: dict = Depends(ge
     }
     await db.schedule_proposals.insert_one({**doc})
     await log_audit(principal["email"], principal["role"], "DEMANDE_HORAIRE_IA", "horaire", doc["id"],
-                    f"Génération IA demandée pour la semaine du {payload.week_start}", pid)
+                    f"Génération IA demandée pour la semaine du {payload.week_start}"
+                    f"{f' (budget {weekly_budget:.2f} $)' if weekly_budget > 0 else ''}", pid)
     asyncio.create_task(generate_schedule_content(doc["id"], pid, payload.week_start, payload.instructions,
-                                                  roster, profiles, absences))
+                                                  roster, profiles, absences, weekly_budget))
     return proposal_view(doc)
 
 

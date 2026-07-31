@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Sparkles, Loader2, Check, X, Trash2, CalendarPlus, AlertTriangle, ExternalLink } from 'lucide-react';
+import { Sparkles, Loader2, Check, X, Trash2, CalendarPlus, AlertTriangle, ExternalLink, Wallet, Users } from 'lucide-react';
 import { toast } from 'sonner';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -31,6 +31,18 @@ const STATUS_META: Record<ProposalStatus, { label: string; cls: string }> = {
   applied: { label: 'Appliqué à l\'horaire', cls: 'bg-slate-200 text-slate-700' },
 };
 
+const TRAFFIC_DAYS: [string, string][] = [
+  ['mon', 'Lun'], ['tue', 'Mar'], ['wed', 'Mer'], ['thu', 'Jeu'], ['fri', 'Ven'], ['sat', 'Sam'], ['sun', 'Dim'],
+];
+
+const TRAFFIC_BLOCKS: [string, string][] = [
+  ['matin', 'Matin'], ['apres_midi', 'Après-midi'], ['soir', 'Soir'],
+];
+
+type TrafficGrid = Record<string, Record<string, number>>;
+
+const cad = (n: number): string => n.toLocaleString('fr-CA', { style: 'currency', currency: 'CAD' });
+
 const nextMonday = (): string => {
   const d = new Date();
   const day = (d.getDay() + 6) % 7;
@@ -47,6 +59,8 @@ export const ScheduleProposals = (): JSX.Element => {
   const [weekStart, setWeekStart] = useState(nextMonday());
   const [instructions, setInstructions] = useState('');
   const [deadlineHours, setDeadlineHours] = useState('48');
+  const [budget, setBudget] = useState('');
+  const [traffic, setTraffic] = useState<TrafficGrid>({});
   const [expanded, setExpanded] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -63,14 +77,30 @@ export const ScheduleProposals = (): JSX.Element => {
   useEffect(() => { void refresh(); }, [refresh]);
 
   useEffect(() => {
+    if (!genOpen || !token) return;
+    axios.get<{ weekly_budget: number; traffic: TrafficGrid }>(`${API}/schedule/settings`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => {
+        setBudget(r.data.weekly_budget > 0 ? String(r.data.weekly_budget) : '');
+        setTraffic(r.data.traffic ?? {});
+      })
+      .catch(() => undefined);
+  }, [genOpen, token]);
+
+  useEffect(() => {
     if (!proposals.some((p) => p.effective_status === 'generating')) return undefined;
     const id = window.setInterval(() => void refresh(), 5000);
     return () => window.clearInterval(id);
   }, [proposals, refresh]);
 
+  const setTrafficVal = (day: string, block: string, value: string): void => {
+    const n = Math.max(0, Math.min(500, Number(value) || 0));
+    setTraffic((t) => ({ ...t, [day]: { ...(t[day] ?? {}), [block]: n } }));
+  };
+
   const generate = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
     setBusy(true);
+    const budgetNum = Math.max(0, Number(budget.replace(',', '.')) || 0);
     const endDate = new Date(`${weekStart}T00:00:00`);
     endDate.setDate(endDate.getDate() + 6);
     const weekEnd = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, '0')}-${String(endDate.getDate()).padStart(2, '0')}`;
@@ -87,18 +117,20 @@ export const ScheduleProposals = (): JSX.Element => {
         };
       });
     try {
+      await axios.put(`${API}/schedule/settings`, { weekly_budget: budgetNum, traffic }, { headers });
       await axios.post(`${API}/schedule/generate`, {
         week_start: weekStart,
         instructions,
         approval_deadline_hours: Number(deadlineHours),
+        weekly_budget: budgetNum,
         absences,
         employees: state.employees.filter((emp) => emp.status === 'Actif').map((emp) => ({
           id: emp.id, name: `${emp.firstName} ${emp.lastName}`, position: emp.position,
         })),
       }, { headers });
-      toast.success(absences.length > 0
-        ? `L'IA prépare l'horaire en tenant compte de ${absences.length} absence(s) approuvée(s) et des tâches de la semaine…`
-        : 'L\'IA prépare l\'horaire en respectant les profils et les tâches de la semaine…');
+      toast.success(budgetNum > 0
+        ? `L'IA prépare l'horaire en respectant le budget de ${cad(budgetNum)}, l'achalandage, les tâches et les profils…`
+        : 'L\'IA prépare l\'horaire en respectant l\'achalandage, les tâches et les profils…');
       setGenOpen(false);
       await refresh();
     } catch (err) {
@@ -154,8 +186,9 @@ export const ScheduleProposals = (): JSX.Element => {
         </Button>
       </div>
       <p className="text-xs text-slate-500 mb-4">
-        L'IA respecte les profils (disponibilités, rôles, restrictions, heures min/max), les absences approuvées et les tâches à faire
-        de la semaine. Les quarts douteux (qualification manquante, conflit d'absence) sont signalés — approuvez ou rejetez en connaissance de cause,
+        L'IA respecte le budget salarial hebdomadaire, l'achalandage (clients/heure par plage), les profils (disponibilités, rôles, restrictions,
+        heures min/max, taux horaire), les absences approuvées et les tâches de la semaine. Les points douteux (budget dépassé, plage achalandée
+        sans couverture, qualification manquante, conflit d'absence) sont signalés — approuvez ou rejetez en connaissance de cause,
         puis chaque employé approuve dans le délai fixé (sans réponse, l'approbation est tacite).
       </p>
 
@@ -166,13 +199,23 @@ export const ScheduleProposals = (): JSX.Element => {
           const meta = STATUS_META[p.effective_status];
           const days = Array.from(new Set(p.shifts.map((s) => s.date))).sort();
           const isOpen = expanded === p.id;
+          const overBudget = (p.weekly_budget ?? 0) > 0 && (p.estimated_cost ?? 0) > (p.weekly_budget ?? 0);
           return (
             <div key={p.id} data-testid={`proposal-card-${p.id}`} className="rounded-lg border border-slate-200 p-5">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3">
                   {p.effective_status === 'generating' && <Loader2 className="w-4 h-4 text-sky-600 animate-spin" />}
                   <p className="text-sm font-bold text-slate-800">Semaine du {p.week_start}</p>
                   <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${meta.cls}`}>{meta.label}</span>
+                  {p.estimated_cost != null && p.effective_status !== 'generating' && (
+                    <span
+                      data-testid={`proposal-cost-${p.id}`}
+                      className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold ${overBudget ? 'bg-red-100 text-red-800' : 'bg-emerald-100 text-emerald-800'}`}
+                    >
+                      <Wallet className="w-3 h-3" /> Coût estimé : {cad(p.estimated_cost)}
+                      {(p.weekly_budget ?? 0) > 0 && ` / Budget : ${cad(p.weekly_budget ?? 0)}`}
+                    </span>
+                  )}
                   {(p.warnings_count ?? 0) > 0 && p.effective_status !== 'applied' && (
                     <span data-testid={`proposal-warnings-badge-${p.id}`} className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">
                       <AlertTriangle className="w-3 h-3" /> {p.warnings_count} point(s) à vérifier
@@ -240,6 +283,14 @@ export const ScheduleProposals = (): JSX.Element => {
                       <ul className="space-y-1.5">
                         {(p.alerts ?? []).map((raw, i) => {
                           const a = normAlert(raw);
+                          const clickable = a.kind === 'task' || a.kind === 'profile';
+                          if (!clickable) {
+                            return (
+                              <li key={i} data-testid={`alert-static-${p.id}-${i}`} className={`text-xs ${a.kind === 'budget' ? 'text-red-700 font-semibold' : 'text-amber-800'}`}>
+                                — {a.text}
+                              </li>
+                            );
+                          }
                           return (
                             <li key={i}>
                               <button
@@ -300,15 +351,55 @@ export const ScheduleProposals = (): JSX.Element => {
       </div>
 
       <Dialog open={genOpen} onOpenChange={setGenOpen}>
-        <DialogContent data-testid="generate-schedule-dialog">
+        <DialogContent data-testid="generate-schedule-dialog" className="max-h-[85vh] overflow-y-auto sm:max-w-xl">
           <DialogHeader>
             <DialogTitle className="font-heading">Générer l'horaire par IA</DialogTitle>
           </DialogHeader>
           <form onSubmit={(e) => void generate(e)} className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Semaine (lundi)</Label>
+                <Input data-testid="gen-week-start-input" type="date" value={weekStart} onChange={(e) => setWeekStart(e.target.value)} required />
+              </div>
+              <div className="space-y-2">
+                <Label className="inline-flex items-center gap-1.5"><Wallet className="w-3.5 h-3.5 text-bronze-600" /> Budget salarial de la semaine ($)</Label>
+                <Input data-testid="gen-budget-input" value={budget} onChange={(e) => setBudget(e.target.value)} inputMode="decimal" placeholder="Ex. 8500 — vide = sans limite" />
+              </div>
+            </div>
+            <p className="text-xs text-slate-500">Les absences approuvées, les tâches planifiées et les taux horaires des profils sont transmis automatiquement à l'IA. Le coût estimé de l'horaire sera comparé au budget.</p>
             <div className="space-y-2">
-              <Label>Semaine (lundi)</Label>
-              <Input data-testid="gen-week-start-input" type="date" value={weekStart} onChange={(e) => setWeekStart(e.target.value)} required />
-              <p className="text-xs text-slate-500">Les absences approuvées et les tâches planifiées de cette semaine sont transmises automatiquement à l'IA.</p>
+              <Label className="inline-flex items-center gap-1.5"><Users className="w-3.5 h-3.5 text-bronze-600" /> Achalandage estimé (clients à l'heure)</Label>
+              <div data-testid="gen-traffic-grid" className="rounded-lg border border-slate-200 overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-slate-50 text-slate-500">
+                      <th className="px-2 py-1.5 text-left font-semibold">Jour</th>
+                      {TRAFFIC_BLOCKS.map(([, label]) => (
+                        <th key={label} className="px-2 py-1.5 text-left font-semibold">{label}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {TRAFFIC_DAYS.map(([day, label]) => (
+                      <tr key={day} className="border-t border-slate-100">
+                        <td className="px-2 py-1 font-semibold text-slate-700">{label}</td>
+                        {TRAFFIC_BLOCKS.map(([block]) => (
+                          <td key={block} className="px-1.5 py-1">
+                            <Input
+                              data-testid={`gen-traffic-${day}-${block}`}
+                              value={String(traffic[day]?.[block] ?? 0)}
+                              onChange={(e) => setTrafficVal(day, block, e.target.value)}
+                              inputMode="numeric"
+                              className="h-7 w-full text-xs px-2"
+                            />
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-xs text-slate-500">Plus de clients/heure = plus de personnel planifié sur la plage. Sauvegardé pour les prochaines générations (Matin 8h-12h · Après-midi 12h-17h · Soir 17h-21h30).</p>
             </div>
             <div className="space-y-2">
               <Label>Consignes pour l'IA (besoins, heures d'ouverture, événements…)</Label>

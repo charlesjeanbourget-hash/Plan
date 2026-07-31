@@ -516,7 +516,7 @@ export interface ProposalWarning {
 
 export interface ProposalAlert {
   text: string;
-  kind: 'task' | 'profile';
+  kind: 'task' | 'profile' | 'budget' | 'traffic';
   task_id?: string;
   task_date?: string;
   employee_id?: string;
@@ -553,6 +553,8 @@ export interface ScheduleProposal {
   shifts: ProposalShift[];
   alerts?: (string | ProposalAlert)[];
   warnings_count?: number;
+  estimated_cost?: number | null;
+  weekly_budget?: number | null;
   employee_approvals: Record<string, ApprovalSlot>;
   admin_status: 'pending' | 'approved' | 'rejected';
   approval_deadline: string;
