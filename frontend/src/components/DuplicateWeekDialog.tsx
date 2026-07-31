@@ -1,51 +1,57 @@
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import axios from 'axios';
+import { useAuth } from '@/context/AuthContext';
 import { useHR } from '@/context/HRContext';
+import { PlannedShift, addDaysIso, computeOvertimeWarnings } from '@/lib/schedule';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { CopyPlus, CalendarCheck } from 'lucide-react';
+import { CopyPlus, CalendarCheck, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 
-const WEEKS_AHEAD = 16;
+const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
-const addDays = (isoDate: string, n: number): string => {
-  const d = new Date(`${isoDate}T00:00:00`);
-  d.setDate(d.getDate() + n);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-};
+const WEEKS_AHEAD = 16;
 
 export const DuplicateWeekDialog = ({ open, onClose, days }: {
   open: boolean;
   onClose: () => void;
   days: string[];
 }): JSX.Element => {
+  const { token } = useAuth();
   const { state, addShift } = useHR();
   const [selected, setSelected] = useState<number[]>([]);
   const [busy, setBusy] = useState(false);
+  const [maxByEmp, setMaxByEmp] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    if (!open || !token) return;
+    axios.get<{ employee_id: string; max_hours_week?: number }[]>(`${API}/profiles`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => {
+        const m: Record<string, number> = {};
+        r.data.forEach((p) => { if (p.max_hours_week) m[p.employee_id] = p.max_hours_week; });
+        setMaxByEmp(m);
+      })
+      .catch(() => undefined);
+  }, [open, token]);
 
   const sourceShifts = state.shifts.filter((s) => s.date >= days[0] && s.date <= days[6]);
 
   const targetWeeks = useMemo(() => Array.from({ length: WEEKS_AHEAD }, (_, i) => {
     const offset = i + 1;
-    const monday = addDays(days[0], offset * 7);
-    const sunday = addDays(monday, 6);
+    const monday = addDaysIso(days[0], offset * 7);
+    const sunday = addDaysIso(monday, 6);
     const existing = state.shifts.filter((s) => s.date >= monday && s.date <= sunday).length;
     return { offset, monday, sunday, existing };
   }), [days, state.shifts]);
 
-  const toggle = (offset: number): void =>
-    setSelected((sel) => sel.includes(offset) ? sel.filter((o) => o !== offset) : [...sel, offset]);
-
-  const allChecked = selected.length === WEEKS_AHEAD;
-
-  const duplicate = (): void => {
-    setBusy(true);
-    let copied = 0;
+  const plan = useMemo(() => {
+    const additions: PlannedShift[] = [];
     let skippedExisting = 0;
     let skippedAbsence = 0;
     selected.forEach((offset) => {
       sourceShifts.forEach((s) => {
-        const targetDate = addDays(s.date, offset * 7);
+        const targetDate = addDaysIso(s.date, offset * 7);
         const identical = state.shifts.some((x) =>
           x.employeeId === s.employeeId && x.date === targetDate && x.startTime === s.startTime && x.endTime === s.endTime);
         if (identical) {
@@ -58,13 +64,31 @@ export const DuplicateWeekDialog = ({ open, onClose, days }: {
           skippedAbsence += 1;
           return;
         }
-        addShift({ employeeId: s.employeeId, date: targetDate, startTime: s.startTime, endTime: s.endTime });
-        copied += 1;
+        additions.push({ employeeId: s.employeeId, date: targetDate, startTime: s.startTime, endTime: s.endTime });
       });
     });
-    const parts = [`${copied} quart(s) copié(s) sur ${selected.length} semaine(s)`];
-    if (skippedExisting > 0) parts.push(`${skippedExisting} ignoré(s) — déjà présents`);
-    if (skippedAbsence > 0) parts.push(`${skippedAbsence} ignoré(s) — absence approuvée`);
+    return { additions, skippedExisting, skippedAbsence };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, state.shifts, state.leaveRequests, days]);
+
+  const nameByEmp = useMemo(() =>
+    Object.fromEntries(state.employees.map((e) => [e.id, `${e.firstName} ${e.lastName}`])), [state.employees]);
+
+  const overtime = useMemo(() =>
+    computeOvertimeWarnings(state.shifts, plan.additions, maxByEmp, nameByEmp),
+  [state.shifts, plan.additions, maxByEmp, nameByEmp]);
+
+  const toggle = (offset: number): void =>
+    setSelected((sel) => sel.includes(offset) ? sel.filter((o) => o !== offset) : [...sel, offset]);
+
+  const allChecked = selected.length === WEEKS_AHEAD;
+
+  const duplicate = (): void => {
+    setBusy(true);
+    plan.additions.forEach((a) => addShift(a));
+    const parts = [`${plan.additions.length} quart(s) copié(s) sur ${selected.length} semaine(s)`];
+    if (plan.skippedExisting > 0) parts.push(`${plan.skippedExisting} ignoré(s) — déjà présents`);
+    if (plan.skippedAbsence > 0) parts.push(`${plan.skippedAbsence} ignoré(s) — absence approuvée`);
     toast.success(parts.join(' · '), { duration: 6000 });
     setBusy(false);
     setSelected([]);
@@ -100,7 +124,7 @@ export const DuplicateWeekDialog = ({ open, onClose, days }: {
                 {allChecked ? 'Tout décocher' : 'Tout cocher'}
               </button>
             </div>
-            <div className="max-h-72 overflow-y-auto rounded-lg border border-slate-200 divide-y divide-slate-100">
+            <div className="max-h-64 overflow-y-auto rounded-lg border border-slate-200 divide-y divide-slate-100">
               {targetWeeks.map((w) => (
                 <label
                   key={w.offset}
@@ -121,15 +145,32 @@ export const DuplicateWeekDialog = ({ open, onClose, days }: {
                 </label>
               ))}
             </div>
+            {overtime.length > 0 && (
+              <div data-testid="duplicate-overtime-warning" className="rounded-lg border border-red-200 bg-red-50 p-3">
+                <p className="text-xs font-bold text-red-700 inline-flex items-center gap-1.5 mb-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5" /> Dépassement du maximum d'heures hebdomadaires
+                </p>
+                <ul className="space-y-1">
+                  {overtime.map((w) => (
+                    <li key={`${w.employeeId}-${w.weekMonday}`} className="text-xs text-red-700 font-semibold">
+                      — {w.employeeName} : {w.projected} h &gt; max {w.max} h — semaine du {w.weekMonday}
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-[11px] text-red-600/80 mt-1.5">Vous pouvez confirmer malgré tout, en connaissance de cause.</p>
+              </div>
+            )}
             <Button
               data-testid="duplicate-confirm-button"
               onClick={duplicate}
               disabled={busy || selected.length === 0}
-              className="w-full rounded-full bg-emerald-600 hover:bg-emerald-700"
+              className={`w-full rounded-full ${overtime.length > 0 ? 'bg-red-600 hover:bg-red-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}
             >
               {selected.length === 0
                 ? 'Cochez au moins une semaine'
-                : `Dupliquer vers ${selected.length} semaine(s)`}
+                : overtime.length > 0
+                  ? `Dupliquer quand même vers ${selected.length} semaine(s)`
+                  : `Dupliquer vers ${selected.length} semaine(s)`}
             </Button>
           </>
         )}

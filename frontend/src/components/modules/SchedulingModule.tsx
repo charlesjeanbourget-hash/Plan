@@ -9,10 +9,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ChevronLeft, ChevronRight, Plus, X, ArrowLeftRight, Check, Stethoscope, CopyPlus } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, X, ArrowLeftRight, Check, Stethoscope, CopyPlus, LayoutTemplate } from 'lucide-react';
 import { ScheduleProposals } from '@/components/ScheduleProposals';
 import { AppointmentDialog } from '@/components/AppointmentDialog';
 import { DuplicateWeekDialog } from '@/components/DuplicateWeekDialog';
+import { WeekTemplatesDialog } from '@/components/WeekTemplatesDialog';
 import { toast } from 'sonner';
 
 const DAY_LABELS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
@@ -44,6 +45,7 @@ export default function SchedulingModule(): JSX.Element {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [apptOpen, setApptOpen] = useState(false);
   const [dupOpen, setDupOpen] = useState(false);
+  const [tplOpen, setTplOpen] = useState(false);
 
   useEffect(() => {
     if (!isAdmin || !token) return;
@@ -116,9 +118,14 @@ export default function SchedulingModule(): JSX.Element {
               </Button>
             )}
             {isAdmin && (
-              <Button data-testid="duplicate-week-button" variant="outline" onClick={() => setDupOpen(true)} className="rounded-full border-bronze-300 text-bronze-800 hover:bg-bronze-50">
-                <CopyPlus className="w-4 h-4 mr-1" /> Dupliquer la semaine
-              </Button>
+              <>
+                <Button data-testid="week-templates-button" variant="outline" onClick={() => setTplOpen(true)} className="rounded-full border-bronze-300 text-bronze-800 hover:bg-bronze-50">
+                  <LayoutTemplate className="w-4 h-4 mr-1" /> Modèles
+                </Button>
+                <Button data-testid="duplicate-week-button" variant="outline" onClick={() => setDupOpen(true)} className="rounded-full border-bronze-300 text-bronze-800 hover:bg-bronze-50">
+                  <CopyPlus className="w-4 h-4 mr-1" /> Dupliquer la semaine
+                </Button>
+              </>
             )}
             <Button data-testid="add-shift-button" onClick={() => setDialogOpen(true)} className="rounded-full bg-emerald-600 hover:bg-emerald-700">
               <Plus className="w-4 h-4 mr-1" /> Nouveau quart
@@ -291,6 +298,7 @@ export default function SchedulingModule(): JSX.Element {
 
       <AppointmentDialog open={apptOpen} onOpenChange={setApptOpen} onCreated={() => void refreshAppointments()} />
       {isAdmin && <DuplicateWeekDialog open={dupOpen} onClose={() => setDupOpen(false)} days={days} />}
+      {isAdmin && <WeekTemplatesDialog open={tplOpen} onClose={() => setTplOpen(false)} days={days} />}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent data-testid="add-shift-dialog">

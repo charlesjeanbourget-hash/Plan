@@ -1800,6 +1800,62 @@ def _time_to_minutes(t: str) -> int:
     return int(h) * 60 + int(m)
 
 
+class TemplateEntryIn(BaseModel):
+    employee_id: str
+    employee_name: str = ""
+    weekday: int
+    start: str
+    end: str
+
+
+class ScheduleTemplateIn(BaseModel):
+    name: str
+    entries: list[TemplateEntryIn]
+
+
+@api_router.get("/schedule/templates")
+async def list_schedule_templates(principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    return await db.schedule_templates.find({"pharmacy_id": pid}, {"_id": 0}).sort("created_at", -1).to_list(100)
+
+
+@api_router.post("/schedule/templates")
+async def create_schedule_template(payload: ScheduleTemplateIn, principal: dict = Depends(get_principal)):
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Nom du modèle requis.")
+    if not payload.entries:
+        raise HTTPException(status_code=400, detail="Le modèle doit contenir au moins un quart.")
+    if len(payload.entries) > 300:
+        raise HTTPException(status_code=400, detail="Modèle trop volumineux (max 300 quarts).")
+    for e in payload.entries:
+        if not (0 <= e.weekday <= 6):
+            raise HTTPException(status_code=400, detail="Jour de semaine invalide.")
+        if e.end <= e.start:
+            raise HTTPException(status_code=400, detail="Heures de quart invalides.")
+    pid = principal["pharmacy_id"] or "ph1"
+    doc = {
+        "id": str(uuid.uuid4()), "pharmacy_id": pid, "name": name,
+        "entries": [e.model_dump() for e in payload.entries],
+        "created_by": principal["email"], "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.schedule_templates.insert_one({**doc})
+    await log_audit(principal["email"], principal["role"], "CREATION_MODELE_HORAIRE", "horaire", doc["id"],
+                    f"Modèle de semaine « {name} » ({len(doc['entries'])} quart(s))", pid)
+    return doc
+
+
+@api_router.delete("/schedule/templates/{template_id}")
+async def delete_schedule_template(template_id: str, principal: dict = Depends(get_principal)):
+    doc = await db.schedule_templates.find_one({"id": template_id}, {"_id": 0})
+    if not doc or doc["pharmacy_id"] != (principal["pharmacy_id"] or "ph1"):
+        raise HTTPException(status_code=404, detail="Modèle introuvable.")
+    await db.schedule_templates.delete_one({"id": template_id})
+    await log_audit(principal["email"], principal["role"], "SUPPRESSION_MODELE_HORAIRE", "horaire", template_id,
+                    f"Modèle « {doc['name']} » supprimé", doc["pharmacy_id"])
+    return {"status": "supprimé"}
+
+
 class AbsenceIn(BaseModel):
     employee_id: str
     employee_name: str = ""
