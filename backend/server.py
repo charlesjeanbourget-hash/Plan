@@ -1932,12 +1932,55 @@ async def publish_schedule(payload: SchedulePublishIn, principal: dict = Depends
     await db.schedule_publications.update_one(
         {"pharmacy_id": pid, "week_start": payload.week_start},
         {"$set": {"pharmacy_id": pid, "week_start": payload.week_start, "published_at": now,
-                  "published_by": principal["email"]},
+                  "published_by": principal["email"],
+                  "recipients": [r.model_dump() for r in payload.recipients]},
          "$inc": {"count": 1}}, upsert=True)
     await log_audit(principal["email"], principal["role"], "PUBLICATION_HORAIRE", "horaire", payload.week_start,
                     f"Horaire de la semaine du {payload.week_start} {'republié (modifié)' if updated else 'publié'} — "
                     f"{len(payload.recipients)} employé(s) notifié(s), {emailed} courriel(s)", pid)
     return {"notified": len(payload.recipients), "emailed": emailed, "updated": updated}
+
+
+class ScheduleSeenIn(BaseModel):
+    week_start: str
+
+
+@api_router.post("/schedule/seen")
+async def mark_schedule_seen(payload: ScheduleSeenIn, user: dict = Depends(get_current_user)):
+    try:
+        date.fromisoformat(payload.week_start)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Semaine invalide.")
+    eid = user.get("employee_id")
+    if not eid:
+        return {"status": "ignoré"}
+    pid = user.get("pharmacy_id") or "ph1"
+    await db.schedule_views.update_one(
+        {"pharmacy_id": pid, "employee_id": eid, "week_start": payload.week_start},
+        {"$set": {"pharmacy_id": pid, "employee_id": eid, "week_start": payload.week_start,
+                  "seen_at": datetime.now(timezone.utc).isoformat()}}, upsert=True)
+    return {"status": "vu"}
+
+
+@api_router.get("/schedule/publish/status")
+async def schedule_publish_status(week_start: str = Query(...), principal: dict = Depends(get_principal)):
+    try:
+        date.fromisoformat(week_start)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Semaine invalide.")
+    pid = principal["pharmacy_id"] or "ph1"
+    pub = await db.schedule_publications.find_one({"pharmacy_id": pid, "week_start": week_start}, {"_id": 0})
+    if not pub:
+        return {"published": False, "recipients": []}
+    views = await db.schedule_views.find({"pharmacy_id": pid, "week_start": week_start}, {"_id": 0}).to_list(500)
+    seen_by = {v["employee_id"]: v["seen_at"] for v in views}
+    recipients = []
+    for r in pub.get("recipients", []):
+        seen_at = seen_by.get(r["employee_id"])
+        seen = bool(seen_at and seen_at > pub["published_at"])
+        recipients.append({**r, "seen": seen, "seen_at": seen_at if seen else None})
+    return {"published": True, "published_at": pub["published_at"], "count": pub.get("count", 1),
+            "recipients": recipients}
 
 
 @api_router.get("/punch/cost")
@@ -1995,8 +2038,15 @@ class ConversationIn(BaseModel):
     participant_email: str = ""
 
 
+class ChatAttachmentIn(BaseModel):
+    name: str
+    mime: str
+    data: str
+
+
 class ChatMessageIn(BaseModel):
-    body: str
+    body: str = ""
+    attachment: Optional[ChatAttachmentIn] = None
 
 
 def chat_can_access(convo: dict, user: dict) -> bool:
@@ -2090,23 +2140,73 @@ async def post_chat_message(conversation_id: str, payload: ChatMessageIn, user: 
     if not convo or not chat_can_access(convo, user):
         raise HTTPException(status_code=404, detail="Conversation introuvable.")
     body = payload.body.strip()
-    if not body:
+    if not body and not payload.attachment:
         raise HTTPException(status_code=400, detail="Message vide.")
     if len(body) > 2000:
         raise HTTPException(status_code=400, detail="Message trop long (max 2000 caractères).")
     now = datetime.now(timezone.utc).isoformat()
+    attachment_meta = None
+    if payload.attachment:
+        att = payload.attachment
+        if not att.data.startswith("data:"):
+            raise HTTPException(status_code=400, detail="Pièce jointe invalide.")
+        if len(att.data) > 7_200_000:
+            raise HTTPException(status_code=400, detail="Pièce jointe trop volumineuse (max 5 Mo).")
+        att_id = str(uuid.uuid4())
+        await db.chat_attachments.insert_one({
+            "id": att_id, "conversation_id": conversation_id, "pharmacy_id": convo["pharmacy_id"],
+            "name": att.name[:120] or "fichier", "mime": att.mime[:80], "data": att.data, "created_at": now})
+        attachment_meta = {"id": att_id, "name": att.name[:120] or "fichier", "mime": att.mime[:80],
+                           "size": len(att.data)}
     doc = {
         "id": str(uuid.uuid4()), "conversation_id": conversation_id, "pharmacy_id": convo["pharmacy_id"],
         "sender_email": user["email"], "sender_name": user.get("name", ""), "sender_role": user["role"],
-        "body": body, "created_at": now,
+        "body": body, "attachment": attachment_meta, "created_at": now,
     }
     await db.chat_messages.insert_one({**doc})
+    preview = body[:80] if body else f"📎 {attachment_meta['name']}" if attachment_meta else ""
     await db.conversations.update_one({"id": conversation_id}, {"$set": {
-        "last_message": body[:80], "last_sender": user.get("name", ""), "last_message_at": now}})
+        "last_message": preview, "last_sender": user.get("name", ""), "last_message_at": now}})
     await db.conversation_reads.update_one(
         {"conversation_id": conversation_id, "email": user["email"]},
         {"$set": {"conversation_id": conversation_id, "email": user["email"], "last_read_at": now}}, upsert=True)
     return doc
+
+
+@api_router.get("/chat/attachments/{attachment_id}")
+async def get_chat_attachment(attachment_id: str, user: dict = Depends(get_current_user)):
+    att = await db.chat_attachments.find_one({"id": attachment_id}, {"_id": 0})
+    if not att:
+        raise HTTPException(status_code=404, detail="Pièce jointe introuvable.")
+    convo = await db.conversations.find_one({"id": att["conversation_id"]}, {"_id": 0})
+    if not convo or not chat_can_access(convo, user):
+        raise HTTPException(status_code=404, detail="Pièce jointe introuvable.")
+    return {"name": att["name"], "mime": att["mime"], "data": att["data"]}
+
+
+@api_router.post("/chat/messages/{message_id}/pin")
+async def pin_chat_message(message_id: str, principal: dict = Depends(get_principal)):
+    msg = await db.chat_messages.find_one({"id": message_id}, {"_id": 0})
+    if not msg or msg["pharmacy_id"] != (principal["pharmacy_id"] or "ph1"):
+        raise HTTPException(status_code=404, detail="Message introuvable.")
+    convo = await db.conversations.find_one({"id": msg["conversation_id"]}, {"_id": 0})
+    if not convo:
+        raise HTTPException(status_code=404, detail="Conversation introuvable.")
+    currently = (convo.get("pinned_message") or {}).get("id")
+    if currently == message_id:
+        await db.conversations.update_one({"id": convo["id"]}, {"$set": {"pinned_message": None}})
+        await log_audit(principal["email"], principal["role"], "DESEPINGLAGE_MESSAGE", "messagerie", message_id,
+                        f"Message désépinglé dans « {convo['name']} »", convo["pharmacy_id"])
+        return {"pinned": False}
+    pinned = {
+        "id": msg["id"], "body": msg.get("body", "")[:200], "sender_name": msg.get("sender_name", ""),
+        "created_at": msg.get("created_at", ""),
+        "attachment_name": (msg.get("attachment") or {}).get("name", ""),
+    }
+    await db.conversations.update_one({"id": convo["id"]}, {"$set": {"pinned_message": pinned}})
+    await log_audit(principal["email"], principal["role"], "EPINGLAGE_MESSAGE", "messagerie", message_id,
+                    f"Message épinglé dans « {convo['name']} »", convo["pharmacy_id"])
+    return {"pinned": True}
 
 
 @api_router.delete("/chat/conversations/{conversation_id}")

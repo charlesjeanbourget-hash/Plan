@@ -9,12 +9,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ChevronLeft, ChevronRight, Plus, X, ArrowLeftRight, Check, Stethoscope, CopyPlus, LayoutTemplate, FileDown, Megaphone, Hourglass } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, X, ArrowLeftRight, Check, Stethoscope, CopyPlus, LayoutTemplate, FileDown, Megaphone, Hourglass, BookOpenCheck } from 'lucide-react';
 import { ScheduleProposals } from '@/components/ScheduleProposals';
 import { AppointmentDialog } from '@/components/AppointmentDialog';
 import { DuplicateWeekDialog } from '@/components/DuplicateWeekDialog';
 import { WeekTemplatesDialog } from '@/components/WeekTemplatesDialog';
 import { BudgetActualCard } from '@/components/BudgetActualCard';
+import { ReadReceiptsDialog } from '@/components/ReadReceiptsDialog';
 import { downloadSchedulePdf } from '@/lib/schedulePdf';
 import { hoursBetween } from '@/lib/schedule';
 import { toast } from 'sonner';
@@ -50,6 +51,7 @@ export default function SchedulingModule(): JSX.Element {
   const [dupOpen, setDupOpen] = useState(false);
   const [tplOpen, setTplOpen] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [receiptsOpen, setReceiptsOpen] = useState(false);
 
   useEffect(() => {
     if (!isAdmin || !token) return;
@@ -111,6 +113,13 @@ export default function SchedulingModule(): JSX.Element {
     setShiftSwapStatus(swapId, 'Approuvée');
     toast.success('Échange approuvé — l\'horaire a été mis à jour automatiquement.');
   };
+
+  useEffect(() => {
+    if (currentUser?.role !== 'employee' || !currentUser.employeeId || !token) return;
+    axios.post(`${API}/schedule/seen`, { week_start: days[0] }, { headers: { Authorization: `Bearer ${token}` } })
+      .catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [days[0], currentUser?.employeeId, token]);
 
   const publishWeek = async (): Promise<void> => {
     const byEmp = new Map<string, { shift_count: number; hours: number }>();
@@ -180,6 +189,9 @@ export default function SchedulingModule(): JSX.Element {
                 </Button>
                 <Button data-testid="publish-week-button" onClick={() => void publishWeek()} disabled={publishing} className="rounded-full bg-bronze-600 hover:bg-bronze-700 text-white">
                   <Megaphone className="w-4 h-4 mr-1" /> {publishing ? 'Publication…' : 'Publier la semaine'}
+                </Button>
+                <Button data-testid="read-receipts-button" variant="outline" onClick={() => setReceiptsOpen(true)} className="rounded-full">
+                  <BookOpenCheck className="w-4 h-4 mr-1" /> Accusés
                 </Button>
               </>
             )}
@@ -376,6 +388,7 @@ export default function SchedulingModule(): JSX.Element {
       <AppointmentDialog open={apptOpen} onOpenChange={setApptOpen} onCreated={() => void refreshAppointments()} />
       {isAdmin && <DuplicateWeekDialog open={dupOpen} onClose={() => setDupOpen(false)} days={days} />}
       {isAdmin && <WeekTemplatesDialog open={tplOpen} onClose={() => setTplOpen(false)} days={days} />}
+      {isAdmin && <ReadReceiptsDialog open={receiptsOpen} onClose={() => setReceiptsOpen(false)} weekStart={days[0]} />}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent data-testid="add-shift-dialog">

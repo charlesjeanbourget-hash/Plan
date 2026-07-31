@@ -22,7 +22,7 @@ export const HireCandidateDialog = ({ candidate, suggestedPosition, onClose }: {
   onClose: () => void;
 }): JSX.Element => {
   const { token } = useAuth();
-  const { state, addEmployee } = useHR();
+  const { state, addEmployee, addOnboardingItem } = useHR();
   const [position, setPosition] = useState<Position>('ATP');
   const [rate, setRate] = useState('');
   const [capacities, setCapacities] = useState<string[]>([]);
@@ -69,7 +69,22 @@ export const HireCandidateDialog = ({ candidate, suggestedPosition, onClose }: {
     } catch {
       toast.error('Fiche créée, mais le profil (capacités) n\'a pas pu être enregistré — complétez-le dans Employés.');
     }
-    toast.success(`${candidate.name} embauché(e) ! Fiche employé créée avec ${capacities.length} capacité(s).`, { duration: 6000 });
+    const ONBOARDING_CHECKLIST: { label: string; category: 'Documents' | 'Formation' | 'Équipement' | 'Intégration' }[] = [
+      { label: 'Contrat de travail signé', category: 'Documents' },
+      { label: 'Spécimen de chèque / dépôt direct', category: 'Documents' },
+      { label: 'Formulaires d\'impôt (TD1 / TP-1015.3)', category: 'Documents' },
+      { label: 'Formation Loi 25 et confidentialité', category: 'Formation' },
+      { label: 'Formation caisse et systèmes internes', category: 'Formation' },
+      { label: 'Uniforme / sarrau remis', category: 'Équipement' },
+      { label: 'Code de punch et accès créés', category: 'Équipement' },
+      { label: 'Visite de la pharmacie et présentation de l\'équipe', category: 'Intégration' },
+      { label: 'Jumelage avec un(e) mentor(e)', category: 'Intégration' },
+    ];
+    ONBOARDING_CHECKLIST.forEach((item) =>
+      addOnboardingItem({ employeeId: emp.id, label: item.label, done: false, category: item.category }));
+    toast.success(
+      `${candidate.name} embauché(e) ! Fiche créée avec ${capacities.length} capacité(s) et parcours d'intégration lancé (${ONBOARDING_CHECKLIST.length} étapes — voir module Intégration).`,
+      { duration: 7000 });
     setBusy(false);
     onClose();
   };

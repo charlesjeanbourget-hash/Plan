@@ -7,10 +7,18 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { MessagesSquare, Plus, Send, Trash2, Users, ShieldCheck, UserRound } from 'lucide-react';
+import { MessagesSquare, Plus, Send, Trash2, Users, ShieldCheck, UserRound, Pin, PinOff, Paperclip, FileText, Download, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+
+interface PinnedMessage {
+  id: string;
+  body: string;
+  sender_name: string;
+  created_at: string;
+  attachment_name?: string;
+}
 
 interface Conversation {
   id: string;
@@ -21,6 +29,14 @@ interface Conversation {
   last_sender: string;
   last_message_at: string;
   unread: number;
+  pinned_message?: PinnedMessage | null;
+}
+
+interface AttachmentMeta {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
 }
 
 interface ChatMessage {
@@ -30,6 +46,7 @@ interface ChatMessage {
   sender_role: string;
   body: string;
   created_at: string;
+  attachment?: AttachmentMeta | null;
 }
 
 interface ChatUser {
@@ -44,8 +61,68 @@ const TYPE_META = {
   direct: { label: 'Directe', icon: UserRound, cls: 'bg-sky-100 text-sky-700' },
 } as const;
 
+const MAX_FILE_BYTES = 5 * 1024 * 1024;
+
 const timeLabel = (iso: string): string =>
   new Date(iso).toLocaleString('fr-CA', { dateStyle: 'short', timeStyle: 'short' });
+
+const roleLabel = (role: string): string =>
+  role === 'admin' ? 'Propriétaire' : role === 'manager' ? 'Gestionnaire' : 'Employé(e)';
+
+const AttachmentView = ({ att, token, mine }: { att: AttachmentMeta; token: string; mine: boolean }): JSX.Element => {
+  const [data, setData] = useState<string | null>(null);
+  const isImage = att.mime.startsWith('image/');
+
+  useEffect(() => {
+    if (!isImage) return;
+    axios.get<{ data: string }>(`${API}/chat/attachments/${att.id}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => setData(r.data.data))
+      .catch(() => undefined);
+  }, [att.id, isImage, token]);
+
+  const download = async (): Promise<void> => {
+    let d = data;
+    if (!d) {
+      try {
+        const r = await axios.get<{ data: string }>(`${API}/chat/attachments/${att.id}`, { headers: { Authorization: `Bearer ${token}` } });
+        d = r.data.data;
+      } catch {
+        toast.error('Téléchargement impossible.');
+        return;
+      }
+    }
+    const a = document.createElement('a');
+    a.href = d;
+    a.download = att.name;
+    a.click();
+  };
+
+  if (isImage) {
+    return data ? (
+      <img
+        data-testid={`attachment-image-${att.id}`}
+        src={data}
+        alt={att.name}
+        onClick={() => void download()}
+        className="rounded-lg max-h-52 max-w-full cursor-pointer mb-1"
+      />
+    ) : (
+      <div className="rounded-lg bg-black/10 w-40 h-24 animate-pulse mb-1" />
+    );
+  }
+  return (
+    <button
+      type="button"
+      data-testid={`attachment-file-${att.id}`}
+      onClick={() => void download()}
+      className={`flex items-center gap-2 rounded-lg px-3 py-2 mb-1 text-xs font-semibold border transition-colors ${mine ? 'bg-emerald-700/40 border-emerald-400/40 text-white hover:bg-emerald-700/60' : 'bg-white border-slate-200 text-slate-700 hover:border-emerald-300'}`}
+    >
+      <FileText className="w-4 h-4 shrink-0" />
+      <span className="truncate max-w-44">{att.name}</span>
+      <Download className="w-3.5 h-3.5 shrink-0 opacity-70" />
+    </button>
+  );
+};
 
 export default function MessagesModule(): JSX.Element {
   const { currentUser, token } = useAuth();
@@ -56,12 +133,14 @@ export default function MessagesModule(): JSX.Element {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState('');
+  const [file, setFile] = useState<File | null>(null);
   const [sending, setSending] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [newType, setNewType] = useState<'equipe' | 'gestionnaires' | 'direct'>('equipe');
   const [newTarget, setNewTarget] = useState('');
   const [chatUsers, setChatUsers] = useState<ChatUser[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const refreshConversations = useCallback(async (): Promise<void> => {
     try {
@@ -112,6 +191,7 @@ export default function MessagesModule(): JSX.Element {
   const openConversation = (cid: string): void => {
     setActiveId(cid);
     setMessages([]);
+    setFile(null);
     setConversations((list) => list.map((c) => (c.id === cid ? { ...c, unread: 0 } : c)));
   };
 
@@ -133,18 +213,50 @@ export default function MessagesModule(): JSX.Element {
     }
   };
 
+  const pickFile = (f: File | null): void => {
+    if (!f) return;
+    if (f.size > MAX_FILE_BYTES) {
+      toast.error('Fichier trop volumineux (max 5 Mo).');
+      return;
+    }
+    setFile(f);
+  };
+
   const sendMessage = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
-    if (!activeId || !draft.trim()) return;
+    if (!activeId || (!draft.trim() && !file)) return;
     setSending(true);
     try {
-      await axios.post(`${API}/chat/conversations/${activeId}/messages`, { body: draft.trim() }, { headers });
+      let attachment: { name: string; mime: string; data: string } | null = null;
+      if (file) {
+        const data = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = () => reject(new Error('read'));
+          reader.readAsDataURL(file);
+        });
+        attachment = { name: file.name, mime: file.type || 'application/octet-stream', data };
+      }
+      await axios.post(`${API}/chat/conversations/${activeId}/messages`, { body: draft.trim(), attachment }, { headers });
       setDraft('');
+      setFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
       await refreshMessages(activeId);
-    } catch {
-      toast.error('Envoi impossible.');
+    } catch (err) {
+      const detail = axios.isAxiosError(err) && err.response ? (err.response.data as { detail?: unknown }).detail : null;
+      toast.error(typeof detail === 'string' ? detail : 'Envoi impossible.');
     } finally {
       setSending(false);
+    }
+  };
+
+  const togglePin = async (messageId: string): Promise<void> => {
+    try {
+      const res = await axios.post<{ pinned: boolean }>(`${API}/chat/messages/${messageId}/pin`, {}, { headers });
+      toast.success(res.data.pinned ? 'Message épinglé en haut de la conversation.' : 'Message désépinglé.');
+      await refreshConversations();
+    } catch {
+      toast.error('Action impossible.');
     }
   };
 
@@ -200,6 +312,7 @@ export default function MessagesModule(): JSX.Element {
                       </span>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
+                          {c.pinned_message && <Pin className="w-3 h-3 text-bronze-600 shrink-0" />}
                           <p className="text-sm font-bold text-slate-800 truncate">{c.name}</p>
                           {c.unread > 0 && (
                             <span data-testid={`conversation-unread-${c.id}`} className="ml-auto shrink-0 min-w-5 h-5 px-1.5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
@@ -244,30 +357,101 @@ export default function MessagesModule(): JSX.Element {
                   </Button>
                 )}
               </div>
-              <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3" style={{ maxHeight: '52vh', minHeight: '40vh' }}>
+              {active.pinned_message && (
+                <div data-testid="pinned-banner" className="flex items-start gap-2.5 px-5 py-2.5 bg-bronze-50 border-b border-bronze-200">
+                  <Pin className="w-3.5 h-3.5 text-bronze-700 mt-0.5 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[11px] font-bold text-bronze-800">Message épinglé · {active.pinned_message.sender_name}</p>
+                    <p className="text-xs text-slate-700 truncate">
+                      {active.pinned_message.body || (active.pinned_message.attachment_name ? `📎 ${active.pinned_message.attachment_name}` : '')}
+                    </p>
+                  </div>
+                  {isManager && (
+                    <button
+                      data-testid="unpin-button"
+                      onClick={() => void togglePin(active.pinned_message?.id ?? '')}
+                      className="text-bronze-700 hover:text-bronze-900 shrink-0 mt-0.5"
+                      aria-label="Désépingler"
+                    >
+                      <PinOff className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              )}
+              <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3" style={{ maxHeight: '48vh', minHeight: '36vh' }}>
                 {messages.length === 0 && (
                   <p data-testid="thread-empty" className="text-sm text-slate-400 text-center py-10">Aucun message — écrivez le premier !</p>
                 )}
                 {messages.map((m) => {
                   const mine = m.sender_email === currentUser?.email;
+                  const pinned = active.pinned_message?.id === m.id;
                   return (
-                    <div key={m.id} data-testid={`chat-message-${m.id}`} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-[75%] rounded-2xl px-4 py-2.5 ${mine ? 'bg-emerald-600 text-white rounded-br-md' : 'bg-slate-100 text-slate-800 rounded-bl-md'}`}>
+                    <div key={m.id} data-testid={`chat-message-${m.id}`} className={`group flex items-center gap-1.5 ${mine ? 'justify-end' : 'justify-start'}`}>
+                      {mine && isManager && (
+                        <button
+                          data-testid={`pin-message-${m.id}`}
+                          onClick={() => void togglePin(m.id)}
+                          className={`transition-opacity ${pinned ? 'text-bronze-600 opacity-100' : 'text-slate-300 opacity-0 group-hover:opacity-100 hover:text-bronze-600'}`}
+                          aria-label="Épingler"
+                        >
+                          <Pin className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      <div className={`max-w-[75%] rounded-2xl px-4 py-2.5 ${mine ? 'bg-emerald-600 text-white rounded-br-md' : 'bg-slate-100 text-slate-800 rounded-bl-md'} ${pinned ? 'ring-2 ring-bronze-300' : ''}`}>
                         {!mine && (
                           <p className="text-[11px] font-bold mb-0.5 text-bronze-700">
                             {m.sender_name}
-                            <span className="font-normal text-slate-400"> · {m.sender_role === 'admin' ? 'Propriétaire' : m.sender_role === 'manager' ? 'Gestionnaire' : 'Employé(e)'}</span>
+                            <span className="font-normal text-slate-400"> · {roleLabel(m.sender_role)}</span>
                           </p>
                         )}
-                        <p className="text-sm whitespace-pre-wrap break-words">{m.body}</p>
+                        {m.attachment && <AttachmentView att={m.attachment} token={token ?? ''} mine={mine} />}
+                        {m.body && <p className="text-sm whitespace-pre-wrap break-words">{m.body}</p>}
                         <p className={`text-[10px] mt-1 ${mine ? 'text-emerald-100' : 'text-slate-400'}`}>{timeLabel(m.created_at)}</p>
                       </div>
+                      {!mine && isManager && (
+                        <button
+                          data-testid={`pin-message-${m.id}`}
+                          onClick={() => void togglePin(m.id)}
+                          className={`transition-opacity ${pinned ? 'text-bronze-600 opacity-100' : 'text-slate-300 opacity-0 group-hover:opacity-100 hover:text-bronze-600'}`}
+                          aria-label="Épingler"
+                        >
+                          <Pin className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                   );
                 })}
                 <div ref={bottomRef} />
               </div>
+              {file && (
+                <div data-testid="attachment-preview" className="flex items-center gap-2 px-4 pt-2">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100 text-slate-700 text-xs font-semibold">
+                    <Paperclip className="w-3 h-3" /> {file.name} ({(file.size / 1024).toFixed(0)} Ko)
+                  </span>
+                  <button data-testid="remove-attachment" onClick={() => { setFile(null); if (fileInputRef.current) fileInputRef.current.value = ''; }} className="text-slate-400 hover:text-red-600" aria-label="Retirer la pièce jointe">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
               <form onSubmit={(e) => void sendMessage(e)} className="flex items-center gap-2 border-t border-slate-100 px-4 py-3">
+                <input
+                  ref={fileInputRef}
+                  data-testid="attachment-input"
+                  type="file"
+                  accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
+                  className="hidden"
+                  onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
+                />
+                <Button
+                  data-testid="attach-file-button"
+                  type="button"
+                  variant="outline"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="rounded-full shrink-0 px-3"
+                  aria-label="Joindre un fichier"
+                >
+                  <Paperclip className="w-4 h-4" />
+                </Button>
                 <Input
                   data-testid="chat-input"
                   value={draft}
@@ -276,7 +460,7 @@ export default function MessagesModule(): JSX.Element {
                   maxLength={2000}
                   className="flex-1"
                 />
-                <Button data-testid="chat-send-button" type="submit" disabled={sending || !draft.trim()} className="rounded-full bg-emerald-600 hover:bg-emerald-700 shrink-0">
+                <Button data-testid="chat-send-button" type="submit" disabled={sending || (!draft.trim() && !file)} className="rounded-full bg-emerald-600 hover:bg-emerald-700 shrink-0">
                   <Send className="w-4 h-4" />
                 </Button>
               </form>
@@ -313,7 +497,7 @@ export default function MessagesModule(): JSX.Element {
                   <SelectContent>
                     {chatUsers.map((u) => (
                       <SelectItem key={u.email} value={u.email}>
-                        {u.name} — {u.role === 'admin' ? 'Propriétaire' : u.role === 'manager' ? 'Gestionnaire' : 'Employé(e)'}
+                        {u.name} — {roleLabel(u.role)}
                       </SelectItem>
                     ))}
                   </SelectContent>
