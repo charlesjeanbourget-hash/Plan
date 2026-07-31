@@ -211,11 +211,11 @@ export default function SchedulingModule(): JSX.Element {
                 <Button data-testid="read-receipts-button" variant="outline" onClick={() => setReceiptsOpen(true)} className="rounded-full">
                   <BookOpenCheck className="w-4 h-4 mr-1" /> Accusés
                 </Button>
+                <Button data-testid="add-shift-button" onClick={() => setDialogOpen(true)} className="rounded-full bg-emerald-600 hover:bg-emerald-700">
+                  <Plus className="w-4 h-4 mr-1" /> Nouveau quart
+                </Button>
               </>
             )}
-            <Button data-testid="add-shift-button" onClick={() => setDialogOpen(true)} className="rounded-full bg-emerald-600 hover:bg-emerald-700">
-              <Plus className="w-4 h-4 mr-1" /> Nouveau quart
-            </Button>
           </div>
         }
       />
