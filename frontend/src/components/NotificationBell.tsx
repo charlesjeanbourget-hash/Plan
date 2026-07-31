@@ -35,6 +35,7 @@ export const NotificationBell = ({ onNavigate }: { onNavigate: (m: ModuleKey) =>
   const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [serverNotifs, setServerNotifs] = useState<{ id: string; title: string; detail: string; module: string; tone: string; icon: string }[]>([]);
   const [open, setOpen] = useState(false);
   const readKey = `luminahr_notif_read_v1_${currentUser?.id ?? ''}`;
   const [readIds, setReadIds] = useState<string[]>(() => {
@@ -45,6 +46,9 @@ export const NotificationBell = ({ onNavigate }: { onNavigate: (m: ModuleKey) =>
   useEffect(() => {
     if (!token || !currentUser) return;
     const headers = { Authorization: `Bearer ${token}` };
+    axios.get<typeof serverNotifs>(`${API}/notifications`, { headers })
+      .then((r) => setServerNotifs(r.data))
+      .catch(() => undefined);
     if (currentUser.role === 'employee') {
       axios.get<Training[]>(`${API}/trainings`, { headers })
         .then((r) => setTrainings(r.data))
@@ -73,6 +77,14 @@ export const NotificationBell = ({ onNavigate }: { onNavigate: (m: ModuleKey) =>
   const notifs = useMemo<Notif[]>(() => {
     if (!currentUser) return [];
     const list: Notif[] = [];
+    serverNotifs.forEach((n) => list.push({
+      id: `srv-${n.id}`,
+      title: n.title,
+      detail: n.detail,
+      module: (n.module || 'dashboard') as ModuleKey,
+      tone: (['amber', 'red', 'sky', 'emerald'].includes(n.tone) ? n.tone : 'emerald') as Notif['tone'],
+      icon: (n.icon in ICONS ? n.icon : 'schedule') as Notif['icon'],
+    }));
     if (currentUser.role === 'employee') {
       const empId = currentUser.employeeId;
       proposals
@@ -105,6 +117,19 @@ export const NotificationBell = ({ onNavigate }: { onNavigate: (m: ModuleKey) =>
           tone: s.status === 'Approuvée' ? 'emerald' : 'red',
           icon: 'swap',
         }));
+      state.shiftSwaps
+        .filter((s) => s.targetEmployeeId === empId && s.status === 'En attente' && s.peerStatus === 'En attente')
+        .forEach((s) => {
+          const req = getEmployee(s.requesterId);
+          list.push({
+            id: `swap-accept-${s.id}`,
+            title: 'Échange de quart à accepter',
+            detail: `${req ? `${req.firstName} ${req.lastName}` : 'Un(e) collègue'} vous propose de reprendre un quart — répondez dans « Mon espace »`,
+            module: 'myspace',
+            tone: 'amber',
+            icon: 'swap',
+          });
+        });
       trainings
         .filter((t) => !t.my_passed)
         .forEach((t) => {
@@ -201,7 +226,7 @@ export const NotificationBell = ({ onNavigate }: { onNavigate: (m: ModuleKey) =>
       }));
     }
     return list;
-  }, [currentUser, state, trainings, licenseItems, proposals, evaluations, deliveries, appointments, getEmployee]);
+  }, [currentUser, state, trainings, licenseItems, proposals, evaluations, deliveries, appointments, serverNotifs, getEmployee]);
 
   const unreadCount = notifs.filter((n) => !readIds.includes(n.id)).length;
 

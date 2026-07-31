@@ -1856,6 +1856,270 @@ async def delete_schedule_template(template_id: str, principal: dict = Depends(g
     return {"status": "supprimé"}
 
 
+# ==================== Notifications & publication d'horaire ====================
+
+@api_router.get("/notifications")
+async def list_notifications(user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    ors = [{"target_email": user["email"]}]
+    if user.get("employee_id"):
+        ors.append({"target_employee_id": user["employee_id"]})
+    return await db.notifications.find({"pharmacy_id": pid, "$or": ors}, {"_id": 0}).sort("created_at", -1).to_list(50)
+
+
+class PublishRecipient(BaseModel):
+    employee_id: str
+    employee_name: str = ""
+    shift_count: int = 0
+    hours: float = 0
+
+
+class SchedulePublishIn(BaseModel):
+    week_start: str
+    recipients: list[PublishRecipient]
+
+
+def schedule_publish_html(name: str, week_start: str, shift_count: int, hours: float, updated: bool) -> str:
+    verb = "a été mis à jour" if updated else "est maintenant publié"
+    return (
+        "<div style='font-family:Arial,sans-serif;max-width:640px;margin:0 auto;color:#0f172a'>"
+        f"<h2 style='color:#059669'>Arrière Plan — Horaire {'modifié' if updated else 'publié'}</h2>"
+        f"<p>Bonjour {name},</p>"
+        f"<p>Votre horaire de la semaine du <strong>{week_start}</strong> {verb} : "
+        f"<strong>{shift_count} quart(s)</strong> pour un total d'environ <strong>{hours:g} h</strong>.</p>"
+        "<p>Connectez-vous à Arrière Plan (module Horaires) pour consulter le détail.</p>"
+        "<p style='font-size:12px;color:#94a3b8;margin-top:24px'>Notification automatique d'Arrière Plan.</p></div>")
+
+
+@api_router.post("/schedule/publish")
+async def publish_schedule(payload: SchedulePublishIn, principal: dict = Depends(get_principal)):
+    try:
+        date.fromisoformat(payload.week_start)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Semaine invalide.")
+    if not payload.recipients:
+        raise HTTPException(status_code=400, detail="Aucun employé à notifier pour cette semaine.")
+    pid = principal["pharmacy_id"] or "ph1"
+    prev = await db.schedule_publications.find_one({"pharmacy_id": pid, "week_start": payload.week_start}, {"_id": 0})
+    updated = bool(prev)
+    now = datetime.now(timezone.utc).isoformat()
+    title = f"Horaire {'modifié' if updated else 'publié'} — semaine du {payload.week_start}"
+    api_key = os.environ.get("RESEND_API_KEY", "")
+    sender = await get_sender() if api_key else ""
+    if api_key:
+        resend.api_key = api_key
+    emailed = 0
+    for r in payload.recipients:
+        await db.notifications.insert_one({
+            "id": str(uuid.uuid4()), "pharmacy_id": pid, "target_employee_id": r.employee_id,
+            "title": title,
+            "detail": f"{r.shift_count} quart(s), ~{r.hours:g} h planifiées — consultez le module Horaires.",
+            "module": "scheduling", "icon": "schedule", "tone": "emerald", "created_at": now})
+        if not api_key:
+            continue
+        account = await db.users.find_one({"employee_id": r.employee_id, "pharmacy_id": pid},
+                                          {"_id": 0, "email": 1, "name": 1})
+        if not account or not account.get("email"):
+            continue
+        try:
+            await asyncio.to_thread(resend.Emails.send, {
+                "from": sender, "to": [account["email"]], "subject": title,
+                "html": schedule_publish_html(account.get("name") or r.employee_name, payload.week_start,
+                                              r.shift_count, r.hours, updated)})
+            emailed += 1
+        except Exception as exc:
+            logger.error(f"Courriel de publication d'horaire vers {account['email']} échoué : {exc}")
+    await db.schedule_publications.update_one(
+        {"pharmacy_id": pid, "week_start": payload.week_start},
+        {"$set": {"pharmacy_id": pid, "week_start": payload.week_start, "published_at": now,
+                  "published_by": principal["email"]},
+         "$inc": {"count": 1}}, upsert=True)
+    await log_audit(principal["email"], principal["role"], "PUBLICATION_HORAIRE", "horaire", payload.week_start,
+                    f"Horaire de la semaine du {payload.week_start} {'republié (modifié)' if updated else 'publié'} — "
+                    f"{len(payload.recipients)} employé(s) notifié(s), {emailed} courriel(s)", pid)
+    return {"notified": len(payload.recipients), "emailed": emailed, "updated": updated}
+
+
+@api_router.get("/punch/cost")
+async def punch_cost(start: str = Query(...), end: str = Query(...), principal: dict = Depends(get_principal)):
+    try:
+        date.fromisoformat(start)
+        date.fromisoformat(end)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Dates invalides.")
+    pid = principal["pharmacy_id"] or "ph1"
+    settings = await db.schedule_settings.find_one({"pharmacy_id": pid}, {"_id": 0}) or {}
+    weekly_budget = settings.get("weekly_budget", 0)
+    punches = await db.punches.find(
+        {"pharmacy_id": pid, "date": {"$gte": start, "$lte": end}, "punch_out": {"$ne": None}},
+        {"_id": 0}).to_list(5000)
+    profiles = await db.employee_profiles.find(
+        {"pharmacy_id": pid}, {"_id": 0, "employee_id": 1, "hourly_rate": 1}).to_list(500)
+    rate_by = {p["employee_id"]: p.get("hourly_rate") for p in profiles}
+    per: dict = {}
+    for p in punches:
+        try:
+            h = (datetime.fromisoformat(p["punch_out"]) - datetime.fromisoformat(p["punch_in"])).total_seconds() / 3600
+        except (ValueError, TypeError):
+            continue
+        e = per.setdefault(p["employee_id"], {"employee_name": p.get("employee_name", ""), "hours": 0.0})
+        e["hours"] += h
+    employees = []
+    total_hours = 0.0
+    real_cost = 0.0
+    missing_rates = []
+    for eid, e in per.items():
+        rate = rate_by.get(eid)
+        cost = round(e["hours"] * float(rate), 2) if rate else None
+        if rate:
+            real_cost += e["hours"] * float(rate)
+        else:
+            missing_rates.append(e["employee_name"] or eid)
+        total_hours += e["hours"]
+        employees.append({"employee_id": eid, "employee_name": e["employee_name"],
+                          "hours": round(e["hours"], 2), "rate": rate, "cost": cost})
+    employees.sort(key=lambda x: -(x["cost"] or 0))
+    return {"weekly_budget": weekly_budget, "total_hours": round(total_hours, 2),
+            "real_cost": round(real_cost, 2), "employees": employees, "missing_rates": missing_rates}
+
+
+# ==================== Messagerie interne ====================
+
+CONVERSATION_TYPES = ("equipe", "gestionnaires", "direct")
+
+
+class ConversationIn(BaseModel):
+    type: str
+    participant_email: str = ""
+
+
+class ChatMessageIn(BaseModel):
+    body: str
+
+
+def chat_can_access(convo: dict, user: dict) -> bool:
+    if convo["pharmacy_id"] != (user.get("pharmacy_id") or "ph1"):
+        return False
+    if convo["type"] == "equipe":
+        return True
+    if convo["type"] == "gestionnaires":
+        return user["role"] in ("admin", "manager", "superadmin")
+    return user["email"] in convo.get("participants", [])
+
+
+@api_router.get("/chat/users")
+async def chat_users(principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    return await db.users.find(
+        {"pharmacy_id": pid, "role": {"$in": ["admin", "manager", "employee"]}},
+        {"_id": 0, "email": 1, "name": 1, "role": 1, "employee_id": 1}).sort("name", 1).to_list(300)
+
+
+@api_router.post("/chat/conversations")
+async def create_conversation(payload: ConversationIn, principal: dict = Depends(get_principal)):
+    if payload.type not in CONVERSATION_TYPES:
+        raise HTTPException(status_code=400, detail="Type de conversation invalide.")
+    pid = principal["pharmacy_id"] or "ph1"
+    participants: list = []
+    if payload.type == "direct":
+        email = payload.participant_email.strip().lower()
+        if not email:
+            raise HTTPException(status_code=400, detail="Choisissez un employé pour la conversation directe.")
+        target = await db.users.find_one({"email": email, "pharmacy_id": pid}, {"_id": 0, "email": 1, "name": 1})
+        if not target:
+            raise HTTPException(status_code=404, detail="Utilisateur introuvable dans cette pharmacie.")
+        if target["email"] == principal["email"]:
+            raise HTTPException(status_code=400, detail="Impossible de créer une conversation avec vous-même.")
+        participants = sorted([principal["email"], target["email"]])
+        existing = await db.conversations.find_one(
+            {"pharmacy_id": pid, "type": "direct", "participants": participants}, {"_id": 0})
+        if existing:
+            raise HTTPException(status_code=400, detail=f"Une conversation avec {target['name']} existe déjà.")
+        name = target["name"]
+    else:
+        existing = await db.conversations.find_one({"pharmacy_id": pid, "type": payload.type}, {"_id": 0})
+        if existing:
+            raise HTTPException(status_code=400, detail="Cette conversation existe déjà.")
+        name = "Toute l'équipe" if payload.type == "equipe" else "Gestionnaires"
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "id": str(uuid.uuid4()), "pharmacy_id": pid, "type": payload.type, "name": name,
+        "participants": participants, "created_by": principal["email"], "created_at": now,
+        "last_message": "", "last_sender": "", "last_message_at": now,
+    }
+    await db.conversations.insert_one({**doc})
+    await log_audit(principal["email"], principal["role"], "CREATION_CONVERSATION", "messagerie", doc["id"],
+                    f"Conversation « {name} » ({payload.type}) créée", pid)
+    return doc
+
+
+@api_router.get("/chat/conversations")
+async def list_conversations(user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    convos = await db.conversations.find({"pharmacy_id": pid}, {"_id": 0}).sort("last_message_at", -1).to_list(200)
+    visible = [c for c in convos if chat_can_access(c, user)]
+    reads = await db.conversation_reads.find({"email": user["email"]}, {"_id": 0}).to_list(500)
+    read_by = {r["conversation_id"]: r["last_read_at"] for r in reads}
+    out = []
+    for c in visible:
+        unread = await db.chat_messages.count_documents({
+            "conversation_id": c["id"], "sender_email": {"$ne": user["email"]},
+            "created_at": {"$gt": read_by.get(c["id"], "")}})
+        out.append({**c, "unread": unread})
+    return out
+
+
+@api_router.get("/chat/conversations/{conversation_id}/messages")
+async def list_chat_messages(conversation_id: str, user: dict = Depends(get_current_user)):
+    convo = await db.conversations.find_one({"id": conversation_id}, {"_id": 0})
+    if not convo or not chat_can_access(convo, user):
+        raise HTTPException(status_code=404, detail="Conversation introuvable.")
+    msgs = await db.chat_messages.find({"conversation_id": conversation_id}, {"_id": 0}).sort("created_at", 1).to_list(300)
+    await db.conversation_reads.update_one(
+        {"conversation_id": conversation_id, "email": user["email"]},
+        {"$set": {"conversation_id": conversation_id, "email": user["email"],
+                  "last_read_at": datetime.now(timezone.utc).isoformat()}}, upsert=True)
+    return msgs
+
+
+@api_router.post("/chat/conversations/{conversation_id}/messages")
+async def post_chat_message(conversation_id: str, payload: ChatMessageIn, user: dict = Depends(get_current_user)):
+    convo = await db.conversations.find_one({"id": conversation_id}, {"_id": 0})
+    if not convo or not chat_can_access(convo, user):
+        raise HTTPException(status_code=404, detail="Conversation introuvable.")
+    body = payload.body.strip()
+    if not body:
+        raise HTTPException(status_code=400, detail="Message vide.")
+    if len(body) > 2000:
+        raise HTTPException(status_code=400, detail="Message trop long (max 2000 caractères).")
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "id": str(uuid.uuid4()), "conversation_id": conversation_id, "pharmacy_id": convo["pharmacy_id"],
+        "sender_email": user["email"], "sender_name": user.get("name", ""), "sender_role": user["role"],
+        "body": body, "created_at": now,
+    }
+    await db.chat_messages.insert_one({**doc})
+    await db.conversations.update_one({"id": conversation_id}, {"$set": {
+        "last_message": body[:80], "last_sender": user.get("name", ""), "last_message_at": now}})
+    await db.conversation_reads.update_one(
+        {"conversation_id": conversation_id, "email": user["email"]},
+        {"$set": {"conversation_id": conversation_id, "email": user["email"], "last_read_at": now}}, upsert=True)
+    return doc
+
+
+@api_router.delete("/chat/conversations/{conversation_id}")
+async def delete_conversation(conversation_id: str, principal: dict = Depends(get_principal)):
+    convo = await db.conversations.find_one({"id": conversation_id}, {"_id": 0})
+    if not convo or convo["pharmacy_id"] != (principal["pharmacy_id"] or "ph1"):
+        raise HTTPException(status_code=404, detail="Conversation introuvable.")
+    await db.chat_messages.delete_many({"conversation_id": conversation_id})
+    await db.conversation_reads.delete_many({"conversation_id": conversation_id})
+    await db.conversations.delete_one({"id": conversation_id})
+    await log_audit(principal["email"], principal["role"], "SUPPRESSION_CONVERSATION", "messagerie", conversation_id,
+                    f"Conversation « {convo['name']} » supprimée", convo["pharmacy_id"])
+    return {"status": "supprimée"}
+
+
 class AbsenceIn(BaseModel):
     employee_id: str
     employee_name: str = ""

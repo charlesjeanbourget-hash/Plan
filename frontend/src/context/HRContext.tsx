@@ -20,6 +20,7 @@ interface HRContextValue {
   updateShift: (id: string, patch: Partial<Shift>) => void;
   deleteShift: (id: string) => void;
   addShiftSwap: (s: Omit<ShiftSwapRequest, 'id'>) => void;
+  updateShiftSwap: (id: string, patch: Partial<ShiftSwapRequest>) => void;
   setShiftSwapStatus: (id: string, status: RequestStatus) => void;
   addTask: (t: Omit<Task, 'id'>) => void;
   setTaskStatus: (id: string, status: TaskStatus) => void;
@@ -91,6 +92,8 @@ export const HRProvider = ({ children }: { children: ReactNode }) => {
       patchList('shifts', (items) => items.map((i) => (i.id === id ? { ...i, ...patch } : i))),
     deleteShift: (id) => patchList('shifts', (items) => items.filter((i) => i.id !== id)),
     addShiftSwap: (s) => patchList('shiftSwaps', (items) => [{ ...s, id: uid() }, ...items]),
+    updateShiftSwap: (id, patch) =>
+      patchList('shiftSwaps', (items) => items.map((i) => (i.id === id ? { ...i, ...patch } : i))),
     setShiftSwapStatus: (id, status) =>
       patchList('shiftSwaps', (items) => items.map((i) => (i.id === id ? { ...i, status } : i))),
     addTask: (t) => patchList('tasks', (items) => [...items, { ...t, id: uid() }]),

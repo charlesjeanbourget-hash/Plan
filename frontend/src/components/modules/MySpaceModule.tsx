@@ -20,7 +20,7 @@ import { toast } from 'sonner';
 const LEAVE_TYPES: LeaveType[] = ['Vacances', 'Maladie', 'Personnel', 'Formation'];
 
 export default function MySpaceModule(): JSX.Element {
-  const { state, getEmployee, addLeaveRequest, addShiftSwap } = useHR();
+  const { state, getEmployee, addLeaveRequest, addShiftSwap, updateShiftSwap, setShiftSwapStatus } = useHR();
   const { currentUser } = useAuth();
   const me = state.employees.find((e) => e.id === currentUser?.employeeId);
   const pharmacy = state.pharmacies.find((p) => p.id === currentUser?.pharmacyId);
@@ -63,7 +63,7 @@ export default function MySpaceModule(): JSX.Element {
   const submitSwap = (e: FormEvent<HTMLFormElement>): void => {
     e.preventDefault();
     if (!swapShiftId || !swapTargetId) return;
-    addShiftSwap({ shiftId: swapShiftId, requesterId: me.id, targetEmployeeId: swapTargetId, reason: swapReason, status: 'En attente' });
+    addShiftSwap({ shiftId: swapShiftId, requesterId: me.id, targetEmployeeId: swapTargetId, reason: swapReason, status: 'En attente', peerStatus: 'En attente' });
     toast.success("Demande d'échange envoyée au gestionnaire.");
     setSwapOpen(false);
     setSwapReason('');
@@ -104,6 +104,37 @@ export default function MySpaceModule(): JSX.Element {
             ))}
             {myShifts.length === 0 && <p className="text-sm text-slate-500">Aucun quart à venir.</p>}
           </div>
+          {state.shiftSwaps.some((s) => s.targetEmployeeId === me.id && s.status === 'En attente' && s.peerStatus === 'En attente') && (
+            <div className="mt-5 pt-4 border-t border-slate-100" data-testid="swaps-to-accept-panel">
+              <p className="text-xs uppercase tracking-[0.15em] text-bronze-700 font-semibold mb-3">Échanges à accepter</p>
+              {state.shiftSwaps
+                .filter((s) => s.targetEmployeeId === me.id && s.status === 'En attente' && s.peerStatus === 'En attente')
+                .map((sw) => {
+                  const shift = state.shifts.find((s) => s.id === sw.shiftId);
+                  const requester = getEmployee(sw.requesterId);
+                  return (
+                    <div key={sw.id} data-testid={`swap-to-accept-${sw.id}`} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-lg border border-bronze-200 bg-bronze-50/50 px-3.5 py-2.5 mb-2">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-800">
+                          {requester ? `${requester.firstName} ${requester.lastName}` : '?'} vous propose son quart
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {shift ? `${shift.date} · ${shift.startTime}–${shift.endTime}` : 'Quart introuvable'}{sw.reason ? ` · ${sw.reason}` : ''}
+                        </p>
+                      </div>
+                      <div className="flex gap-2 shrink-0">
+                        <Button data-testid={`accept-swap-${sw.id}`} size="sm" onClick={() => { updateShiftSwap(sw.id, { peerStatus: 'Approuvée' }); toast.success('Échange accepté — en attente de l\'approbation du gestionnaire.'); }} className="rounded-full bg-emerald-600 hover:bg-emerald-700 text-xs">
+                          Accepter
+                        </Button>
+                        <Button data-testid={`decline-swap-${sw.id}`} size="sm" variant="outline" onClick={() => { updateShiftSwap(sw.id, { peerStatus: 'Refusée' }); setShiftSwapStatus(sw.id, 'Refusée'); toast.success('Échange refusé.'); }} className="rounded-full text-xs text-red-600 border-red-200 hover:bg-red-50">
+                          Refuser
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          )}
           {mySwaps.length > 0 && (
             <div className="mt-5 pt-4 border-t border-slate-100">
               <p className="text-xs uppercase tracking-[0.15em] text-slate-500 font-semibold mb-3">Mes demandes d'échange</p>

@@ -6,6 +6,7 @@ export type ModuleKey =
   | 'dashboard'
   | 'tasks'
   | 'myspace'
+  | 'messages'
   | 'employees'
   | 'licenses'
   | 'scheduling'
@@ -256,6 +257,7 @@ export interface ShiftSwapRequest {
   targetEmployeeId: string;
   reason: string;
   status: RequestStatus;
+  peerStatus?: RequestStatus;
 }
 
 export interface License {

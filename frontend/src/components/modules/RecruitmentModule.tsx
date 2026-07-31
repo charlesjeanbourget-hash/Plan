@@ -1,7 +1,8 @@
 import { useState, FormEvent } from 'react';
 import { useHR } from '@/context/HRContext';
-import { Position, POSITIONS, ContractType, CANDIDATE_STATUSES, CandidateStatus } from '@/types';
+import { Position, POSITIONS, ContractType, CANDIDATE_STATUSES, CandidateStatus, Candidate } from '@/types';
 import { ModuleHeader, StatusBadge } from '@/components/modules/shared';
+import { HireCandidateDialog } from '@/components/HireCandidateDialog';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -15,6 +16,7 @@ import { toast } from 'sonner';
 export default function RecruitmentModule(): JSX.Element {
   const { state, addJobOffer, updateJobOffer, setCandidateStatus } = useHR();
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [hireCandidate, setHireCandidate] = useState<Candidate | null>(null);
   const [title, setTitle] = useState('');
   const [position, setPosition] = useState<Position>('ATP');
   const [type, setType] = useState<ContractType>('Temps plein');
@@ -98,7 +100,22 @@ export default function RecruitmentModule(): JSX.Element {
                   <td className="p-4 text-slate-600">{c.appliedDate}</td>
                   <td className="p-4"><StatusBadge status={c.status} /></td>
                   <td className="p-4">
-                    <Select value={c.status} onValueChange={(v) => { setCandidateStatus(c.id, v as CandidateStatus); toast.success('Statut mis à jour.'); }}>
+                    <Select
+                      value={c.status}
+                      onValueChange={(v) => {
+                        setCandidateStatus(c.id, v as CandidateStatus);
+                        if (v === 'Embauché(e)') {
+                          const exists = state.employees.some((emp) => emp.email.toLowerCase() === c.email.toLowerCase());
+                          if (exists) {
+                            toast.info(`${c.name} figure déjà dans la liste des employés.`);
+                          } else {
+                            setHireCandidate(c);
+                          }
+                        } else {
+                          toast.success('Statut mis à jour.');
+                        }
+                      }}
+                    >
                       <SelectTrigger data-testid={`candidate-status-select-${c.id}`} className="w-40 h-8 text-xs"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         {CANDIDATE_STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
@@ -159,6 +176,8 @@ export default function RecruitmentModule(): JSX.Element {
           </form>
         </DialogContent>
       </Dialog>
+
+      <HireCandidateDialog candidate={hireCandidate} onClose={() => setHireCandidate(null)} />
     </div>
   );
 }

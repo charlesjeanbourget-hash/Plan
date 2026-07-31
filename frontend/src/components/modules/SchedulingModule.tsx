@@ -9,11 +9,14 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ChevronLeft, ChevronRight, Plus, X, ArrowLeftRight, Check, Stethoscope, CopyPlus, LayoutTemplate } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, X, ArrowLeftRight, Check, Stethoscope, CopyPlus, LayoutTemplate, FileDown, Megaphone, Hourglass } from 'lucide-react';
 import { ScheduleProposals } from '@/components/ScheduleProposals';
 import { AppointmentDialog } from '@/components/AppointmentDialog';
 import { DuplicateWeekDialog } from '@/components/DuplicateWeekDialog';
 import { WeekTemplatesDialog } from '@/components/WeekTemplatesDialog';
+import { BudgetActualCard } from '@/components/BudgetActualCard';
+import { downloadSchedulePdf } from '@/lib/schedulePdf';
+import { hoursBetween } from '@/lib/schedule';
 import { toast } from 'sonner';
 
 const DAY_LABELS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
@@ -46,6 +49,7 @@ export default function SchedulingModule(): JSX.Element {
   const [apptOpen, setApptOpen] = useState(false);
   const [dupOpen, setDupOpen] = useState(false);
   const [tplOpen, setTplOpen] = useState(false);
+  const [publishing, setPublishing] = useState(false);
 
   useEffect(() => {
     if (!isAdmin || !token) return;
@@ -95,7 +99,10 @@ export default function SchedulingModule(): JSX.Element {
     setDialogOpen(false);
   };
 
-  const pendingSwaps = state.shiftSwaps.filter((s) => s.status === 'En attente');
+  const pendingSwaps = state.shiftSwaps.filter(
+    (s) => s.status === 'En attente' && (s.peerStatus ?? 'Approuvée') === 'Approuvée');
+  const awaitingPeerSwaps = state.shiftSwaps.filter(
+    (s) => s.status === 'En attente' && s.peerStatus === 'En attente');
 
   const approveSwap = (swapId: string): void => {
     const swap = state.shiftSwaps.find((s) => s.id === swapId);
@@ -103,6 +110,49 @@ export default function SchedulingModule(): JSX.Element {
     updateShift(swap.shiftId, { employeeId: swap.targetEmployeeId });
     setShiftSwapStatus(swapId, 'Approuvée');
     toast.success('Échange approuvé — l\'horaire a été mis à jour automatiquement.');
+  };
+
+  const publishWeek = async (): Promise<void> => {
+    const byEmp = new Map<string, { shift_count: number; hours: number }>();
+    state.shifts
+      .filter((s) => s.date >= days[0] && s.date <= days[6])
+      .forEach((s) => {
+        const e = byEmp.get(s.employeeId) ?? { shift_count: 0, hours: 0 };
+        e.shift_count += 1;
+        e.hours += hoursBetween(s.startTime, s.endTime);
+        byEmp.set(s.employeeId, e);
+      });
+    if (byEmp.size === 0) {
+      toast.error('Aucun quart dans la semaine affichée — rien à publier.');
+      return;
+    }
+    setPublishing(true);
+    try {
+      const res = await axios.post<{ notified: number; emailed: number; updated: boolean }>(`${API}/schedule/publish`, {
+        week_start: days[0],
+        recipients: Array.from(byEmp.entries()).map(([eid, v]) => {
+          const emp = state.employees.find((x) => x.id === eid);
+          return {
+            employee_id: eid,
+            employee_name: emp ? `${emp.firstName} ${emp.lastName}` : '',
+            shift_count: v.shift_count,
+            hours: Math.round(v.hours * 10) / 10,
+          };
+        }),
+      }, { headers: { Authorization: `Bearer ${token ?? ''}` } });
+      toast.success(
+        `Horaire ${res.data.updated ? 'republié (modifié)' : 'publié'} : ${res.data.notified} employé(s) notifié(s), ${res.data.emailed} courriel(s) envoyé(s).`,
+        { duration: 6000 });
+    } catch {
+      toast.error('Publication impossible.');
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  const exportPdf = (): void => {
+    void downloadSchedulePdf(days, state.shifts, state.employees, state.pharmacies[0]?.name ?? 'Arrière Plan');
+    toast.success('PDF de la semaine téléchargé — prêt pour la salle du personnel.');
   };
 
   return (
@@ -125,6 +175,12 @@ export default function SchedulingModule(): JSX.Element {
                 <Button data-testid="duplicate-week-button" variant="outline" onClick={() => setDupOpen(true)} className="rounded-full border-bronze-300 text-bronze-800 hover:bg-bronze-50">
                   <CopyPlus className="w-4 h-4 mr-1" /> Dupliquer la semaine
                 </Button>
+                <Button data-testid="schedule-pdf-button" variant="outline" onClick={exportPdf} className="rounded-full">
+                  <FileDown className="w-4 h-4 mr-1" /> PDF
+                </Button>
+                <Button data-testid="publish-week-button" onClick={() => void publishWeek()} disabled={publishing} className="rounded-full bg-bronze-600 hover:bg-bronze-700 text-white">
+                  <Megaphone className="w-4 h-4 mr-1" /> {publishing ? 'Publication…' : 'Publier la semaine'}
+                </Button>
               </>
             )}
             <Button data-testid="add-shift-button" onClick={() => setDialogOpen(true)} className="rounded-full bg-emerald-600 hover:bg-emerald-700">
@@ -134,15 +190,36 @@ export default function SchedulingModule(): JSX.Element {
         }
       />
       {isAdmin && <ScheduleProposals />}
+      {isAdmin && <BudgetActualCard />}
       {isAdmin && (
         <div className="bg-white rounded-xl border border-slate-200 p-6 mb-6" data-testid="swap-requests-panel">
           <h2 className="font-heading text-base font-bold text-slate-900 mb-4 inline-flex items-center gap-2">
             <ArrowLeftRight className="w-4 h-4 text-emerald-600" /> Demandes d'échange de quarts
           </h2>
-          {pendingSwaps.length === 0 ? (
+          {pendingSwaps.length === 0 && awaitingPeerSwaps.length === 0 ? (
             <p className="text-sm text-slate-500">Aucune demande d'échange en attente.</p>
           ) : (
             <div className="space-y-3">
+              {awaitingPeerSwaps.map((swap) => {
+                const shift = state.shifts.find((s) => s.id === swap.shiftId);
+                const requester = getEmployee(swap.requesterId);
+                const target = getEmployee(swap.targetEmployeeId);
+                return (
+                  <div key={swap.id} data-testid={`swap-awaiting-${swap.id}`} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50/70 px-4 py-3">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-600">
+                        {requester ? `${requester.firstName} ${requester.lastName}` : '?'} → {target ? `${target.firstName} ${target.lastName}` : '?'}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {shift ? `${shift.date} · ${shift.startTime}–${shift.endTime}` : 'Quart introuvable'} · {swap.reason}
+                      </p>
+                    </div>
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-bronze-100 text-bronze-800 text-xs font-semibold shrink-0">
+                      <Hourglass className="w-3 h-3" /> En attente du collègue
+                    </span>
+                  </div>
+                );
+              })}
               {pendingSwaps.map((swap) => {
                 const shift = state.shifts.find((s) => s.id === swap.shiftId);
                 const requester = getEmployee(swap.requesterId);
