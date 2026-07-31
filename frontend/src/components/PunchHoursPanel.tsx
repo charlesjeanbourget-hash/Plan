@@ -9,7 +9,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Timer, ChevronLeft, ChevronRight, Plus, Trash2, Wallet, Settings2, Download, AlertTriangle } from 'lucide-react';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
+import { Timer, ChevronLeft, ChevronRight, Plus, Trash2, Wallet, Settings2, Download, AlertTriangle, ChevronDown, FileSpreadsheet } from 'lucide-react';
 import { toast } from 'sonner';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -143,6 +144,29 @@ export const PunchHoursPanel = (): JSX.Element => {
     }
   };
 
+  const exportPayroll = async (format: 'employeurd' | 'nethris' | 'adp', label: string): Promise<void> => {
+    if (!period) return;
+    try {
+      const res = await axios.get<Blob>(
+        `${API}/punches/export-payroll?start=${period.start}&end=${period.end}&format=${format}`,
+        { headers, responseType: 'blob' });
+      const ext = format === 'employeurd' ? 'xlsx' : 'csv';
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${format}_paie_${period.start}_${period.end}.${ext}`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success(`Export ${label} téléchargé — prêt à importer dans votre logiciel de paie.`);
+    } catch (err) {
+      if (axios.isAxiosError(err) && err.response?.status === 400) {
+        toast.error('Aucune heure complétée dans cette période.');
+      } else {
+        toast.error('Export impossible.');
+      }
+    }
+  };
+
   const closeOpenPunch = async (p: OpenPunch): Promise<void> => {
     try {
       await axios.put(`${API}/punches/${p.id}`, { date: p.date, end_time: closeTimes[p.id] ?? '17:00' }, { headers });
@@ -185,9 +209,29 @@ export const PunchHoursPanel = (): JSX.Element => {
           <Timer className="w-4 h-4 text-emerald-600" /> Heures punchées (source officielle de la paie)
         </h2>
         <div className="flex flex-wrap gap-2">
-          <Button data-testid="export-csv-button" size="sm" variant="outline" onClick={() => void exportCsv()} className="rounded-full text-xs">
-            <Download className="w-3.5 h-3.5 mr-1" /> Exporter CSV
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button data-testid="export-menu-button" size="sm" variant="outline" className="rounded-full text-xs">
+                <Download className="w-3.5 h-3.5 mr-1" /> Exporter la paie <ChevronDown className="w-3 h-3 ml-1" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuLabel className="text-xs">Formats prêts à importer</DropdownMenuLabel>
+              <DropdownMenuItem data-testid="export-employeurd" className="text-xs cursor-pointer" onSelect={() => void exportPayroll('employeurd', 'Employeur D (Excel)')}>
+                <FileSpreadsheet className="w-3.5 h-3.5 mr-2 text-emerald-600" /> Employeur D — Excel (Desjardins)
+              </DropdownMenuItem>
+              <DropdownMenuItem data-testid="export-nethris" className="text-xs cursor-pointer" onSelect={() => void exportPayroll('nethris', 'Nethris (CSV)')}>
+                <FileSpreadsheet className="w-3.5 h-3.5 mr-2 text-sky-600" /> Nethris — CSV
+              </DropdownMenuItem>
+              <DropdownMenuItem data-testid="export-adp" className="text-xs cursor-pointer" onSelect={() => void exportPayroll('adp', 'ADP (CSV)')}>
+                <FileSpreadsheet className="w-3.5 h-3.5 mr-2 text-red-600" /> ADP — CSV (paydata)
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem data-testid="export-csv-button" className="text-xs cursor-pointer" onSelect={() => void exportCsv()}>
+                <Download className="w-3.5 h-3.5 mr-2 text-slate-500" /> CSV détaillé (toutes les entrées)
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button data-testid="add-manual-hours-button" size="sm" variant="outline" onClick={() => { setMEmployeeId(state.employees[0]?.id ?? ''); setManualOpen(true); }} className="rounded-full text-xs">
             <Plus className="w-3.5 h-3.5 mr-1" /> Saisie manuelle
           </Button>
@@ -198,6 +242,7 @@ export const PunchHoursPanel = (): JSX.Element => {
       </div>
       <p className="text-xs text-slate-500 mb-4">
         Seules les heures punchées (NIP à la borne ou depuis « Mon espace ») et les saisies manuelles de l'administration sont comptabilisées.
+        {' '}Astuce : ajoutez le <b>matricule paie</b> de chaque employé dans son profil (Dossiers employés) pour des exports Employeur D / Nethris / ADP prêts à importer sans mappage.
       </p>
 
       {openPunches.filter((p) => p.elapsed_hours >= 12).length > 0 && (

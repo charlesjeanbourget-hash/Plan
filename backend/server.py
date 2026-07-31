@@ -1324,6 +1324,7 @@ class ProfileIn(BaseModel):
     max_hours_week: Optional[int] = None
     availability: Optional[dict] = None
     notes: Optional[str] = None
+    payroll_number: Optional[str] = None
 
 
 async def get_or_create_profile(pharmacy_id: str, employee_id: str, employee_name: str = "") -> dict:
@@ -1591,11 +1592,7 @@ async def delete_punch(punch_id: str, principal: dict = Depends(get_principal)):
     return {"status": "supprimée"}
 
 
-@api_router.get("/punches/summary")
-async def punches_summary(start: str = Query(...), end: str = Query(...), principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
-    docs = await db.punches.find(
-        {"pharmacy_id": pid, "date": {"$gte": start, "$lte": end}}, {"_id": 0}).to_list(5000)
+def aggregate_punch_hours(docs: list) -> list:
     rows: dict = {}
     weekly: dict = {}
     for p in docs:
@@ -1623,6 +1620,14 @@ async def punches_summary(start: str = Query(...), end: str = Query(...), princi
     return sorted(rows.values(), key=lambda r: r["employee_name"])
 
 
+@api_router.get("/punches/summary")
+async def punches_summary(start: str = Query(...), end: str = Query(...), principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    docs = await db.punches.find(
+        {"pharmacy_id": pid, "date": {"$gte": start, "$lte": end}}, {"_id": 0}).to_list(5000)
+    return aggregate_punch_hours(docs)
+
+
 @api_router.get("/punches/export")
 async def export_punches(start: str = Query(...), end: str = Query(...), principal: dict = Depends(get_principal)):
     pid = principal["pharmacy_id"] or "ph1"
@@ -1644,6 +1649,69 @@ async def export_punches(start: str = Query(...), end: str = Query(...), princip
                     f"Export CSV des heures du {start} au {end} ({len(docs)} entrées)", pid)
     return Response(content=csv_content.encode("utf-8"), media_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition": f'attachment; filename="heures_{start}_{end}.csv"'})
+
+
+PAYROLL_EXPORT_FORMATS = ("employeurd", "nethris", "adp")
+
+
+@api_router.get("/punches/export-payroll")
+async def export_punches_payroll(start: str = Query(...), end: str = Query(...),
+                                 format: str = Query(...), principal: dict = Depends(get_principal)):
+    if format not in PAYROLL_EXPORT_FORMATS:
+        raise HTTPException(status_code=400, detail="Format invalide. Choix : employeurd, nethris, adp.")
+    pid = principal["pharmacy_id"] or "ph1"
+    docs = await db.punches.find(
+        {"pharmacy_id": pid, "date": {"$gte": start, "$lte": end}}, {"_id": 0}).to_list(5000)
+    rows = [r for r in aggregate_punch_hours(docs) if r["total_hours"] > 0]
+    if not rows:
+        raise HTTPException(status_code=400, detail="Aucune heure complétée dans cette période.")
+    profiles = await db.employee_profiles.find(
+        {"pharmacy_id": pid}, {"_id": 0, "employee_id": 1, "payroll_number": 1}).to_list(1000)
+    num_by = {p["employee_id"]: (p.get("payroll_number") or "").strip() for p in profiles}
+
+    if format == "employeurd":
+        from openpyxl import Workbook
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Paie"
+        ws.append(["Matricule", "Nom de l'employé", "Code de gain", "Heures"])
+        for r in rows:
+            mat = num_by.get(r["employee_id"], "")
+            if r["regular_hours"] > 0:
+                ws.append([mat, r["employee_name"], "REG", r["regular_hours"]])
+            if r["overtime_hours"] > 0:
+                ws.append([mat, r["employee_name"], "SUP", r["overtime_hours"]])
+        buf = io.BytesIO()
+        wb.save(buf)
+        content = buf.getvalue()
+        media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        filename = f"employeur-d_paie_{start}_{end}.xlsx"
+    elif format == "nethris":
+        lines = ["Matricule;Nom de l'employé;Code de gain;Heures"]
+        for r in rows:
+            mat = num_by.get(r["employee_id"], "")
+            if r["regular_hours"] > 0:
+                lines.append(f"{mat};{r['employee_name']};REG;{str(r['regular_hours']).replace('.', ',')}")
+            if r["overtime_hours"] > 0:
+                lines.append(f"{mat};{r['employee_name']};SUP;{str(r['overtime_hours']).replace('.', ',')}")
+        content = ("\ufeff" + "\n".join(lines)).encode("utf-8")
+        media = "text/csv; charset=utf-8"
+        filename = f"nethris_paie_{start}_{end}.csv"
+    else:
+        lines = ["Co Code,Batch ID,File #,Employee Name,Reg Hours,O/T Hours"]
+        for r in rows:
+            mat = num_by.get(r["employee_id"], "")
+            name = r["employee_name"].replace(",", " ")
+            lines.append(f",,{mat},{name},{r['regular_hours']},{r['overtime_hours']}")
+        content = ("\ufeff" + "\n".join(lines)).encode("utf-8")
+        media = "text/csv; charset=utf-8"
+        filename = f"adp_paydata_{start}_{end}.csv"
+
+    missing = sum(1 for r in rows if not num_by.get(r["employee_id"], ""))
+    await log_audit(principal["email"], principal["role"], "EXPORT_PAIE", "punch", f"{start}_{end}",
+                    f"Export paie format {format} du {start} au {end} ({len(rows)} employé(s), {missing} sans matricule)", pid)
+    return Response(content=content, media_type=media,
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 @api_router.get("/punches/open")

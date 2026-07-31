@@ -206,6 +206,15 @@ admin@luminahr.ca/admin123 · julie@luminahr.ca/employe123 · super@luminahr.ca/
 - **Section FAQ publique** (`FaqSection.tsx`, id="faq", testid faq-section) placée entre « Votre temps vaut plus » et le formulaire démo : 8 questions/réponses rassurantes (sécurité Loi 25, mise en place, facilité employés, compatibilité paie Nethris/EmployeurD/ADP/QuickBooks, mobile PWA, contrôle sur l'horaire IA, remplacements de dernière minute, démo sans engagement) en accordéon shadcn + CTA « Réserver une démo » (faq-demo-cta, scroll vers #demo). Lien « Questions fréquentes » ajouté au footer (footer-faq-link).
 - **RECHERCHE intégrations paie (réponse au client)** : ADP = API gated (ADP API Central côté client payant OU partenariat Marketplace + certificat SSL mutuel — pas self-serve). Nethris/Employeur D (Desjardins) = PAS d'API publique ouverte, MAIS un connecteur Service Web existe pour les clients (activé par le support Desjardins : numéro client + code utilisateur API + code entreprise + mot de passe Service Web). Alternative pragmatique utilisée par les concurrents (Agendrix) : formats d'export dédiés par logiciel (ex. « Desjardins (Excel) ») importés dans Paie > Importer les transactions. PISTE BACKLOG : ajouter des formats d'export spécifiques Nethris/EmployeurD/ADP sans clés API.
 
+## Itération 26 (31 juillet 2026) — Exports paie dédiés Employeur D / Nethris / ADP — testée (curl 3 formats + xlsx vérifié + E2E navigateur menu/téléchargement/toast)
+- **Endpoint GET /api/punches/export-payroll?start&end&format={employeurd|nethris|adp}** (admin/manager/superadmin via get_principal) : agrège les heures punchées de la période (helper `aggregate_punch_hours` extrait de punches_summary — refactor DRY), heures régulières vs temps supp (>40 h/sem ISO), matricule paie depuis le profil.
+  - employeurd → **vrai fichier Excel .xlsx** (openpyxl, installé + requirements.txt) : Matricule | Nom | Code de gain (REG/SUP) | Heures
+  - nethris → CSV point-virgule + BOM, décimales à virgule
+  - adp → CSV paydata : Co Code,Batch ID,File #,Employee Name,Reg Hours,O/T Hours (Co Code/Batch vides à compléter par le commis)
+  - 400 format invalide / 400 aucune heure ; audit EXPORT_PAIE avec nb employés sans matricule.
+- **Matricule paie** : nouveau champ `payroll_number` dans ProfileIn + EmployeeProfile (types.ts) + input dans ProfileEditor (payroll-number-input, sous heures min/max). Julie (e2) = 000123 pour démonstration.
+- **PunchHoursPanel** : bouton « Exporter la paie » devient un menu déroulant (export-menu-button) : Employeur D — Excel / Nethris — CSV / ADP — CSV / CSV détaillé (ancien export, testid export-csv-button conservé). Astuce matricule affichée sous le titre. Nouveau `ui/dropdown-menu.d.ts` pour le mode strict.
+
 ## Notes techniques
 - Ne jamais recréer `jsconfig.json` (conflit CRA avec tsconfig.json)
 - npm interdit — yarn uniquement

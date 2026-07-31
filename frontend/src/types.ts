@@ -438,6 +438,7 @@ export interface EmployeeProfile {
   max_hours_week: number;
   availability: Record<WeekDayKey, AvailabilityDay>;
   punch_code: string | null;
+  payroll_number?: string | null;
   notes: string;
   updated_at: string;
   updated_by: string;

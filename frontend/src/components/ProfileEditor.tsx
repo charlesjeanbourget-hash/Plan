@@ -78,6 +78,7 @@ export const ProfileEditor = ({ employeeId, employeeName, canManageCode }: Props
         max_hours_week: profile.max_hours_week,
         availability: profile.availability,
         notes: profile.notes,
+        payroll_number: profile.payroll_number ?? '',
       }, { headers });
       toast.success('Profil enregistré — il sera pris en compte par l\'IA pour les horaires.');
     } catch {
@@ -151,6 +152,15 @@ export const ProfileEditor = ({ employeeId, employeeName, canManageCode }: Props
             <div className="space-y-2">
               <Label>Heures max. / semaine</Label>
               <Input data-testid="max-hours-input" type="number" min={0} max={80} value={profile.max_hours_week} onChange={(e) => patch({ max_hours_week: Number(e.target.value) })} />
+            </div>
+            <div className="space-y-2 col-span-2">
+              <Label>Matricule paie (numéro d'employé dans votre logiciel de paie)</Label>
+              <Input
+                data-testid="payroll-number-input"
+                value={profile.payroll_number ?? ''}
+                onChange={(e) => patch({ payroll_number: e.target.value })}
+                placeholder="Ex. 000123 — utilisé par les exports Employeur D, Nethris et ADP"
+              />
             </div>
           </div>
           <div className="space-y-2 mt-6">
