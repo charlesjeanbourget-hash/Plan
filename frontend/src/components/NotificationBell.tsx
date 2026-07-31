@@ -2,9 +2,9 @@ import { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import { useAuth } from '@/context/AuthContext';
 import { useHR } from '@/context/HRContext';
-import { ModuleKey, LicenseReportItem, Training, ScheduleProposal, Evaluation, Delivery } from '@/types';
+import { ModuleKey, LicenseReportItem, Training, ScheduleProposal, Evaluation, Delivery, Appointment } from '@/types';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Bell, TreePalm, RefreshCw, BadgeCheck, GraduationCap, CheckCheck, CalendarCheck, ClipboardCheck, HandCoins, Truck } from 'lucide-react';
+import { Bell, TreePalm, RefreshCw, BadgeCheck, GraduationCap, CheckCheck, CalendarCheck, ClipboardCheck, HandCoins, Truck, Stethoscope } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -14,10 +14,10 @@ interface Notif {
   detail: string;
   module: ModuleKey;
   tone: 'amber' | 'red' | 'sky' | 'emerald';
-  icon: 'leave' | 'swap' | 'license' | 'training' | 'schedule' | 'eval' | 'salary' | 'delivery';
+  icon: 'leave' | 'swap' | 'license' | 'training' | 'schedule' | 'eval' | 'salary' | 'delivery' | 'appointment';
 }
 
-const ICONS = { leave: TreePalm, swap: RefreshCw, license: BadgeCheck, training: GraduationCap, schedule: CalendarCheck, eval: ClipboardCheck, salary: HandCoins, delivery: Truck } as const;
+const ICONS = { leave: TreePalm, swap: RefreshCw, license: BadgeCheck, training: GraduationCap, schedule: CalendarCheck, eval: ClipboardCheck, salary: HandCoins, delivery: Truck, appointment: Stethoscope } as const;
 
 const TONES: Record<Notif['tone'], string> = {
   amber: 'bg-bronze-100 text-bronze-700',
@@ -34,6 +34,7 @@ export const NotificationBell = ({ onNavigate }: { onNavigate: (m: ModuleKey) =>
   const [proposals, setProposals] = useState<ScheduleProposal[]>([]);
   const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [open, setOpen] = useState(false);
   const readKey = `luminahr_notif_read_v1_${currentUser?.id ?? ''}`;
   const [readIds, setReadIds] = useState<string[]>(() => {
@@ -56,6 +57,11 @@ export const NotificationBell = ({ onNavigate }: { onNavigate: (m: ModuleKey) =>
         .catch(() => undefined);
       axios.get<Delivery[]>(`${API}/deliveries`, { headers })
         .then((r) => setDeliveries(r.data))
+        .catch(() => undefined);
+      const d = new Date();
+      const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      axios.get<Appointment[]>(`${API}/appointments?start=${today}&end=${today}`, { headers })
+        .then((r) => setAppointments(r.data))
         .catch(() => undefined);
     } else {
       axios.get<{ items: LicenseReportItem[] }>(`${API}/licenses/report`, { headers })
@@ -133,6 +139,19 @@ export const NotificationBell = ({ onNavigate }: { onNavigate: (m: ModuleKey) =>
           tone: 'emerald',
           icon: 'salary',
         }));
+      const myAppts = appointments
+        .filter((a) => a.employee_id === empId)
+        .sort((a, b) => a.start.localeCompare(b.start));
+      if (myAppts.length > 0) {
+        list.push({
+          id: `appts-${myAppts[0].date}-${myAppts.length}`,
+          title: myAppts.length > 1 ? `${myAppts.length} rendez-vous aujourd'hui` : 'Rendez-vous aujourd\'hui',
+          detail: `Premier à ${myAppts[0].start} — ${myAppts[0].client_name}${myAppts[0].reason ? ` (${myAppts[0].reason})` : ''}`,
+          module: 'myspace',
+          tone: 'sky',
+          icon: 'appointment',
+        });
+      }
       deliveries
         .filter((d) => d.status !== 'livree')
         .forEach((d) => list.push({
@@ -182,7 +201,7 @@ export const NotificationBell = ({ onNavigate }: { onNavigate: (m: ModuleKey) =>
       }));
     }
     return list;
-  }, [currentUser, state, trainings, licenseItems, proposals, evaluations, deliveries, getEmployee]);
+  }, [currentUser, state, trainings, licenseItems, proposals, evaluations, deliveries, appointments, getEmployee]);
 
   const unreadCount = notifs.filter((n) => !readIds.includes(n.id)).length;
 

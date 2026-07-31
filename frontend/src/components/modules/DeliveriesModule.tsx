@@ -7,12 +7,13 @@ import { ModuleHeader } from '@/components/modules/shared';
 import { DeliveryProofDialog, DeliveryProof } from '@/components/DeliveryProofDialog';
 import { DeliveryProofsPanel } from '@/components/DeliveryProofsPanel';
 import { DeliveryTourDialog } from '@/components/DeliveryTourDialog';
+import { MileagePanel } from '@/components/MileagePanel';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, Truck, MapPin, Phone, Package, Trash2, CircleCheck, Navigation, Route, Store, ShieldCheck } from 'lucide-react';
+import { Plus, Truck, MapPin, Phone, Package, Trash2, CircleCheck, Navigation, Route, Store, ShieldCheck, Fuel } from 'lucide-react';
 import { toast } from 'sonner';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -43,7 +44,7 @@ export default function DeliveriesModule(): JSX.Element {
   const isManager = currentUser?.role !== 'employee';
   const headers = { Authorization: `Bearer ${token ?? ''}` };
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
-  const [view, setView] = useState<'list' | 'proofs'>('list');
+  const [view, setView] = useState<'list' | 'proofs' | 'mileage'>('list');
   const [createOpen, setCreateOpen] = useState(false);
   const [client, setClient] = useState('');
   const [address, setAddress] = useState('');
@@ -284,11 +285,20 @@ export default function DeliveriesModule(): JSX.Element {
           >
             <ShieldCheck className="w-3.5 h-3.5" /> Preuves clients
           </button>
+          <button
+            data-testid="deliveries-view-mileage"
+            onClick={() => setView('mileage')}
+            className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-semibold transition-colors ${view === 'mileage' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:text-emerald-700'}`}
+          >
+            <Fuel className="w-3.5 h-3.5" /> Kilométrage
+          </button>
         </div>
       )}
 
       {view === 'proofs' && isManager ? (
         <DeliveryProofsPanel />
+      ) : view === 'mileage' && isManager ? (
+        <MileagePanel />
       ) : (
         <>
           <h2 className="font-heading text-base font-bold text-slate-900 mb-3 inline-flex items-center gap-2">

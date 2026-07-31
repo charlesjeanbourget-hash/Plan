@@ -2672,13 +2672,15 @@ DEFAULT_PHARMACY_ADDRESS = "5090 Rue Sherbrooke Est, Montréal, QC"
 
 class PharmacySettingsIn(BaseModel):
     address: str
+    mileage_rate: float = -1.0
 
 
 @api_router.get("/pharmacy/settings")
 async def get_pharmacy_settings(user: dict = Depends(get_current_user)):
     pid = user.get("pharmacy_id") or "ph1"
     doc = await db.pharmacy_settings.find_one({"pharmacy_id": pid}, {"_id": 0})
-    return {"address": (doc or {}).get("address") or DEFAULT_PHARMACY_ADDRESS}
+    return {"address": (doc or {}).get("address") or DEFAULT_PHARMACY_ADDRESS,
+            "mileage_rate": (doc or {}).get("mileage_rate", 0.50)}
 
 
 @api_router.put("/pharmacy/settings")
@@ -2686,11 +2688,13 @@ async def set_pharmacy_settings(payload: PharmacySettingsIn, principal: dict = D
     if not payload.address.strip():
         raise HTTPException(status_code=400, detail="Adresse requise.")
     pid = principal["pharmacy_id"] or "ph1"
-    await db.pharmacy_settings.update_one(
-        {"pharmacy_id": pid},
-        {"$set": {"pharmacy_id": pid, "address": payload.address.strip(),
-                  "updated_by": principal["email"], "updated_at": datetime.now(timezone.utc).isoformat()}},
-        upsert=True)
+    update = {"pharmacy_id": pid, "address": payload.address.strip(),
+              "updated_by": principal["email"], "updated_at": datetime.now(timezone.utc).isoformat()}
+    if payload.mileage_rate >= 0:
+        if payload.mileage_rate > 5:
+            raise HTTPException(status_code=400, detail="Taux au kilomètre invalide (max 5 $/km).")
+        update["mileage_rate"] = round(payload.mileage_rate, 2)
+    await db.pharmacy_settings.update_one({"pharmacy_id": pid}, {"$set": update}, upsert=True)
     await log_audit(principal["email"], principal["role"], "MODIF_ADRESSE_PHARMACIE", "livraison", pid,
                     f"Adresse de départ des tournées : {payload.address.strip()}", pid)
     return {"address": payload.address.strip()}
@@ -2783,6 +2787,55 @@ async def delivery_route(courier_employee_id: str = Query(""), user: dict = Depe
     maps_url = "https://www.google.com/maps/dir/" + "/".join(requests.utils.quote(p) for p in parts)
     return {"start_address": start_address, "stops": stops,
             "total_km": round(km_u + km_n, 1), "maps_url": maps_url}
+
+
+@api_router.get("/deliveries/mileage")
+async def delivery_mileage(start: str = Query(...), end: str = Query(...), principal: dict = Depends(get_principal)):
+    try:
+        date.fromisoformat(start)
+        date.fromisoformat(end)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Dates invalides.")
+    pid = principal["pharmacy_id"] or "ph1"
+    settings = await db.pharmacy_settings.find_one({"pharmacy_id": pid}, {"_id": 0})
+    start_address = (settings or {}).get("address") or DEFAULT_PHARMACY_ADDRESS
+    rate = (settings or {}).get("mileage_rate", 0.50)
+    docs = await db.deliveries.find(
+        {"pharmacy_id": pid, "status": "livree", "delivered_at": {"$nin": [None, ""]}},
+        {"_id": 0, "proof_image": 0}).to_list(2000)
+    per_courier: dict = {}
+    for d in docs:
+        try:
+            day = datetime.fromisoformat(d["delivered_at"]).astimezone(MONTREAL_TZ).date().isoformat()
+        except ValueError:
+            continue
+        if not (start <= day <= end):
+            continue
+        c = per_courier.setdefault(d["courier_employee_id"], {"courier_name": d["courier_name"], "days": {}})
+        c["days"].setdefault(day, []).append(d)
+    depot = await geocode_address(start_address) if per_courier else None
+    couriers = []
+    for eid, c in per_courier.items():
+        total_km, count, unlocated = 0.0, 0, 0
+        for day in sorted(c["days"]):
+            located_urgent, located_normal = [], []
+            for d in c["days"][day]:
+                count += 1
+                coords = await geocode_address(d["address"])
+                if coords is None:
+                    unlocated += 1
+                elif d["priority"] == "urgent":
+                    located_urgent.append((d, coords))
+                else:
+                    located_normal.append((d, coords))
+            _, km_u, current = _tour_order(depot, located_urgent)
+            _, km_n, _ = _tour_order(current, located_normal)
+            total_km += km_u + km_n
+        couriers.append({"courier_employee_id": eid, "courier_name": c["courier_name"],
+                         "deliveries": count, "days": len(c["days"]),
+                         "km": round(total_km, 1), "unlocated": unlocated})
+    couriers.sort(key=lambda x: -x["km"])
+    return {"start_address": start_address, "mileage_rate": rate, "couriers": couriers}
 
 
 @api_router.get("/deliveries/proofs")
@@ -2983,6 +3036,83 @@ async def delete_appointment(appointment_id: str, user: dict = Depends(get_curre
     await log_audit(user["email"], user["role"], "SUPPRESSION_RDV", "rendez-vous", appointment_id,
                     f"RDV {doc['client_name']} du {doc['date']} supprimé", doc["pharmacy_id"])
     return {"status": "supprimé"}
+
+
+def appointment_reminder_html(name: str, day: str, appts: list) -> str:
+    td = "padding:6px 12px;border-bottom:1px solid #e2e8f0"
+    rows = "".join(
+        f"<tr><td style='{td};font-weight:bold'>{a['start']}–{a['end']}</td>"
+        f"<td style='{td}'>{a['client_name']}</td>"
+        f"<td style='{td}'>{a['reason'] or 'Consultation'}</td>"
+        f"<td style='{td};color:#64748b'>{a['notes']}</td></tr>"
+        for a in appts)
+    return (
+        "<div style='font-family:Arial,sans-serif;max-width:640px;margin:0 auto;color:#0f172a'>"
+        "<h2 style='color:#059669'>Arrière Plan — Vos rendez-vous du jour</h2>"
+        f"<p>Bonjour {name},</p>"
+        f"<p>Vous avez <strong>{len(appts)} rendez-vous</strong> à votre horaire aujourd'hui ({day}) :</p>"
+        "<table style='border-collapse:collapse;width:100%'>"
+        "<tr style='text-align:left;color:#64748b;font-size:12px;text-transform:uppercase'>"
+        "<th style='padding:6px 12px'>Heure</th><th style='padding:6px 12px'>Client</th>"
+        f"<th style='padding:6px 12px'>Motif</th><th style='padding:6px 12px'>Notes</th></tr>{rows}</table>"
+        "<p style='font-size:12px;color:#94a3b8;margin-top:24px'>Rappel automatique envoyé chaque matin à 8 h "
+        "par Arrière Plan.</p></div>")
+
+
+async def send_appointment_reminders(target_date: str = "") -> int:
+    api_key = os.environ.get("RESEND_API_KEY", "")
+    if not api_key:
+        logger.warning("Rappels rendez-vous : RESEND_API_KEY manquante, envoi ignoré.")
+        return 0
+    resend.api_key = api_key
+    sender = await get_sender()
+    day = target_date or datetime.now(MONTREAL_TZ).date().isoformat()
+    appts = await db.appointments.find({"date": day}, {"_id": 0}).sort("start", 1).to_list(2000)
+    groups: dict = {}
+    for a in appts:
+        groups.setdefault((a["pharmacy_id"], a["employee_id"]), []).append(a)
+    sent = 0
+    for (pid, eid), items in groups.items():
+        already = await db.appointment_reminders.find_one({"pharmacy_id": pid, "employee_id": eid, "date": day})
+        if already:
+            continue
+        account = await db.users.find_one({"employee_id": eid, "pharmacy_id": pid}, {"_id": 0, "email": 1, "name": 1})
+        email = (account or {}).get("email", "")
+        if not email:
+            continue
+        name = (account or {}).get("name") or items[0].get("employee_name") or ""
+        try:
+            await asyncio.to_thread(resend.Emails.send, {
+                "from": sender, "to": [email],
+                "subject": f"Vos {len(items)} rendez-vous du {day}" if len(items) > 1 else f"Votre rendez-vous du {day}",
+                "html": appointment_reminder_html(name, day, items)})
+            await db.appointment_reminders.insert_one({
+                "pharmacy_id": pid, "employee_id": eid, "date": day,
+                "count": len(items), "sent_at": datetime.now(timezone.utc).isoformat()})
+            await log_audit("système", "system", "RAPPEL_RDV_ENVOYE", "rendez-vous", eid,
+                            f"{len(items)} rendez-vous du {day} rappelés à {email}", pid)
+            sent += 1
+        except Exception as exc:
+            logger.error(f"Rappel rendez-vous vers {email} échoué : {exc}")
+    return sent
+
+
+@api_router.post("/appointments/reminders/run")
+async def run_appointment_reminders(target_date: str = Query(""), principal: dict = Depends(get_principal)):
+    if target_date:
+        try:
+            date.fromisoformat(target_date)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Date invalide.")
+    sent = await send_appointment_reminders(target_date)
+    await log_audit(principal["email"], principal["role"], "RAPPELS_RDV_DECLENCHES", "rendez-vous", "rappels",
+                    f"{sent} rappel(s) de rendez-vous envoyé(s) manuellement", principal.get("pharmacy_id", ""))
+    return {"sent": sent}
+
+
+async def appointment_reminders_job():
+    sent = await send_appointment_reminders()
+    logger.info(f"Rappels rendez-vous du matin : {sent} courriel(s) envoyé(s)")
 
 
 # ==================== Partenaires de remplacement globaux (superadmin) ====================
@@ -3601,6 +3731,7 @@ async def startup_tasks():
     await seed_users()
     scheduler.add_job(monthly_reports_job, CronTrigger(day=1, hour=8, minute=0))
     scheduler.add_job(license_reminders_job, CronTrigger(hour=8, minute=30))
+    scheduler.add_job(appointment_reminders_job, CronTrigger(hour=8, minute=0))
     scheduler.add_job(training_reminders_job, CronTrigger(hour=8, minute=45))
     scheduler.add_job(evaluation_reminders_job, CronTrigger(hour=9, minute=0))
     scheduler.add_job(shift_task_reminders_job, CronTrigger(hour=12, minute=0), args=["Matin"])

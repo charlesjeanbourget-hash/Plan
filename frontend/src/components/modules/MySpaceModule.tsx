@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { CalendarClock, Download, TreePalm, ArrowLeftRight, Plus } from 'lucide-react';
 import { downloadPayStub } from '@/lib/paystub';
 import { MyPunchCard } from '@/components/MyPunchCard';
+import { NurseDayPanel } from '@/components/NurseDayPanel';
 import { MyProposalsPanel } from '@/components/MyProposalsPanel';
 import { MyEvaluationsPanel } from '@/components/MyEvaluationsPanel';
 import { ProfileEditor } from '@/components/ProfileEditor';
@@ -79,6 +80,11 @@ export default function MySpaceModule(): JSX.Element {
         <div className="lg:col-span-2">
           <MyPunchCard />
         </div>
+        {me.position === 'Infirmier(ère)' && (
+          <div className="lg:col-span-2">
+            <NurseDayPanel />
+          </div>
+        )}
         <MyProposalsPanel />
         <div className="bg-white rounded-xl border border-slate-200 p-7" data-testid="myspace-shifts">
           <div className="flex items-center justify-between mb-5">
