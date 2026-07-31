@@ -1,28 +1,11 @@
 import { View } from '@/types';
 import { BrandLogo } from '@/components/BrandLogo';
-import {
-  Users, Briefcase, Building2, ArrowRight, CalendarClock, Wallet, TrendingUp, ShieldCheck,
-  Timer, ListChecks, RefreshCw, GraduationCap, TreePalm, ClipboardCheck, Sparkles, CheckCircle2,
-} from 'lucide-react';
+import { LandingShowcase } from '@/components/LandingShowcase';
+import { Users, Briefcase, Building2, ArrowRight, CheckCircle2 } from 'lucide-react';
 
 interface Props {
   onNavigate: (view: View) => void;
 }
-
-const FEATURES = [
-  { icon: CalendarClock, title: 'Horaires intelligents', text: 'L\'IA propose l\'horaire selon les disponibilités et les rôles — double approbation gestionnaire et employé.', cls: 'text-emerald-600', bg: 'bg-emerald-50' },
-  { icon: Timer, title: 'Punch & feuilles de temps', text: 'Borne à NIP avec confirmation d\'identité, temps supplémentaire calculé, alertes de punch oublié, export CSV pour la paie.', cls: 'text-bronze-600', bg: 'bg-bronze-100' },
-  { icon: Wallet, title: 'Paie & relevés PDF', text: 'Salaires, déductions et cumulatifs annuels générés automatiquement — relevés PDF à votre image.', cls: 'text-emerald-600', bg: 'bg-emerald-50' },
-  { icon: ListChecks, title: 'Tâches par quart', text: 'Distribuez les tâches de la semaine par quart de travail — l\'équipe coche, vous suivez la progression en direct.', cls: 'text-bronze-600', bg: 'bg-bronze-100' },
-  { icon: RefreshCw, title: 'Remplacements & agences', text: 'Un courriel automatique aux agences avec lien public : elles proposent, vous comparez les offres et choisissez.', cls: 'text-emerald-600', bg: 'bg-emerald-50' },
-  { icon: TrendingUp, title: 'Évaluations & salaires', text: 'Évaluations structurées, auto-évaluations et suggestion d\'augmentation calculée sur votre BAIIA.', cls: 'text-bronze-600', bg: 'bg-bronze-100' },
-  { icon: GraduationCap, title: 'Formations IA & certificats', text: 'Déposez un PDF ou un texte : l\'IA crée la formation par secteur, l\'examen et le certificat de réussite.', cls: 'text-emerald-600', bg: 'bg-emerald-50' },
-  { icon: ShieldCheck, title: 'Licences pro & Loi 25', text: 'Coffre-fort numérique des licences professionnelles avec rappels automatiques 30 jours avant l\'échéance.', cls: 'text-bronze-600', bg: 'bg-bronze-100' },
-  { icon: Briefcase, title: 'Recrutement & carrières', text: 'Portail carrières public, suivi des candidatures et intégration des nouvelles recrues en quelques clics.', cls: 'text-emerald-600', bg: 'bg-emerald-50' },
-  { icon: TreePalm, title: 'Vacances & congés', text: 'Demandes, approbations et calendrier d\'équipe centralisés — fini les conflits d\'horaire de dernière minute.', cls: 'text-bronze-600', bg: 'bg-bronze-100' },
-  { icon: ClipboardCheck, title: 'Onboarding & contrats', text: 'Listes d\'intégration automatiques, contrats et avantages sociaux réunis dans le dossier de chaque employé.', cls: 'text-emerald-600', bg: 'bg-emerald-50' },
-  { icon: Sparkles, title: 'Assistant IA & rappels', text: 'Un assistant qui répond à votre équipe, des notifications et des courriels automatiques pour ne rien échapper.', cls: 'text-bronze-600', bg: 'bg-bronze-100' },
-];
 
 const TIME_BULLETS = [
   'Les horaires, rappels, relances et examens de formation se préparent tout seuls',
@@ -116,28 +99,7 @@ export default function LandingPage({ onNavigate }: Props): JSX.Element {
         </div>
       </section>
 
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 py-16 sm:py-24" data-testid="features-section">
-        <span className="block w-12 h-1 rounded-full bg-gradient-to-r from-emerald-500 to-bronze-500 mb-4" />
-        <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-10">
-          <h2 className="font-heading text-2xl sm:text-3xl font-extrabold text-slate-900 max-w-xl">
-            Tout ce qu'Arrière Plan fait pour votre pharmacie
-          </h2>
-          <p className="text-sm text-slate-500 max-w-md">
-            Un seul outil qui remplace les tableurs, les groupes de textos, les feuilles de punch papier et les rappels manuels.
-          </p>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6" data-testid="features-grid">
-          {FEATURES.map((f) => (
-            <div key={f.title} className="rounded-xl bg-white border border-slate-200 p-6 hover:-translate-y-1 hover:border-bronze-300 hover:shadow-md transition-all">
-              <div className={`w-11 h-11 rounded-xl ${f.bg} flex items-center justify-center mb-4`}>
-                <f.icon className={`w-5 h-5 ${f.cls}`} />
-              </div>
-              <h3 className="font-heading font-bold text-slate-900 text-base mb-1.5">{f.title}</h3>
-              <p className="text-sm text-slate-500">{f.text}</p>
-            </div>
-          ))}
-        </div>
-      </section>
+      <LandingShowcase />
 
       <section className="bg-slate-50 border-y border-slate-200" data-testid="time-value-section">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-16 sm:py-20 grid grid-cols-1 lg:grid-cols-2 gap-10 items-center">

@@ -183,6 +183,12 @@ admin@luminahr.ca/admin123 · julie@luminahr.ca/employe123 · super@luminahr.ca/
 - Bug corrigé post-test : 'messages' manquait dans EMPLOYEE_MODULES (Sidebar.tsx) — les employés ne voyaient pas l'onglet.
 - LEÇON test navigateur : pour changer d'utilisateur en cours de session Playwright → setItem('luminahr_auth_v3') PUIS page.reload() (pas de double goto, sinon l'ancien state réécrit l'auth).
 
+## Itération 22 (31 juillet 2026) — Page d'accueil « vitrine 3D » style Agendrix — testée (screenshots desktop 1920 + mobile 390, tsc propre, 0 débordement)
+- **Refonte de la section fonctionnalités** : la grille de 12 cartes est REMPLACÉE par 10 sections vitrines style Agendrix (choix client) : sur-titre bronze, gros titre Fraunces avec fin de phrase en vert, maquette 3D du produit recréée en HTML/CSS (fenêtres flottantes, ombres profondes, halo radial bronze/jade, cartes secondaires en rotation avec animation de flottement `animate-float`), puis 4 points forts avec icônes en grille 2×2.
+- **10 sections** (`showcase-{id}`) : horaires (grille + popover « Créer un quart » + accusé « vu par 4/5 »), punch (feuille de temps + borne NIP sombre flottante), taches (checklist + badge série 4 semaines), communication (téléphone avec message épinglé, pièce jointe PDF, accusés de lecture), livraisons (tournée + preuve signature), remplacements (offres comparées + lien public), formations (sections IA + question d'examen), evaluations (étoiles + taux suggéré BAIIA), licences (badges d'échéance + audit Loi 25), recrutement (pipeline + onboarding auto). Vacances et assistant IA couverts dans les puces horaires/communication.
+- Nouveaux fichiers : `LandingMockups.tsx` (10 maquettes décoratives aria-hidden), `LandingShowcase.tsx` (données + rendu, testid `features-showcase`). `index.css` : keyframes `floatSoft` via propriété CSS `translate` (préserve les rotate Tailwind). Sections avec `overflow-hidden` (corrige un débordement horizontal mobile de 8 px causé par le halo).
+- Le reste de la landing (hero, ROI, « Votre temps vaut plus », portails, footer) inchangé.
+
 ## Notes techniques
 - Ne jamais recréer `jsconfig.json` (conflit CRA avec tsconfig.json)
 - npm interdit — yarn uniquement
