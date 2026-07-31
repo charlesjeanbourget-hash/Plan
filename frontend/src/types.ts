@@ -646,6 +646,8 @@ export interface Delivery {
   courier_employee_id: string;
   courier_name: string;
   status: 'a_ramasser' | 'en_route' | 'livree';
+  proof_image?: string | null;
+  proof_type?: 'photo' | 'signature' | null;
   created_by: string;
   created_at: string;
   picked_up_at: string | null;

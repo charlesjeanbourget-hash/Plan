@@ -2681,6 +2681,8 @@ class DeliveryIn(BaseModel):
 
 class DeliveryStatusIn(BaseModel):
     status: str
+    proof_image: str = ""
+    proof_type: str = ""
 
 
 def delivery_email_html(d: dict) -> str:
@@ -2728,6 +2730,7 @@ async def create_delivery(payload: DeliveryIn, principal: dict = Depends(get_pri
         "priority": payload.priority,
         "courier_employee_id": payload.courier_employee_id, "courier_name": payload.courier_name,
         "status": "a_ramasser", "picked_up_at": None, "delivered_at": None,
+        "proof_image": None, "proof_type": None,
         "created_by": principal["email"], "created_at": now, "updated_at": now,
     }
     await db.deliveries.insert_one({**doc})
@@ -2765,11 +2768,22 @@ async def update_delivery_status(delivery_id: str, payload: DeliveryStatusIn, us
     update = {"status": payload.status, "updated_at": now}
     if payload.status == "en_route" and not doc.get("picked_up_at"):
         update["picked_up_at"] = now
-    if payload.status == "livree" and not doc.get("delivered_at"):
-        update["delivered_at"] = now
+    if payload.status == "livree":
+        if not doc.get("delivered_at"):
+            update["delivered_at"] = now
+        if payload.proof_image:
+            if not payload.proof_image.startswith("data:image/"):
+                raise HTTPException(status_code=400, detail="Format de preuve invalide.")
+            if len(payload.proof_image) > 3_000_000:
+                raise HTTPException(status_code=400, detail="Image de preuve trop lourde (max ~2 Mo).")
+            if payload.proof_type not in ("photo", "signature"):
+                raise HTTPException(status_code=400, detail="Type de preuve invalide.")
+            update["proof_image"] = payload.proof_image
+            update["proof_type"] = payload.proof_type
     await db.deliveries.update_one({"id": delivery_id}, {"$set": update})
+    proof_note = f" avec preuve ({payload.proof_type})" if update.get("proof_image") else ""
     await log_audit(user["email"], user["role"], "STATUT_LIVRAISON", "livraison", delivery_id,
-                    f"Livraison {doc['client_name']} → {payload.status}", doc["pharmacy_id"])
+                    f"Livraison {doc['client_name']} → {payload.status}{proof_note}", doc["pharmacy_id"])
     return {**doc, **update}
 
 

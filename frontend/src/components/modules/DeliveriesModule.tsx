@@ -4,6 +4,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useHR } from '@/context/HRContext';
 import { Delivery } from '@/types';
 import { ModuleHeader } from '@/components/modules/shared';
+import { DeliveryProofDialog, DeliveryProof } from '@/components/DeliveryProofDialog';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -50,6 +51,9 @@ export default function DeliveriesModule(): JSX.Element {
   const [priority, setPriority] = useState('normal');
   const [courierId, setCourierId] = useState('');
   const [busy, setBusy] = useState(false);
+  const [proofFor, setProofFor] = useState<Delivery | null>(null);
+  const [proofBusy, setProofBusy] = useState(false);
+  const [viewProof, setViewProof] = useState<Delivery | null>(null);
 
   const refresh = useCallback(async (): Promise<void> => {
     try {
@@ -101,10 +105,27 @@ export default function DeliveriesModule(): JSX.Element {
   const setStatus = async (d: Delivery, status: Delivery['status']): Promise<void> => {
     try {
       await axios.put(`${API}/deliveries/${d.id}/status`, { status }, { headers });
-      toast.success(status === 'en_route' ? 'Colis ramassé — bonne route !' : status === 'livree' ? 'Livraison complétée, bravo !' : 'Statut mis à jour.');
+      toast.success(status === 'en_route' ? 'Colis ramassé — bonne route !' : 'Statut mis à jour.');
       await refresh();
     } catch (err) {
       toast.error(apiError(err));
+    }
+  };
+
+  const confirmDelivered = async (proof: DeliveryProof | null): Promise<void> => {
+    if (!proofFor) return;
+    setProofBusy(true);
+    try {
+      await axios.put(`${API}/deliveries/${proofFor.id}/status`, {
+        status: 'livree', proof_image: proof?.image ?? '', proof_type: proof?.type ?? '',
+      }, { headers });
+      toast.success(proof ? 'Livraison confirmée avec preuve — merci !' : 'Livraison complétée, bravo !');
+      setProofFor(null);
+      await refresh();
+    } catch (err) {
+      toast.error(apiError(err));
+    } finally {
+      setProofBusy(false);
     }
   };
 
@@ -169,6 +190,12 @@ export default function DeliveriesModule(): JSX.Element {
           {d.picked_up_at && <> · ramassé {fmtTime(d.picked_up_at)}</>}
           {d.delivered_at && <> · livré {fmtTime(d.delivered_at)}</>}
         </p>
+        {d.proof_image && (
+          <button data-testid={`delivery-proof-thumb-${d.id}`} onClick={() => setViewProof(d)} className="mt-2 block text-left">
+            <img src={d.proof_image} alt="Preuve de livraison" className="h-14 rounded-lg border border-slate-200 object-cover" />
+            <span className="text-[10px] text-slate-400">{d.proof_type === 'signature' ? 'Signature du client — cliquer pour agrandir' : 'Photo de livraison — cliquer pour agrandir'}</span>
+          </button>
+        )}
         {(mine || isManager) && d.status !== 'livree' && (
           <div className="flex flex-wrap gap-2 mt-3">
             {d.status === 'a_ramasser' && (
@@ -177,7 +204,7 @@ export default function DeliveriesModule(): JSX.Element {
               </Button>
             )}
             {d.status === 'en_route' && (
-              <Button data-testid={`delivery-done-${d.id}`} size="sm" onClick={() => void setStatus(d, 'livree')} className="rounded-full bg-emerald-600 hover:bg-emerald-700 text-xs">
+              <Button data-testid={`delivery-done-${d.id}`} size="sm" onClick={() => setProofFor(d)} className="rounded-full bg-emerald-600 hover:bg-emerald-700 text-xs">
                 <CircleCheck className="w-3.5 h-3.5 mr-1" /> Marquer livrée
               </Button>
             )}
@@ -220,6 +247,28 @@ export default function DeliveriesModule(): JSX.Element {
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 opacity-80">{done.map(card)}</div>
         </>
       )}
+
+      <DeliveryProofDialog
+        delivery={proofFor}
+        busy={proofBusy}
+        onClose={() => setProofFor(null)}
+        onConfirm={(p) => void confirmDelivered(p)}
+      />
+
+      <Dialog open={viewProof !== null} onOpenChange={(o) => !o && setViewProof(null)}>
+        <DialogContent data-testid="proof-view-dialog">
+          <DialogHeader>
+            <DialogTitle className="font-heading">Preuve de livraison — {viewProof?.client_name}</DialogTitle>
+          </DialogHeader>
+          {viewProof?.proof_image && (
+            <img src={viewProof.proof_image} alt="Preuve de livraison" className="w-full rounded-lg border border-slate-200" />
+          )}
+          <p className="text-xs text-slate-500">
+            {viewProof?.proof_type === 'signature' ? 'Signature du client' : 'Photo prise à la livraison'}
+            {viewProof?.delivered_at ? ` · ${fmtTime(viewProof.delivered_at)}` : ''}
+          </p>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent data-testid="create-delivery-dialog" className="max-h-[85vh] overflow-y-auto">
