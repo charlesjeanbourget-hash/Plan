@@ -47,7 +47,7 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'superadmin', label: 'Superadmin', icon: ShieldCheck },
 ];
 
-const EMPLOYEE_MODULES: ModuleKey[] = ['dashboard', 'myspace', 'scheduling', 'tasks', 'deliveries', 'vacations', 'training', 'benefits', 'faq'];
+const EMPLOYEE_MODULES: ModuleKey[] = ['dashboard', 'myspace', 'messages', 'scheduling', 'tasks', 'deliveries', 'vacations', 'training', 'benefits', 'faq'];
 
 export default function Sidebar({ active, onSelect, onLogout }: Props): JSX.Element {
   const { currentUser, changePassword } = useAuth();

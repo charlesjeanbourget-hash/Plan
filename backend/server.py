@@ -1947,6 +1947,8 @@ async def punch_cost(start: str = Query(...), end: str = Query(...), principal: 
         date.fromisoformat(end)
     except ValueError:
         raise HTTPException(status_code=400, detail="Dates invalides.")
+    if start > end:
+        raise HTTPException(status_code=400, detail="La date de début doit précéder la date de fin.")
     pid = principal["pharmacy_id"] or "ph1"
     settings = await db.schedule_settings.find_one({"pharmacy_id": pid}, {"_id": 0}) or {}
     weekly_budget = settings.get("weekly_budget", 0)
