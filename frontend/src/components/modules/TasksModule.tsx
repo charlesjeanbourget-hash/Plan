@@ -6,6 +6,7 @@ import { ShiftTask } from '@/types';
 import { ModuleHeader } from '@/components/modules/shared';
 import { TaskStatsPanel } from '@/components/TaskStatsPanel';
 import { TaskTemplatesDialog } from '@/components/TaskTemplatesDialog';
+import { TeamGoalBar } from '@/components/TeamGoalBar';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Progress } from '@/components/ui/progress';
@@ -246,6 +247,7 @@ export default function TasksModule(): JSX.Element {
         <TaskStatsPanel isAdmin={isAdmin} />
       ) : (
         <>
+      <TeamGoalBar key={`${days[0]}-${tasks.filter((t) => t.done).length}`} weekStart={days[0]} isManager={isAdmin} />
       <div className="flex flex-wrap items-center gap-3 mb-6">
         <Button data-testid="tasks-week-prev" variant="outline" size="icon" className="rounded-full" onClick={() => setWeekOffset(weekOffset - 1)}>
           <ChevronLeft className="w-4 h-4" />

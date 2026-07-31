@@ -3,6 +3,7 @@ import axios from 'axios';
 import { useHR } from '@/context/HRContext';
 import { useAuth } from '@/context/AuthContext';
 import { ModuleHeader, StatCard, StatusBadge } from '@/components/modules/shared';
+import { HonorRoll } from '@/components/HonorRoll';
 import { Users, CalendarClock, Briefcase, TreePalm, BadgeAlert } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -12,7 +13,7 @@ export default function DashboardModule(): JSX.Element {
   const { currentUser, token } = useAuth();
   const [expiringCount, setExpiringCount] = useState(0);
 
-  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'superadmin';
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'manager' || currentUser?.role === 'superadmin';
 
   useEffect(() => {
     if (!isAdmin || !token) return;
@@ -59,7 +60,8 @@ export default function DashboardModule(): JSX.Element {
         <StatCard label="Offres actives" value={String(activeOffers)} icon={Briefcase} hint={`${state.candidates.length} candidatures reçues`} />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <HonorRoll />
         <div className="bg-white rounded-xl border border-slate-200 p-6">
           <h2 className="font-heading text-base font-bold text-slate-900 mb-5">Prochains quarts de travail</h2>
           <div className="space-y-3">

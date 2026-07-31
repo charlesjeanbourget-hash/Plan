@@ -2,9 +2,9 @@ import { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import { useAuth } from '@/context/AuthContext';
 import { useHR } from '@/context/HRContext';
-import { ModuleKey, LicenseReportItem, Training, ScheduleProposal, Evaluation } from '@/types';
+import { ModuleKey, LicenseReportItem, Training, ScheduleProposal, Evaluation, Delivery } from '@/types';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Bell, TreePalm, RefreshCw, BadgeCheck, GraduationCap, CheckCheck, CalendarCheck, ClipboardCheck, HandCoins } from 'lucide-react';
+import { Bell, TreePalm, RefreshCw, BadgeCheck, GraduationCap, CheckCheck, CalendarCheck, ClipboardCheck, HandCoins, Truck } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -14,10 +14,10 @@ interface Notif {
   detail: string;
   module: ModuleKey;
   tone: 'amber' | 'red' | 'sky' | 'emerald';
-  icon: 'leave' | 'swap' | 'license' | 'training' | 'schedule' | 'eval' | 'salary';
+  icon: 'leave' | 'swap' | 'license' | 'training' | 'schedule' | 'eval' | 'salary' | 'delivery';
 }
 
-const ICONS = { leave: TreePalm, swap: RefreshCw, license: BadgeCheck, training: GraduationCap, schedule: CalendarCheck, eval: ClipboardCheck, salary: HandCoins } as const;
+const ICONS = { leave: TreePalm, swap: RefreshCw, license: BadgeCheck, training: GraduationCap, schedule: CalendarCheck, eval: ClipboardCheck, salary: HandCoins, delivery: Truck } as const;
 
 const TONES: Record<Notif['tone'], string> = {
   amber: 'bg-bronze-100 text-bronze-700',
@@ -33,6 +33,7 @@ export const NotificationBell = ({ onNavigate }: { onNavigate: (m: ModuleKey) =>
   const [trainings, setTrainings] = useState<Training[]>([]);
   const [proposals, setProposals] = useState<ScheduleProposal[]>([]);
   const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
+  const [deliveries, setDeliveries] = useState<Delivery[]>([]);
   const [open, setOpen] = useState(false);
   const readKey = `luminahr_notif_read_v1_${currentUser?.id ?? ''}`;
   const [readIds, setReadIds] = useState<string[]>(() => {
@@ -52,6 +53,9 @@ export const NotificationBell = ({ onNavigate }: { onNavigate: (m: ModuleKey) =>
         .catch(() => undefined);
       axios.get<Evaluation[]>(`${API}/evaluations`, { headers })
         .then((r) => setEvaluations(r.data))
+        .catch(() => undefined);
+      axios.get<Delivery[]>(`${API}/deliveries`, { headers })
+        .then((r) => setDeliveries(r.data))
         .catch(() => undefined);
     } else {
       axios.get<{ items: LicenseReportItem[] }>(`${API}/licenses/report`, { headers })
@@ -129,6 +133,18 @@ export const NotificationBell = ({ onNavigate }: { onNavigate: (m: ModuleKey) =>
           tone: 'emerald',
           icon: 'salary',
         }));
+      deliveries
+        .filter((d) => d.status !== 'livree')
+        .forEach((d) => list.push({
+          id: `delivery-${d.id}-${d.status}`,
+          title: d.status === 'a_ramasser'
+            ? (d.priority === 'urgent' ? 'Livraison URGENTE à ramasser' : 'Livraison à ramasser')
+            : 'Livraison en cours',
+          detail: `${d.client_name} — ${d.address}`,
+          module: 'deliveries',
+          tone: d.priority === 'urgent' ? 'red' : 'sky',
+          icon: 'delivery',
+        }));
     } else {
       state.leaveRequests
         .filter((l) => l.status === 'En attente')
@@ -166,7 +182,7 @@ export const NotificationBell = ({ onNavigate }: { onNavigate: (m: ModuleKey) =>
       }));
     }
     return list;
-  }, [currentUser, state, trainings, licenseItems, proposals, evaluations, getEmployee]);
+  }, [currentUser, state, trainings, licenseItems, proposals, evaluations, deliveries, getEmployee]);
 
   const unreadCount = notifs.filter((n) => !readIds.includes(n.id)).length;
 

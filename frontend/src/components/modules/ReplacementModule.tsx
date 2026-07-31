@@ -243,17 +243,24 @@ export default function ReplacementModule(): JSX.Element {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {agencies.map((a) => (
-                <div key={a.id} data-testid={`agency-card-${a.id}`} className="bg-white rounded-xl border border-slate-200 p-5">
+                <div key={a.id} data-testid={`agency-card-${a.id}`} className={`bg-white rounded-xl border p-5 ${a.global ? 'border-bronze-200' : 'border-slate-200'}`}>
                   <div className="flex items-start justify-between mb-2">
                     <div>
                       <p className="font-heading font-bold text-slate-900 inline-flex items-center gap-2">
-                        <Building2 className="w-4 h-4 text-emerald-600" /> {a.name}
+                        <Building2 className={`w-4 h-4 ${a.global ? 'text-bronze-600' : 'text-emerald-600'}`} /> {a.name}
                       </p>
                       <p className="text-xs text-slate-500 mt-0.5">{a.email}</p>
+                      {a.global && (
+                        <span data-testid={`agency-global-badge-${a.id}`} className="inline-flex mt-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-bronze-100 text-bronze-800">
+                          {a.partner_type === 'individual' ? 'Remplaçant(e) du réseau global' : 'Partenaire global (réseau superadmin)'}
+                        </span>
+                      )}
                     </div>
-                    <Button data-testid={`delete-agency-${a.id}`} size="sm" variant="outline" onClick={() => void deleteAgency(a)} className="rounded-full text-xs text-red-600 border-red-200 hover:bg-red-50">
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </Button>
+                    {!a.global && (
+                      <Button data-testid={`delete-agency-${a.id}`} size="sm" variant="outline" onClick={() => void deleteAgency(a)} className="rounded-full text-xs text-red-600 border-red-200 hover:bg-red-50">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    )}
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     {a.roles.map((rr) => (

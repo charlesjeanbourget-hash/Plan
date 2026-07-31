@@ -27,11 +27,13 @@ import LicensesModule from '@/components/modules/LicensesModule';
 import MySpaceModule from '@/components/modules/MySpaceModule';
 import TrainingModule from '@/components/modules/TrainingModule';
 import TasksModule from '@/components/modules/TasksModule';
+import DeliveriesModule from '@/components/modules/DeliveriesModule';
 import { NotificationBell } from '@/components/NotificationBell';
 
 const MODULES: Record<ModuleKey, () => JSX.Element> = {
   dashboard: DashboardModule,
   tasks: TasksModule,
+  deliveries: DeliveriesModule,
   myspace: MySpaceModule,
   employees: EmployeeDossier,
   licenses: LicensesModule,

@@ -1,4 +1,4 @@
-export type Role = 'superadmin' | 'admin' | 'employee';
+export type Role = 'superadmin' | 'admin' | 'manager' | 'employee';
 
 export type View = 'landing' | 'login' | 'careers' | 'agency' | 'dashboard' | 'punch';
 
@@ -19,6 +19,7 @@ export type ModuleKey =
   | 'benefits'
   | 'faq'
   | 'training'
+  | 'deliveries'
   | 'superadmin';
 
 export interface User {
@@ -36,6 +37,8 @@ export type Position =
   | 'ATP'
   | 'Technicien(ne) de laboratoire'
   | 'Commis'
+  | 'Caissier(ère)'
+  | "Commis d'entrepôt"
   | 'Livreur(se)';
 
 export const POSITIONS: Position[] = [
@@ -43,6 +46,8 @@ export const POSITIONS: Position[] = [
   'ATP',
   'Technicien(ne) de laboratoire',
   'Commis',
+  'Caissier(ère)',
+  "Commis d'entrepôt",
   'Livreur(se)',
 ];
 
@@ -615,6 +620,36 @@ export interface Agency {
   email: string;
   roles: string[];
   created_at: string;
+  global?: boolean;
+  partner_type?: 'agency' | 'individual';
+}
+
+export interface GlobalPartner {
+  id: string;
+  name: string;
+  email: string;
+  roles: string[];
+  partner_type: 'agency' | 'individual';
+  created_at: string;
+}
+
+export interface Delivery {
+  id: string;
+  pharmacy_id: string;
+  client_name: string;
+  address: string;
+  phone: string;
+  order_ref: string;
+  products: string;
+  notes: string;
+  priority: 'normal' | 'urgent';
+  courier_employee_id: string;
+  courier_name: string;
+  status: 'a_ramasser' | 'en_route' | 'livree';
+  created_by: string;
+  created_at: string;
+  picked_up_at: string | null;
+  delivered_at: string | null;
 }
 
 export interface ReplacementSlotT {

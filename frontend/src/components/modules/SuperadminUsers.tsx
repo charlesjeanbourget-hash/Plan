@@ -17,12 +17,14 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const ROLE_LABELS: Record<Role, string> = {
   superadmin: 'Superadmin',
   admin: 'Admin (propriétaire)',
+  manager: 'Gestionnaire',
   employee: 'Employé(e)',
 };
 
 const ROLE_STYLES: Record<Role, string> = {
   superadmin: 'bg-violet-100 text-violet-800',
   admin: 'bg-emerald-100 text-emerald-800',
+  manager: 'bg-bronze-100 text-bronze-800',
   employee: 'bg-slate-100 text-slate-700',
 };
 
@@ -227,6 +229,7 @@ export const SuperadminUsers = (): JSX.Element => {
                   <SelectTrigger data-testid="user-role-select"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="admin">Admin (propriétaire)</SelectItem>
+                    <SelectItem value="manager">Gestionnaire</SelectItem>
                     <SelectItem value="employee">Employé(e)</SelectItem>
                     <SelectItem value="superadmin">Superadmin</SelectItem>
                   </SelectContent>

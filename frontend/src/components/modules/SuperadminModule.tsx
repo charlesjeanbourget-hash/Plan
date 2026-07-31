@@ -5,6 +5,7 @@ import { PharmacyPlan } from '@/types';
 import { ModuleHeader, StatCard } from '@/components/modules/shared';
 import { SuperadminUsers } from '@/components/modules/SuperadminUsers';
 import { SuperadminOverview } from '@/components/modules/SuperadminOverview';
+import { SuperadminPartners } from '@/components/SuperadminPartners';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -101,6 +102,8 @@ export default function SuperadminModule(): JSX.Element {
       <SuperadminOverview />
 
       <SuperadminUsers />
+
+      <SuperadminPartners />
 
       <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
         <table className="w-full text-sm min-w-[800px]">

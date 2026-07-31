@@ -242,6 +242,8 @@ AUTH_SEED_USERS = [
      "pharmacy_id": "ph1", "employee_id": "e1", "temp": False},
     {"email": "julie@luminahr.ca", "password": "employe123", "name": "Julie Gagnon", "role": "employee",
      "pharmacy_id": "ph1", "employee_id": "e2", "temp": False},
+    {"email": "gestion@luminahr.ca", "password": "gestion123", "name": "Marc-André Roy", "role": "manager",
+     "pharmacy_id": "ph1", "employee_id": None, "temp": False},
     {"email": "jeffmenard78@hotmail.com", "password": "Lumina-Jeff!2941", "name": "Jeff Ménard",
      "role": "superadmin", "temp": True},
     {"email": "charles-jbourget@hotmail.com", "password": "Lumina-Charles!7358", "name": "Charles-J. Bourget",
@@ -306,7 +308,7 @@ async def admin_list_users(su: dict = Depends(require_superadmin)):
 @api_router.post("/admin/users")
 async def admin_create_user(payload: UserCreateIn, su: dict = Depends(require_superadmin)):
     email = payload.email.strip().lower()
-    if payload.role not in ("admin", "employee", "superadmin"):
+    if payload.role not in ("admin", "manager", "employee", "superadmin"):
         raise HTTPException(status_code=400, detail="Rôle invalide.")
     if await db.users.find_one({"email": email}):
         raise HTTPException(status_code=400, detail="Un compte existe déjà avec ce courriel.")
@@ -337,7 +339,7 @@ async def admin_update_user(user_id: str, payload: UserUpdateIn, su: dict = Depe
     if user_id == su["id"] and payload.suspended:
         raise HTTPException(status_code=400, detail="Impossible de suspendre votre propre compte.")
     patch = payload.model_dump(exclude_none=True)
-    if patch.get("role") and patch["role"] not in ("admin", "employee", "superadmin"):
+    if patch.get("role") and patch["role"] not in ("admin", "manager", "employee", "superadmin"):
         raise HTTPException(status_code=400, detail="Rôle invalide.")
     if patch:
         await db.users.update_one({"id": user_id}, {"$set": patch})
@@ -423,7 +425,7 @@ MAX_CERT_SIZE = 10 * 1024 * 1024
 
 
 async def get_principal(user: dict = Depends(get_current_user)):
-    if user["role"] not in ("admin", "superadmin"):
+    if user["role"] not in ("admin", "manager", "superadmin"):
         raise HTTPException(status_code=403, detail="Accès refusé : réservé aux administrateurs (Loi 25).")
     return {"email": user["email"], "role": user["role"], "pharmacy_id": user.get("pharmacy_id") or ""}
 
@@ -990,7 +992,7 @@ async def list_trainings(pharmacy_id: Optional[str] = Query(None), user: dict = 
     else:
         query = {"pharmacy_id": user.get("pharmacy_id") or "", "status": "published"}
     docs = await db.trainings.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
-    include_answers = user["role"] in ("admin", "superadmin")
+    include_answers = user["role"] in ("admin", "manager", "superadmin")
     out = []
     for d in docs:
         item = training_public(d, include_answers)
@@ -1020,7 +1022,7 @@ async def get_training_or_404(training_id: str, user: dict) -> dict:
 @api_router.get("/trainings/{training_id}")
 async def get_training(training_id: str, user: dict = Depends(get_current_user)):
     doc = await get_training_or_404(training_id, user)
-    return training_public(doc, user["role"] in ("admin", "superadmin"))
+    return training_public(doc, user["role"] in ("admin", "manager", "superadmin"))
 
 
 class TrainingSectionIn(BaseModel):
@@ -1150,7 +1152,7 @@ async def submit_attempt(training_id: str, payload: AttemptIn, user: dict = Depe
 @api_router.get("/trainings/{training_id}/attempts")
 async def list_attempts(training_id: str, user: dict = Depends(get_current_user)):
     doc = await get_training_or_404(training_id, user)
-    if user["role"] in ("admin", "superadmin"):
+    if user["role"] in ("admin", "manager", "superadmin"):
         query: dict = {"training_id": training_id}
     else:
         query = {"training_id": training_id, "user_id": user["id"]}
@@ -1339,7 +1341,7 @@ async def get_or_create_profile(pharmacy_id: str, employee_id: str, employee_nam
 
 
 def check_profile_access(user: dict, employee_id: str) -> str:
-    if user["role"] in ("admin", "superadmin"):
+    if user["role"] in ("admin", "manager", "superadmin"):
         pid = user.get("pharmacy_id") or ""
         if not pid and user["role"] == "admin":
             raise HTTPException(status_code=403, detail="Aucune pharmacie associée.")
@@ -1351,7 +1353,7 @@ def check_profile_access(user: dict, employee_id: str) -> str:
 
 @api_router.get("/profiles")
 async def list_profiles(user: dict = Depends(get_current_user)):
-    if user["role"] in ("admin", "superadmin"):
+    if user["role"] in ("admin", "manager", "superadmin"):
         pid = user.get("pharmacy_id") or ""
         query = {"pharmacy_id": pid} if pid else {}
         return await db.employee_profiles.find(query, {"_id": 0}).to_list(1000)
@@ -1925,7 +1927,7 @@ async def schedule_generate(payload: ScheduleGenIn, principal: dict = Depends(ge
 @api_router.get("/schedule/proposals")
 async def list_proposals(user: dict = Depends(get_current_user)):
     pid = user.get("pharmacy_id") or ""
-    if user["role"] in ("admin", "superadmin"):
+    if user["role"] in ("admin", "manager", "superadmin"):
         query: dict = {"pharmacy_id": pid} if pid else {}
         docs = await db.schedule_proposals.find(query, {"_id": 0}).sort("created_at", -1).to_list(100)
         return [proposal_view(d) for d in docs]
@@ -2106,7 +2108,7 @@ async def create_evaluation(payload: EvaluationCreateIn, principal: dict = Depen
 @api_router.get("/evaluations")
 async def list_evaluations(user: dict = Depends(get_current_user)):
     pid = user.get("pharmacy_id") or ""
-    if user["role"] in ("admin", "superadmin"):
+    if user["role"] in ("admin", "manager", "superadmin"):
         query: dict = {"pharmacy_id": pid} if pid else {}
     else:
         if not user.get("employee_id"):
@@ -2312,7 +2314,7 @@ async def list_tasks(start: str = Query(...), end: str = Query(...), user: dict 
     if pid:
         await materialize_recurring_tasks(pid, start, end)
     query: dict = {"pharmacy_id": pid, "date": {"$gte": start, "$lte": end}}
-    if user["role"] not in ("admin", "superadmin"):
+    if user["role"] not in ("admin", "manager", "superadmin"):
         eid = user.get("employee_id") or ""
         query["$or"] = [{"assignee_employee_id": eid}, {"assignee_employee_id": ""}]
     return await db.shift_tasks.find(query, {"_id": 0}).sort([("date", 1), ("created_at", 1)]).to_list(500)
@@ -2384,7 +2386,7 @@ async def toggle_task(task_id: str, user: dict = Depends(get_current_user)):
     doc = await db.shift_tasks.find_one({"id": task_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Tâche introuvable.")
-    if user["role"] not in ("admin", "superadmin"):
+    if user["role"] not in ("admin", "manager", "superadmin"):
         eid = user.get("employee_id") or ""
         if doc["assignee_employee_id"] not in ("", eid):
             raise HTTPException(status_code=403, detail="Cette tâche est assignée à un autre employé.")
@@ -2501,7 +2503,7 @@ async def send_shift_task_reminders(shift: str, date_str: str = "") -> int:
         by_pharmacy.setdefault(t["pharmacy_id"], []).append(t)
     sent = 0
     for pid, tasks in by_pharmacy.items():
-        admins = await db.users.find({"role": "admin", "pharmacy_id": pid}, {"_id": 0}).to_list(50)
+        admins = await db.users.find({"role": {"$in": ["admin", "manager"]}, "pharmacy_id": pid}, {"_id": 0}).to_list(50)
         html = unfinished_tasks_html(shift, today, tasks)
         for a in admins:
             if not a.get("email"):
@@ -2624,7 +2626,7 @@ async def send_weekly_task_reports(week_start: str = "", only_pharmacy: str = ""
         watch = [f"Quart {s['shift']} : seulement {s['rate']} % de complétion" for s in shifts_sorted if s["rate"] < 60]
         watch += [f"{e['name']} : {e['rate']} % de ses tâches complétées" for e in emp_sorted if e["rate"] < 60]
         html = weekly_report_html(ws.isoformat(), we.isoformat(), shifts_sorted, emp_sorted, team, watch)
-        admins = await db.users.find({"role": "admin", "pharmacy_id": pid}, {"_id": 0}).to_list(50)
+        admins = await db.users.find({"role": {"$in": ["admin", "manager"]}, "pharmacy_id": pid}, {"_id": 0}).to_list(50)
         sent = 0
         for a in admins:
             if not a.get("email"):
@@ -2658,6 +2660,170 @@ async def run_weekly_task_report(week_start: str = Query(""), principal: dict = 
 async def weekly_task_report_job():
     sent = await send_weekly_task_reports()
     logger.info(f"Rapport hebdo tâches : {sent} courriel(s) envoyé(s)")
+
+
+# ==================== Livraisons ====================
+
+DELIVERY_STATUSES = ("a_ramasser", "en_route", "livree")
+
+
+class DeliveryIn(BaseModel):
+    client_name: str
+    address: str
+    phone: str = ""
+    order_ref: str = ""
+    products: str = ""
+    notes: str = ""
+    priority: str = "normal"
+    courier_employee_id: str
+    courier_name: str = ""
+
+
+class DeliveryStatusIn(BaseModel):
+    status: str
+
+
+def delivery_email_html(d: dict) -> str:
+    maps = "https://www.google.com/maps/search/?api=1&query=" + requests.utils.quote(d["address"])
+    urgent = "<p style='color:#dc2626;font-weight:bold'>PRIORITÉ URGENTE</p>" if d["priority"] == "urgent" else ""
+    rows = ""
+    for label, val in (("Client", d["client_name"]), ("Adresse", d["address"]), ("Téléphone", d["phone"]),
+                       ("Commande", d["order_ref"]), ("Produits", d["products"]), ("Notes", d["notes"])):
+        if val:
+            rows += (f"<tr><td style='padding:4px 12px;color:#64748b'>{label}</td>"
+                     f"<td style='padding:4px 12px;font-weight:bold'>{val}</td></tr>")
+    return (
+        "<div style='font-family:Arial,sans-serif;max-width:640px;margin:0 auto;color:#0f172a'>"
+        "<h2 style='color:#059669'>Arrière Plan — Nouvelle livraison assignée</h2>"
+        f"{urgent}<table style='border-collapse:collapse'>{rows}</table>"
+        f"<p><a href='{maps}' style='color:#059669;font-weight:bold'>Ouvrir l'itinéraire dans Google Maps</a></p>"
+        "<p>Ramassez le colis à la pharmacie puis mettez à jour le statut dans votre compte Arrière Plan "
+        "(module Livraisons).</p></div>")
+
+
+@api_router.get("/deliveries")
+async def list_deliveries(user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    query: dict = {"pharmacy_id": pid}
+    if user["role"] not in ("admin", "manager", "superadmin"):
+        query["courier_employee_id"] = user.get("employee_id") or ""
+    return await db.deliveries.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
+
+
+@api_router.post("/deliveries")
+async def create_delivery(payload: DeliveryIn, principal: dict = Depends(get_principal)):
+    if not payload.client_name.strip() or not payload.address.strip():
+        raise HTTPException(status_code=400, detail="Client et adresse requis.")
+    if payload.priority not in ("normal", "urgent"):
+        raise HTTPException(status_code=400, detail="Priorité invalide.")
+    if not payload.courier_employee_id:
+        raise HTTPException(status_code=400, detail="Choisissez un livreur.")
+    pid = principal["pharmacy_id"] or "ph1"
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "id": str(uuid.uuid4()), "pharmacy_id": pid,
+        "client_name": payload.client_name.strip(), "address": payload.address.strip(),
+        "phone": payload.phone.strip(), "order_ref": payload.order_ref.strip(),
+        "products": payload.products.strip(), "notes": payload.notes.strip(),
+        "priority": payload.priority,
+        "courier_employee_id": payload.courier_employee_id, "courier_name": payload.courier_name,
+        "status": "a_ramasser", "picked_up_at": None, "delivered_at": None,
+        "created_by": principal["email"], "created_at": now, "updated_at": now,
+    }
+    await db.deliveries.insert_one({**doc})
+    email_sent = False
+    api_key = os.environ.get("RESEND_API_KEY", "")
+    courier_user = await db.users.find_one(
+        {"employee_id": payload.courier_employee_id, "pharmacy_id": pid}, {"_id": 0, "email": 1})
+    if api_key and courier_user and courier_user.get("email"):
+        resend.api_key = api_key
+        sender = await get_sender()
+        try:
+            await asyncio.to_thread(resend.Emails.send, {
+                "from": sender, "to": [courier_user["email"]],
+                "subject": ("URGENT — " if payload.priority == "urgent" else "") + f"Livraison à faire : {doc['client_name']}",
+                "html": delivery_email_html(doc)})
+            email_sent = True
+        except Exception as exc:
+            logger.error(f"Courriel livraison vers {courier_user['email']} échoué : {exc}")
+    await log_audit(principal["email"], principal["role"], "CREATION_LIVRAISON", "livraison", doc["id"],
+                    f"Livraison pour {doc['client_name']} assignée à {doc['courier_name']}"
+                    f"{' (courriel envoyé)' if email_sent else ''}", pid)
+    return {**doc, "email_sent": email_sent}
+
+
+@api_router.put("/deliveries/{delivery_id}/status")
+async def update_delivery_status(delivery_id: str, payload: DeliveryStatusIn, user: dict = Depends(get_current_user)):
+    if payload.status not in DELIVERY_STATUSES:
+        raise HTTPException(status_code=400, detail="Statut invalide.")
+    doc = await db.deliveries.find_one({"id": delivery_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Livraison introuvable.")
+    if user["role"] not in ("admin", "manager", "superadmin") and doc["courier_employee_id"] != (user.get("employee_id") or ""):
+        raise HTTPException(status_code=403, detail="Cette livraison est assignée à un autre livreur.")
+    now = datetime.now(timezone.utc).isoformat()
+    update = {"status": payload.status, "updated_at": now}
+    if payload.status == "en_route" and not doc.get("picked_up_at"):
+        update["picked_up_at"] = now
+    if payload.status == "livree" and not doc.get("delivered_at"):
+        update["delivered_at"] = now
+    await db.deliveries.update_one({"id": delivery_id}, {"$set": update})
+    await log_audit(user["email"], user["role"], "STATUT_LIVRAISON", "livraison", delivery_id,
+                    f"Livraison {doc['client_name']} → {payload.status}", doc["pharmacy_id"])
+    return {**doc, **update}
+
+
+@api_router.delete("/deliveries/{delivery_id}")
+async def delete_delivery(delivery_id: str, principal: dict = Depends(get_principal)):
+    doc = await db.deliveries.find_one({"id": delivery_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Livraison introuvable.")
+    await db.deliveries.delete_one({"id": delivery_id})
+    await log_audit(principal["email"], principal["role"], "SUPPRESSION_LIVRAISON", "livraison", delivery_id,
+                    f"Livraison {doc['client_name']} supprimée", doc["pharmacy_id"])
+    return {"status": "supprimée"}
+
+
+# ==================== Partenaires de remplacement globaux (superadmin) ====================
+
+class GlobalPartnerIn(BaseModel):
+    name: str
+    email: str
+    roles: list[str]
+    partner_type: str = "agency"
+
+
+@api_router.get("/superadmin/partners")
+async def list_global_partners(su: dict = Depends(require_superadmin)):
+    return await db.global_partners.find({}, {"_id": 0}).sort("name", 1).to_list(500)
+
+
+@api_router.post("/superadmin/partners")
+async def create_global_partner(payload: GlobalPartnerIn, su: dict = Depends(require_superadmin)):
+    if payload.partner_type not in ("agency", "individual"):
+        raise HTTPException(status_code=400, detail="Type de partenaire invalide.")
+    if not payload.name.strip() or not payload.email.strip():
+        raise HTTPException(status_code=400, detail="Nom et courriel requis.")
+    if not payload.roles:
+        raise HTTPException(status_code=400, detail="Sélectionnez au moins un poste couvert.")
+    doc = {"id": str(uuid.uuid4()), "name": payload.name.strip(), "email": payload.email.strip().lower(),
+           "roles": payload.roles, "partner_type": payload.partner_type,
+           "created_by": su["email"], "created_at": datetime.now(timezone.utc).isoformat()}
+    await db.global_partners.insert_one({**doc})
+    await log_audit(su["email"], su["role"], "AJOUT_PARTENAIRE_GLOBAL", "remplacement", doc["id"],
+                    f"Partenaire global « {doc['name']} » ({', '.join(doc['roles'])}) ajouté au réseau", "")
+    return doc
+
+
+@api_router.delete("/superadmin/partners/{partner_id}")
+async def delete_global_partner(partner_id: str, su: dict = Depends(require_superadmin)):
+    doc = await db.global_partners.find_one({"id": partner_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Partenaire introuvable.")
+    await db.global_partners.delete_one({"id": partner_id})
+    await log_audit(su["email"], su["role"], "RETRAIT_PARTENAIRE_GLOBAL", "remplacement", partner_id,
+                    f"Partenaire global « {doc['name']} » retiré du réseau", "")
+    return {"status": "supprimé"}
 
 
 # ---------------------- Modèles de tâches + statistiques ----------------------
@@ -2747,7 +2913,7 @@ def compute_task_badges(week_map: dict, team_checks: int, current_week: str) -> 
 @api_router.get("/tasks/stats")
 async def task_stats(weeks: int = Query(8, ge=1, le=26), user: dict = Depends(get_current_user)):
     pid = user.get("pharmacy_id") or "ph1"
-    is_employee = user["role"] not in ("admin", "superadmin")
+    is_employee = user["role"] not in ("admin", "manager", "superadmin")
     my_eid = user.get("employee_id") or ""
     my_name = user.get("name") or ""
     today = datetime.now(timezone.utc).astimezone(MONTREAL_TZ).date()
@@ -2812,6 +2978,77 @@ async def task_stats(weeks: int = Query(8, ge=1, le=26), user: dict = Depends(ge
     }
 
 
+@api_router.get("/tasks/honor-roll")
+async def task_honor_roll(month: str = Query(""), user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    today = datetime.now(timezone.utc).astimezone(MONTREAL_TZ).date()
+    target_month = month if re.fullmatch(r"\d{4}-\d{2}", month or "") else today.isoformat()[:7]
+    docs = await db.shift_tasks.find(
+        {"pharmacy_id": pid, "date": {"$gte": f"{target_month}-01", "$lte": f"{target_month}-31"}},
+        {"_id": 0}).to_list(5000)
+    by_emp: dict = {}
+    for t in docs:
+        done = bool(t.get("done"))
+        name = t.get("assignee_name") or ""
+        if name:
+            e = by_emp.setdefault(name, {"name": name, "total": 0, "done": 0, "team_checks": 0})
+            e["total"] += 1
+            if done:
+                e["done"] += 1
+        elif done and t.get("done_by"):
+            e = by_emp.setdefault(t["done_by"], {"name": t["done_by"], "total": 0, "done": 0, "team_checks": 0})
+            e["team_checks"] += 1
+    entries = []
+    for e in by_emp.values():
+        if e["total"] == 0 and e["team_checks"] == 0:
+            continue
+        e["rate"] = _rate(e["done"], e["total"]) if e["total"] > 0 else 100
+        entries.append(e)
+    entries.sort(key=lambda x: (-x["rate"], -(x["done"] + x["team_checks"]), x["name"]))
+    return {"month": target_month, "entries": entries[:10]}
+
+
+class TaskGoalIn(BaseModel):
+    target: int
+
+
+@api_router.get("/tasks/goal")
+async def get_task_goal(start: str = Query(""), user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    try:
+        ws = date.fromisoformat(start) if start else None
+    except ValueError:
+        ws = None
+    if ws is None:
+        today = datetime.now(timezone.utc).astimezone(MONTREAL_TZ).date()
+        ws = today - timedelta(days=today.weekday())
+    ws = ws - timedelta(days=ws.weekday())
+    we = ws + timedelta(days=6)
+    goal = await db.task_goals.find_one({"pharmacy_id": pid}, {"_id": 0})
+    target = int(goal["target"]) if goal else 0
+    docs = await db.shift_tasks.find(
+        {"pharmacy_id": pid, "date": {"$gte": ws.isoformat(), "$lte": we.isoformat()}},
+        {"_id": 0, "done": 1}).to_list(5000)
+    total = len(docs)
+    done = sum(1 for t in docs if t.get("done"))
+    return {"target": target, "week_start": ws.isoformat(), "total": total, "done": done, "rate": _rate(done, total)}
+
+
+@api_router.post("/tasks/goal")
+async def set_task_goal(payload: TaskGoalIn, principal: dict = Depends(get_principal)):
+    if not 50 <= payload.target <= 100:
+        raise HTTPException(status_code=400, detail="L'objectif doit être entre 50 et 100 %.")
+    pid = principal["pharmacy_id"] or "ph1"
+    await db.task_goals.update_one(
+        {"pharmacy_id": pid},
+        {"$set": {"pharmacy_id": pid, "target": payload.target,
+                  "updated_by": principal["email"], "updated_at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True)
+    await log_audit(principal["email"], principal["role"], "OBJECTIF_EQUIPE", "tâche", pid,
+                    f"Objectif d'équipe hebdomadaire fixé à {payload.target} %", pid)
+    return {"target": payload.target}
+
+
 # ==================== Remplaçants : agences, demandes, offres ====================
 
 class AgencyIn(BaseModel):
@@ -2823,7 +3060,9 @@ class AgencyIn(BaseModel):
 @api_router.get("/agencies")
 async def list_agencies(principal: dict = Depends(get_principal)):
     pid = principal["pharmacy_id"] or "ph1"
-    return await db.agencies.find({"pharmacy_id": pid}, {"_id": 0}).sort("name", 1).to_list(200)
+    local = await db.agencies.find({"pharmacy_id": pid}, {"_id": 0}).sort("name", 1).to_list(200)
+    partners = await db.global_partners.find({}, {"_id": 0}).sort("name", 1).to_list(500)
+    return local + [{**p, "pharmacy_id": "", "global": True} for p in partners]
 
 
 @api_router.post("/agencies")
@@ -2903,12 +3142,20 @@ async def create_replacement_request(payload: ReplacementRequestIn, principal: d
     sent = 0
     api_key = os.environ.get("RESEND_API_KEY", "")
     agencies = await db.agencies.find({"pharmacy_id": pid, "roles": payload.role}, {"_id": 0}).to_list(200)
-    if api_key and agencies:
+    partners = await db.global_partners.find({"roles": payload.role}, {"_id": 0}).to_list(200)
+    recipients: list = []
+    seen_emails: set = set()
+    for r in agencies + partners:
+        em = (r.get("email") or "").lower()
+        if em and em not in seen_emails:
+            seen_emails.add(em)
+            recipients.append(r)
+    if api_key and recipients:
         resend.api_key = api_key
         sender = await get_sender()
         pharmacy_name = "Pharmacie Arrière Plan"
         html = replacement_email_html(pharmacy_name, payload.role, doc["slots"], doc["notes"], doc["urgency"], link)
-        for ag in agencies:
+        for ag in recipients:
             try:
                 await asyncio.to_thread(resend.Emails.send, {
                     "from": sender, "to": [ag["email"]],
@@ -2920,7 +3167,8 @@ async def create_replacement_request(payload: ReplacementRequestIn, principal: d
     doc["emails_sent"] = sent
     await db.replacement_requests.insert_one({**doc})
     await log_audit(principal["email"], principal["role"], "DEMANDE_REMPLACEMENT", "remplacement", doc["id"],
-                    f"Demande {payload.role} ({len(payload.slots)} plage(s)) — {sent} courriel(s) envoyé(s) aux agences", pid)
+                    f"Demande {payload.role} ({len(payload.slots)} plage(s)) — {sent} courriel(s) envoyé(s) "
+                    f"({len(agencies)} agence(s) locale(s) + {len(partners)} partenaire(s) global(aux))", pid)
     return {k: v for k, v in doc.items() if k != "token"} | {"link": link}
 
 

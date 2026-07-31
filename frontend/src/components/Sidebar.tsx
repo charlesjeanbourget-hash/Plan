@@ -10,7 +10,7 @@ import { toast } from 'sonner';
 import {
   LayoutDashboard, Users, CalendarClock, Briefcase, Wallet, RefreshCw, TreePalm,
   TrendingUp, ClipboardCheck, FileText, HeartHandshake, HelpCircle, ShieldCheck,
-  LogOut, Menu, X, LucideIcon, BadgeCheck, UserRound, KeyRound, Eye, EyeOff, GraduationCap, ListChecks,
+  LogOut, Menu, X, LucideIcon, BadgeCheck, UserRound, KeyRound, Eye, EyeOff, GraduationCap, ListChecks, Truck,
 } from 'lucide-react';
 
 interface Props {
@@ -32,6 +32,7 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'licenses', label: 'Licences pro.', icon: BadgeCheck },
   { key: 'scheduling', label: 'Horaires', icon: CalendarClock },
   { key: 'tasks', label: 'Tâches par quart', icon: ListChecks },
+  { key: 'deliveries', label: 'Livraisons', icon: Truck },
   { key: 'recruitment', label: 'Recrutement', icon: Briefcase },
   { key: 'payroll', label: 'Paie', icon: Wallet },
   { key: 'replacements', label: 'Remplacements', icon: RefreshCw },
@@ -45,7 +46,7 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'superadmin', label: 'Superadmin', icon: ShieldCheck },
 ];
 
-const EMPLOYEE_MODULES: ModuleKey[] = ['dashboard', 'myspace', 'scheduling', 'tasks', 'vacations', 'training', 'benefits', 'faq'];
+const EMPLOYEE_MODULES: ModuleKey[] = ['dashboard', 'myspace', 'scheduling', 'tasks', 'deliveries', 'vacations', 'training', 'benefits', 'faq'];
 
 export default function Sidebar({ active, onSelect, onLogout }: Props): JSX.Element {
   const { currentUser, changePassword } = useAuth();
@@ -106,7 +107,7 @@ export default function Sidebar({ active, onSelect, onLogout }: Props): JSX.Elem
       <div className="p-4 border-t border-slate-200">
         <p className="text-sm font-semibold text-slate-900 truncate" data-testid="sidebar-user-name">{currentUser?.name}</p>
         <p className="text-xs text-bronze-700 font-semibold mb-3 capitalize">
-          {currentUser?.role === 'admin' ? 'Gestionnaire' : currentUser?.role === 'superadmin' ? 'Superadmin' : 'Employé(e)'}
+          {currentUser?.role === 'admin' ? 'Admin (propriétaire)' : currentUser?.role === 'manager' ? 'Gestionnaire' : currentUser?.role === 'superadmin' ? 'Superadmin' : 'Employé(e)'}
         </p>
         <button
           data-testid="sidebar-password-button"
