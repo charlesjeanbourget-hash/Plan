@@ -4282,6 +4282,65 @@ async def startup_tasks():
     scheduler.start()
 
 
+# ==================== Demandes de démo (public) ====================
+
+class DemoRequestIn(BaseModel):
+    name: str
+    pharmacy: str = ""
+    email: str
+    phone: str = ""
+    message: str = ""
+
+
+@api_router.post("/demo-requests")
+async def create_demo_request(payload: DemoRequestIn, request: Request):
+    name = payload.name.strip()
+    email = payload.email.strip().lower()
+    if not name or not email or "@" not in email or "." not in email.split("@")[-1]:
+        raise HTTPException(status_code=400, detail="Nom et courriel valide requis.")
+    fwd = request.headers.get("x-forwarded-for", "")
+    ip = fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else "inconnu")
+    since = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    recent = await db.demo_requests.count_documents({"ip": ip, "created_at": {"$gte": since}})
+    if recent >= 5:
+        raise HTTPException(status_code=429, detail="Trop de demandes envoyées. Réessayez dans une heure.")
+    doc = {
+        "id": str(uuid.uuid4()), "name": name, "pharmacy": payload.pharmacy.strip(),
+        "email": email, "phone": payload.phone.strip(), "message": payload.message.strip()[:2000],
+        "ip": ip, "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.demo_requests.insert_one({**doc})
+    notify_to = os.environ.get("DEMO_NOTIFY_EMAIL", "")
+    sent = False
+    if os.environ.get("RESEND_API_KEY", "") and notify_to:
+        rows = "".join(
+            f"<tr><td style='padding:6px 12px;color:#64748b'>{label}</td><td style='padding:6px 12px;font-weight:bold'>{value or '—'}</td></tr>"
+            for label, value in [("Nom", doc["name"]), ("Pharmacie", doc["pharmacy"]),
+                                 ("Courriel", doc["email"]), ("Téléphone", doc["phone"]),
+                                 ("Message", doc["message"])]
+        )
+        html = (
+            "<div style='font-family:Arial,sans-serif;max-width:640px;margin:0 auto;color:#0f172a'>"
+            "<h2 style='color:#059669'>Arrière Plan — Nouvelle demande de démo</h2>"
+            f"<table style='border-collapse:collapse;background:#f8fafc;border-radius:8px'>{rows}</table>"
+            "<p style='font-size:12px;color:#94a3b8;margin-top:24px'>Demande envoyée depuis la page d'accueil.</p>"
+            "</div>"
+        )
+        try:
+            await asyncio.to_thread(resend.Emails.send, {
+                "from": await get_sender(),
+                "to": [notify_to],
+                "subject": f"Demande de démo — {name}" + (f" ({doc['pharmacy']})" if doc["pharmacy"] else ""),
+                "html": html,
+            })
+            sent = True
+        except Exception as e:
+            logger.warning(f"Envoi du courriel de demande de démo échoué : {e}")
+    await log_audit("public", "visiteur", "DEMANDE_DEMO", "demo", doc["id"],
+                    f"Demande de démo de {name} <{email}>", "")
+    return {"ok": True, "email_sent": sent}
+
+
 app.include_router(api_router)
 
 app.add_middleware(

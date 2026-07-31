@@ -1,11 +1,18 @@
 import { View } from '@/types';
 import { BrandLogo } from '@/components/BrandLogo';
 import { LandingShowcase } from '@/components/LandingShowcase';
-import { Users, Briefcase, Building2, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { PayrollSection } from '@/components/PayrollSection';
+import { TestimonialsSection } from '@/components/TestimonialsSection';
+import { DemoSection } from '@/components/DemoSection';
+import { Users, Briefcase, Building2, ArrowRight, CheckCircle2, ShieldCheck, Leaf } from 'lucide-react';
 
 interface Props {
   onNavigate: (view: View) => void;
 }
+
+const scrollToId = (id: string): void => {
+  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
+};
 
 const TIME_BULLETS = [
   'Les horaires, rappels, relances et examens de formation se préparent tout seuls',
@@ -21,6 +28,13 @@ export default function LandingPage({ onNavigate }: Props): JSX.Element {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 sm:h-20 flex items-center justify-between gap-2">
           <BrandLogo size="sm" hideTextOnSmall />
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            <button
+              data-testid="header-demo-button"
+              onClick={() => scrollToId('demo')}
+              className="hidden sm:inline-flex px-3.5 sm:px-5 py-2 rounded-full bg-bronze-600 text-white text-xs sm:text-sm font-semibold whitespace-nowrap hover:bg-bronze-700 transition-colors"
+            >
+              Réserver une démo
+            </button>
             <button
               data-testid="header-punch-button"
               onClick={() => onNavigate('punch')}
@@ -101,6 +115,10 @@ export default function LandingPage({ onNavigate }: Props): JSX.Element {
 
       <LandingShowcase />
 
+      <PayrollSection />
+
+      <TestimonialsSection />
+
       <section className="bg-slate-50 border-y border-slate-200" data-testid="time-value-section">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-16 sm:py-20 grid grid-cols-1 lg:grid-cols-2 gap-10 items-center">
           <div>
@@ -139,7 +157,9 @@ export default function LandingPage({ onNavigate }: Props): JSX.Element {
         </div>
       </section>
 
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 py-16 sm:py-24">
+      <DemoSection />
+
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 py-16 sm:py-24 border-t border-slate-100">
         <span className="block w-12 h-1 rounded-full bg-gradient-to-r from-emerald-500 to-bronze-500 mb-4" />
         <p className="text-xs uppercase tracking-[0.2em] text-slate-500 font-bold mb-8">Choisissez votre espace</p>
         <div className="grid grid-cols-1 md:grid-cols-12 gap-8">
@@ -192,13 +212,70 @@ export default function LandingPage({ onNavigate }: Props): JSX.Element {
         </div>
       </section>
 
-      <footer className="max-w-7xl mx-auto px-4 sm:px-6 py-10 flex flex-col sm:flex-row items-center justify-between gap-4 bg-white border-t border-slate-100">
-        <p className="text-sm text-slate-500">© 2026 Arrière Plan — Le SIRH des pharmacies.</p>
-        <div className="flex flex-wrap justify-center gap-4 sm:gap-6 text-sm text-slate-500">
-          <button data-testid="footer-careers-link" onClick={() => onNavigate('careers')} className="hover:text-bronze-700 transition-colors">Carrières</button>
-          <button data-testid="footer-agency-link" onClick={() => onNavigate('agency')} className="hover:text-bronze-700 transition-colors">Agences</button>
-          <button data-testid="footer-punch-link" onClick={() => onNavigate('punch')} className="hover:text-bronze-700 transition-colors">Borne de punch</button>
-          <button data-testid="footer-login-link" onClick={() => onNavigate('login')} className="hover:text-bronze-700 transition-colors">Connexion</button>
+      <footer className="bg-slate-50/80 border-t border-slate-200" data-testid="landing-footer">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-14 grid grid-cols-2 md:grid-cols-12 gap-8 md:gap-6">
+          <div className="col-span-2 md:col-span-4">
+            <BrandLogo size="sm" />
+            <p className="mt-4 text-sm text-slate-500 max-w-xs">
+              Le SIRH des pharmacies du Québec — horaires, punch, paie, tâches, remplacements,
+              formations et conformité, réunis en un seul outil.
+            </p>
+          </div>
+          <div className="md:col-span-4">
+            <p className="text-xs uppercase tracking-[0.15em] text-slate-400 font-bold mb-4">Fonctionnalités</p>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 text-sm text-slate-600">
+              {[
+                { id: 'horaires', label: 'Horaires' },
+                { id: 'punch', label: 'Punch & paie' },
+                { id: 'taches', label: 'Tâches par quart' },
+                { id: 'communication', label: 'Communication' },
+                { id: 'livraisons', label: 'Livraisons' },
+                { id: 'remplacements', label: 'Remplacements' },
+                { id: 'formations', label: 'Formations IA' },
+                { id: 'evaluations', label: 'Évaluations' },
+                { id: 'licences', label: 'Licences Loi 25' },
+                { id: 'recrutement', label: 'Recrutement' },
+              ].map((l) => (
+                <button
+                  key={l.id}
+                  data-testid={`footer-feature-${l.id}`}
+                  onClick={() => scrollToId(`sec-${l.id}`)}
+                  className="text-left hover:text-emerald-700 transition-colors"
+                >
+                  {l.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="md:col-span-2">
+            <p className="text-xs uppercase tracking-[0.15em] text-slate-400 font-bold mb-4">Espaces</p>
+            <div className="flex flex-col gap-2.5 text-sm text-slate-600">
+              <button data-testid="footer-login-link" onClick={() => onNavigate('login')} className="text-left hover:text-emerald-700 transition-colors">Connexion</button>
+              <button data-testid="footer-careers-link" onClick={() => onNavigate('careers')} className="text-left hover:text-emerald-700 transition-colors">Portail Carrières</button>
+              <button data-testid="footer-agency-link" onClick={() => onNavigate('agency')} className="text-left hover:text-emerald-700 transition-colors">Portail Agence</button>
+              <button data-testid="footer-punch-link" onClick={() => onNavigate('punch')} className="text-left hover:text-emerald-700 transition-colors">Borne de punch</button>
+            </div>
+          </div>
+          <div className="md:col-span-2">
+            <p className="text-xs uppercase tracking-[0.15em] text-slate-400 font-bold mb-4">Support</p>
+            <div className="flex flex-col gap-2.5 text-sm text-slate-600">
+              <button data-testid="footer-demo-link" onClick={() => scrollToId('demo')} className="text-left hover:text-emerald-700 transition-colors">Réserver une démo</button>
+              <button data-testid="footer-testimonials-link" onClick={() => scrollToId('demo')} className="text-left hover:text-emerald-700 transition-colors">Nous joindre</button>
+            </div>
+          </div>
+        </div>
+        <div className="border-t border-slate-200">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <p className="text-sm text-slate-500">© 2026 Arrière Plan — Le SIRH des pharmacies.</p>
+            <div className="flex items-center gap-6">
+              <span data-testid="footer-badge-loi25" className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600">
+                <ShieldCheck className="w-4 h-4 text-emerald-600" /> Conforme Loi 25
+              </span>
+              <span data-testid="footer-badge-quebec" className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600">
+                <Leaf className="w-4 h-4 text-bronze-600" /> Fait au Québec
+              </span>
+            </div>
+          </div>
         </div>
       </footer>
     </div>

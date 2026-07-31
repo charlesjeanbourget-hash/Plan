@@ -189,6 +189,13 @@ admin@luminahr.ca/admin123 · julie@luminahr.ca/employe123 · super@luminahr.ca/
 - Nouveaux fichiers : `LandingMockups.tsx` (10 maquettes décoratives aria-hidden), `LandingShowcase.tsx` (données + rendu, testid `features-showcase`). `index.css` : keyframes `floatSoft` via propriété CSS `translate` (préserve les rotate Tailwind). Sections avec `overflow-hidden` (corrige un débordement horizontal mobile de 8 px causé par le halo).
 - Le reste de la landing (hero, ROI, « Votre temps vaut plus », portails, footer) inchangé.
 
+## Itération 23 (31 juillet 2026) — Témoignages, Formulaire démo, Section paie, Footer riche — testée (curl E2E + screenshots desktop/mobile, 0 débordement, tsc propre)
+- **Témoignages clients** (`TestimonialsSection.tsx`, testid testimonials-section) : 3 témoignages FICTIFS d'exemple (Marie-Claude Bergeron/Longueuil, Jean-François Caron/Trois-Rivières, Nathalie Simard/Québec) avec portraits photoréalistes générés (Gemini, URLs static.prod-images), 5 étoiles bronze, citations liées aux vraies fonctionnalités. À remplacer par de vrais clients plus tard.
+- **Formulaire « Réserver une démo »** (`DemoSection.tsx`, id="demo") : bouton bronze dans l'en-tête (header-demo-button, caché <sm) + section avec formulaire (nom*, pharmacie, courriel*, téléphone, message) → POST /api/demo-requests (PUBLIC, validation nom+courriel 400, throttle 5/h/IP 429, stockage Mongo `demo_requests`, audit DEMANDE_DEMO) → courriel Resend vers DEMO_NOTIFY_EMAIL (backend/.env = charlesjeanbourget@gmail.com, adresse propriétaire Resend donc livraison réelle OK). Panneau succès (demo-success) + toast. Testé E2E : email_sent:true.
+- **Section « Compatible avec votre système de paie »** (`PayrollSection.tsx`) : carte centrale logo Arrière Plan « Export CSV en 1 clic » entourée de 8 pastilles flottantes (Nethris, EmployeurD, Desjardins, Acomba, QuickBooks, ADP, Sage, Payworks) + 2 puces honnêtes (feuilles de temps, CSV universel). NOTE client : il souhaite de VRAIES intégrations API paie plus tard — nécessite comptes développeur/clés chez chaque fournisseur (QuickBooks/Intuit possible). Backlog.
+- **Footer riche** : colonnes Marque / Fonctionnalités (ancres scroll vers sec-{id} des 10 sections vitrines) / Espaces / Support (Réserver une démo) + bande badges « Conforme Loi 25 » (ShieldCheck vert) et « Fait au Québec » (Leaf bronze). Pas d'icônes sociales (choix client). Anciens testids footer-*-link conservés.
+- LandingShowcase : sections avec id `sec-{id}` pour le scroll. Ordre de page : hero → ROI → vitrines → paie → témoignages → temps → démo → portails → footer.
+
 ## Notes techniques
 - Ne jamais recréer `jsconfig.json` (conflit CRA avec tsconfig.json)
 - npm interdit — yarn uniquement

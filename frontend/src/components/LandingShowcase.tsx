@@ -162,6 +162,7 @@ export function LandingShowcase(): JSX.Element {
       {SECTIONS.map((s, idx) => (
         <section
           key={s.id}
+          id={`sec-${s.id}`}
           data-testid={`showcase-${s.id}`}
           className={`overflow-hidden ${idx % 2 === 1 ? 'bg-slate-50/80 border-y border-slate-100' : 'bg-white'}`}
         >
