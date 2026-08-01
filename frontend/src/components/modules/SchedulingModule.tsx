@@ -160,6 +160,12 @@ export default function SchedulingModule(): JSX.Element {
   });
   const today = iso(new Date());
 
+  const weekAgencySlots = replacements.flatMap((q) => q.slots
+    .filter((s) => s.date >= days[0] && s.date <= days[6])
+    .map((s) => ({ ...s, candidate: q.chosen_offer?.candidate_name ?? '', agency: q.chosen_offer?.agency_name ?? '', role: q.role, rate: q.chosen_offer?.hourly_rate ?? 0 })));
+  const agencyWeekHours = weekAgencySlots.reduce((sum, s) => sum + hoursBetween(s.start, s.end), 0);
+  const agencyWeekCost = weekAgencySlots.reduce((sum, s) => sum + hoursBetween(s.start, s.end) * s.rate, 0);
+
   const refreshAppointments = useCallback(async (): Promise<void> => {
     try {
       const res = await axios.get<Appointment[]>(`${API}/appointments?start=${days[0]}&end=${days[6]}`, { headers: { Authorization: `Bearer ${token ?? ''}` } });
@@ -617,13 +623,44 @@ export default function SchedulingModule(): JSX.Element {
               </tr>
               );
             })}
+            {isAdmin && weekAgencySlots.length > 0 && (
+              <tr data-testid="replacements-schedule-row" className="bg-bronze-50/40 border-t-2 border-bronze-200">
+                <td className="p-4 border-r border-slate-200 align-top">
+                  <p className="font-semibold text-bronze-800">Remplaçants (agence)</p>
+                  <p className="text-xs text-bronze-700/70">Retenus via le module Remplacements</p>
+                </td>
+                {days.map((d) => (
+                  <td key={d} className="p-2 border-r border-slate-200 align-top">
+                    {weekAgencySlots.filter((s) => s.date === d).map((s, i) => (
+                      <div
+                        key={`${s.date}-${i}`}
+                        data-testid={`replacement-chip-${s.date}-${i}`}
+                        className="relative overflow-hidden rounded-lg border border-bronze-200 bg-bronze-50 pl-3.5 pr-2 py-2 mb-1.5 text-bronze-900 shadow-sm"
+                        title={`${s.candidate} (${s.agency}) — ${s.role}${s.rate > 0 ? ` · ${s.rate} $/h` : ''}`}
+                      >
+                        <span className="absolute inset-y-0 left-0 w-1.5 bg-bronze-400" />
+                        <p className="text-xs font-bold">{s.start}–{s.end}</p>
+                        <p className="text-[10px] text-bronze-700 truncate mt-0.5">{s.candidate} · {s.role}{s.rate > 0 ? ` · ${s.rate} $/h` : ''}</p>
+                      </div>
+                    ))}
+                  </td>
+                ))}
+                <td data-testid="agency-row-total" className="px-4 py-3 align-top text-right bg-bronze-50/60">
+                  <p className="text-sm font-bold text-bronze-900">{agencyWeekHours > 0 ? fmtHours(agencyWeekHours) : '—'}</p>
+                  {agencyWeekCost > 0 && (
+                    <p data-testid="agency-row-cost" className="text-xs font-semibold text-bronze-700 mt-0.5">{fmtCad(agencyWeekCost)}</p>
+                  )}
+                </td>
+              </tr>
+            )}
             <tr data-testid="schedule-totals-row" className="bg-slate-50/80 border-t-2 border-slate-200">
               <td className="px-5 py-3 border-r border-slate-200 text-[11px] uppercase tracking-[0.18em] text-slate-400 font-semibold">Totaux</td>
               {days.map((d) => {
                 const filteredIds = new Set(state.employees.filter((e) => branchFilter === 'all' || e.branchId === branchFilter).map((e) => e.id));
                 const dh = state.shifts
                   .filter((s) => s.date === d && filteredIds.has(s.employeeId))
-                  .reduce((sum, s) => sum + hoursBetween(s.startTime, s.endTime), 0);
+                  .reduce((sum, s) => sum + hoursBetween(s.startTime, s.endTime), 0)
+                  + weekAgencySlots.filter((s) => s.date === d).reduce((sum, s) => sum + hoursBetween(s.start, s.end), 0);
                 return (
                   <td key={d} data-testid={`day-total-${d}`} className="px-3 py-3 border-r border-slate-200 text-center text-xs font-bold text-slate-700">
                     {dh > 0 ? fmtHours(dh) : <span className="text-slate-300">—</span>}
@@ -641,46 +678,19 @@ export default function SchedulingModule(): JSX.Element {
                   gh += h;
                   gc += h * (rates[e.id] ?? 0);
                 });
+                gh += agencyWeekHours;
+                gc += agencyWeekCost;
                 return (
                   <td className="px-4 py-3 text-right bg-slate-100/60">
                     <p data-testid="week-total-hours" className="text-sm font-bold text-slate-900">{fmtHours(gh)}</p>
                     {isAdmin && gc > 0 && <p data-testid="week-total-cost" className="text-xs font-semibold text-emerald-700 mt-0.5">{fmtCad(gc)}</p>}
+                    {isAdmin && agencyWeekCost > 0 && (
+                      <p data-testid="week-agency-cost-note" className="text-[10px] text-bronze-700 mt-0.5">dont {fmtCad(agencyWeekCost)} agence</p>
+                    )}
                   </td>
                 );
               })()}
             </tr>
-            {isAdmin && (() => {
-              const weekSlots = replacements.flatMap((q) =>
-                q.slots
-                  .filter((s) => days.includes(s.date))
-                  .map((s) => ({ ...s, candidate: q.chosen_offer?.candidate_name ?? '', agency: q.chosen_offer?.agency_name ?? '', role: q.role })));
-              if (weekSlots.length === 0) return null;
-              return (
-                <tr data-testid="replacements-schedule-row" className="bg-bronze-50/40 border-t-2 border-bronze-200">
-                  <td className="p-4 border-r border-slate-200 align-top">
-                    <p className="font-semibold text-bronze-800">Remplaçants (agence)</p>
-                    <p className="text-xs text-bronze-700/70">Retenus via le module Remplacements</p>
-                  </td>
-                  {days.map((d) => (
-                    <td key={d} className="p-2 border-r border-slate-200 align-top">
-                      {weekSlots.filter((s) => s.date === d).map((s, i) => (
-                        <div
-                          key={`${s.date}-${i}`}
-                          data-testid={`replacement-chip-${s.date}-${i}`}
-                          className="relative overflow-hidden rounded-lg border border-bronze-200 bg-bronze-50 pl-3.5 pr-2 py-2 mb-1.5 text-bronze-900 shadow-sm"
-                          title={`${s.candidate} (${s.agency}) — ${s.role}`}
-                        >
-                          <span className="absolute inset-y-0 left-0 w-1.5 bg-bronze-400" />
-                          <p className="text-xs font-bold">{s.start}–{s.end}</p>
-                          <p className="text-[10px] text-bronze-700 truncate mt-0.5">{s.candidate} · {s.role}</p>
-                        </div>
-                      ))}
-                    </td>
-                  ))}
-                  <td className="bg-slate-50/60" />
-                </tr>
-              );
-            })()}
           </tbody>
         </table>
       </div>

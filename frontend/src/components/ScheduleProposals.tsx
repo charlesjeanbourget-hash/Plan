@@ -41,6 +41,21 @@ const TRAFFIC_BLOCKS: [string, string][] = [
 
 type TrafficGrid = Record<string, Record<string, number>>;
 
+interface TrafficPeriod {
+  id: string;
+  name: string;
+  start_md: string;
+  end_md: string;
+  traffic: TrafficGrid;
+}
+
+const mdOf = (dateStr: string): string => dateStr.slice(5);
+
+const fmtMd = (md: string): string => `${Number(md.slice(3))}/${Number(md.slice(0, 2))}`;
+
+const periodMatches = (p: TrafficPeriod, md: string): boolean =>
+  p.start_md <= p.end_md ? (p.start_md <= md && md <= p.end_md) : (md >= p.start_md || md <= p.end_md);
+
 const cad = (n: number): string => n.toLocaleString('fr-CA', { style: 'currency', currency: 'CAD' });
 
 const nextMonday = (): string => {
@@ -73,6 +88,13 @@ export const ScheduleProposals = (): JSX.Element => {
   const [deadlineHours, setDeadlineHours] = useState('48');
   const [budget, setBudget] = useState('');
   const [traffic, setTraffic] = useState<TrafficGrid>({});
+  const [defaultTraffic, setDefaultTraffic] = useState<TrafficGrid>({});
+  const [periods, setPeriods] = useState<TrafficPeriod[]>([]);
+  const [selectedPeriod, setSelectedPeriod] = useState('');
+  const [savingPeriod, setSavingPeriod] = useState(false);
+  const [periodName, setPeriodName] = useState('');
+  const [periodStart, setPeriodStart] = useState('');
+  const [periodEnd, setPeriodEnd] = useState('');
   const [expanded, setExpanded] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -101,13 +123,71 @@ export const ScheduleProposals = (): JSX.Element => {
 
   useEffect(() => {
     if (!genOpen || !token) return;
-    axios.get<{ weekly_budget: number; traffic: TrafficGrid }>(`${API}/schedule/settings`, { headers: { Authorization: `Bearer ${token}` } })
+    axios.get<{ weekly_budget: number; traffic: TrafficGrid; traffic_periods?: TrafficPeriod[] }>(`${API}/schedule/settings`, { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => {
         setBudget(r.data.weekly_budget > 0 ? String(r.data.weekly_budget) : '');
         setTraffic(r.data.traffic ?? {});
+        setDefaultTraffic(r.data.traffic ?? {});
+        setPeriods(r.data.traffic_periods ?? []);
       })
       .catch(() => undefined);
   }, [genOpen, token]);
+
+  useEffect(() => {
+    if (!genOpen || periods.length === 0 || !weekStart) return;
+    const match = periods.find((p) => periodMatches(p, mdOf(weekStart)));
+    if (match) {
+      setSelectedPeriod(match.id);
+      setTraffic(match.traffic);
+      toast.success(`Période « ${match.name} » appliquée automatiquement pour la semaine du ${weekStart}.`);
+    } else {
+      setSelectedPeriod('');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [genOpen, weekStart, periods]);
+
+  const persistPeriods = async (next: TrafficPeriod[]): Promise<TrafficPeriod[] | null> => {
+    try {
+      const res = await axios.put<{ traffic_periods?: TrafficPeriod[] }>(`${API}/schedule/settings`, {
+        weekly_budget: Math.max(0, Number(budget.replace(',', '.')) || 0),
+        traffic,
+        traffic_periods: next,
+      }, { headers });
+      return res.data.traffic_periods ?? next;
+    } catch (err) {
+      const detail = axios.isAxiosError(err) && err.response ? (err.response.data as { detail?: unknown }).detail : null;
+      toast.error(typeof detail === 'string' ? detail : 'Enregistrement des périodes impossible.');
+      return null;
+    }
+  };
+
+  const savePeriod = async (): Promise<void> => {
+    const name = periodName.trim();
+    if (!name || !periodStart || !periodEnd) {
+      toast.error('Nom, date de début et date de fin requis.');
+      return;
+    }
+    const next = [...periods, { id: crypto.randomUUID(), name, start_md: mdOf(periodStart), end_md: mdOf(periodEnd), traffic }];
+    const saved = await persistPeriods(next);
+    if (!saved) return;
+    setPeriods(saved);
+    setSavingPeriod(false);
+    setPeriodName('');
+    setPeriodStart('');
+    setPeriodEnd('');
+    toast.success(`Période « ${name} » enregistrée (${fmtMd(mdOf(periodStart))} → ${fmtMd(mdOf(periodEnd))}) avec la grille actuelle.`);
+  };
+
+  const deletePeriod = async (): Promise<void> => {
+    const p = periods.find((x) => x.id === selectedPeriod);
+    if (!p) return;
+    const saved = await persistPeriods(periods.filter((x) => x.id !== selectedPeriod));
+    if (!saved) return;
+    setPeriods(saved);
+    setSelectedPeriod('');
+    setTraffic(defaultTraffic);
+    toast.success(`Période « ${p.name} » supprimée.`);
+  };
 
   useEffect(() => {
     if (!proposals.some((p) => p.effective_status === 'generating')) return undefined;
@@ -450,6 +530,77 @@ export const ScheduleProposals = (): JSX.Element => {
                 </Button>
                 <span className="text-[11px] text-slate-400">la 1re case de chaque colonne (ligne Lun) est recopiée sur toute sa colonne</span>
               </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Select
+                  value={selectedPeriod || 'none'}
+                  onValueChange={(v) => {
+                    if (v === 'none') {
+                      setSelectedPeriod('');
+                      setTraffic(defaultTraffic);
+                      return;
+                    }
+                    const p = periods.find((x) => x.id === v);
+                    if (p) {
+                      setSelectedPeriod(v);
+                      setTraffic(p.traffic);
+                      toast.success(`Grille de la période « ${p.name} » chargée.`);
+                    }
+                  }}
+                >
+                  <SelectTrigger data-testid="gen-period-select" className="h-8 w-56 text-xs">
+                    <SelectValue placeholder="Période de l'année" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Grille par défaut (aucune période)</SelectItem>
+                    {periods.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>{p.name} ({fmtMd(p.start_md)} → {fmtMd(p.end_md)})</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {selectedPeriod && (
+                  <Button
+                    type="button"
+                    data-testid="gen-period-delete"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => void deletePeriod()}
+                    className="rounded-full text-xs text-red-600 hover:bg-red-50"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 mr-1" /> Supprimer
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  data-testid="gen-period-save-toggle"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setSavingPeriod((v) => !v)}
+                  className="rounded-full text-xs"
+                >
+                  Enregistrer la grille comme période…
+                </Button>
+              </div>
+              {savingPeriod && (
+                <div data-testid="gen-period-form" className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+                  <Input
+                    data-testid="gen-period-name"
+                    value={periodName}
+                    onChange={(e) => setPeriodName(e.target.value)}
+                    placeholder="Ex. Été / Fêtes / Saison grippe"
+                    className="h-8 w-44 text-xs"
+                  />
+                  <span className="text-xs text-slate-500">du</span>
+                  <Input data-testid="gen-period-start" type="date" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} className="h-8 w-36 text-xs" />
+                  <span className="text-xs text-slate-500">au</span>
+                  <Input data-testid="gen-period-end" type="date" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} className="h-8 w-36 text-xs" />
+                  <Button type="button" data-testid="gen-period-save" size="sm" onClick={() => void savePeriod()} className="rounded-full text-xs bg-emerald-600 hover:bg-emerald-700">
+                    Enregistrer
+                  </Button>
+                  <span className="w-full text-[11px] text-slate-400">
+                    La grille d'achalandage actuelle sera associée à cette période (seuls le jour et le mois comptent — elle se réapplique chaque année, ex. Fêtes 15/12 → 05/01).
+                  </span>
+                </div>
+              )}
               <div data-testid="gen-traffic-grid" className="rounded-lg border border-slate-200 overflow-hidden">
                 <table className="w-full text-xs">
                   <thead>

@@ -2111,6 +2111,15 @@ TRAFFIC_BLOCKS = {
 class ScheduleSettingsIn(BaseModel):
     weekly_budget: float = 0
     traffic: dict = {}
+    traffic_periods: list | None = None
+
+
+def _sanitize_traffic(raw: dict) -> dict:
+    traffic = {}
+    for day in TRAFFIC_DAY_KEYS:
+        blocks = (raw or {}).get(day) or {}
+        traffic[day] = {b: max(0, min(500, int(float(blocks.get(b) or 0)))) for b in TRAFFIC_BLOCKS}
+    return traffic
 
 
 @api_router.get("/schedule/settings")
@@ -2118,29 +2127,46 @@ async def get_schedule_settings(user: dict = Depends(get_current_user)):
     pid = user.get("pharmacy_id") or "ph1"
     doc = await db.schedule_settings.find_one({"pharmacy_id": pid}, {"_id": 0})
     return {"weekly_budget": (doc or {}).get("weekly_budget", 0),
-            "traffic": (doc or {}).get("traffic", {})}
+            "traffic": (doc or {}).get("traffic", {}),
+            "traffic_periods": (doc or {}).get("traffic_periods", [])}
 
 
 @api_router.put("/schedule/settings")
 async def set_schedule_settings(payload: ScheduleSettingsIn, principal: dict = Depends(get_principal)):
     if not (0 <= payload.weekly_budget <= 1_000_000):
         raise HTTPException(status_code=400, detail="Budget hebdomadaire invalide.")
-    traffic = {}
     try:
-        for day in TRAFFIC_DAY_KEYS:
-            blocks = (payload.traffic or {}).get(day) or {}
-            traffic[day] = {b: max(0, min(500, int(float(blocks.get(b) or 0)))) for b in TRAFFIC_BLOCKS}
+        traffic = _sanitize_traffic(payload.traffic)
     except (ValueError, TypeError, AttributeError):
         raise HTTPException(status_code=400, detail="Valeurs d'achalandage invalides.")
     pid = principal["pharmacy_id"] or "ph1"
-    await db.schedule_settings.update_one(
-        {"pharmacy_id": pid},
-        {"$set": {"pharmacy_id": pid, "weekly_budget": round(payload.weekly_budget, 2), "traffic": traffic,
-                  "updated_by": principal["email"], "updated_at": datetime.now(timezone.utc).isoformat()}},
-        upsert=True)
+    update = {"pharmacy_id": pid, "weekly_budget": round(payload.weekly_budget, 2), "traffic": traffic,
+              "updated_by": principal["email"], "updated_at": datetime.now(timezone.utc).isoformat()}
+    if payload.traffic_periods is not None:
+        if len(payload.traffic_periods) > 20:
+            raise HTTPException(status_code=400, detail="Maximum 20 périodes d'achalandage.")
+        periods = []
+        for p in payload.traffic_periods:
+            if not isinstance(p, dict):
+                raise HTTPException(status_code=400, detail="Période invalide.")
+            name = str(p.get("name") or "").strip()
+            smd, emd = str(p.get("start_md") or ""), str(p.get("end_md") or "")
+            if not name or not re.fullmatch(r"\d{2}-\d{2}", smd) or not re.fullmatch(r"\d{2}-\d{2}", emd):
+                raise HTTPException(status_code=400, detail="Période invalide : nom et dates (mois-jour) requis.")
+            try:
+                periods.append({"id": str(p.get("id") or uuid.uuid4()), "name": name[:60],
+                                "start_md": smd, "end_md": emd,
+                                "traffic": _sanitize_traffic(p.get("traffic") or {})})
+            except (ValueError, TypeError, AttributeError):
+                raise HTTPException(status_code=400, detail="Valeurs d'achalandage invalides dans une période.")
+        update["traffic_periods"] = periods
+    await db.schedule_settings.update_one({"pharmacy_id": pid}, {"$set": update}, upsert=True)
+    saved = await db.schedule_settings.find_one({"pharmacy_id": pid}, {"_id": 0})
+    periods_note = f", {len(update['traffic_periods'])} période(s)" if "traffic_periods" in update else ""
     await log_audit(principal["email"], principal["role"], "MODIF_PARAMS_HORAIRE", "horaire", pid,
-                    f"Budget hebdo : {payload.weekly_budget:.2f} $, achalandage mis à jour", pid)
-    return {"weekly_budget": round(payload.weekly_budget, 2), "traffic": traffic}
+                    f"Budget hebdo : {payload.weekly_budget:.2f} $, achalandage mis à jour{periods_note}", pid)
+    return {"weekly_budget": saved.get("weekly_budget", 0), "traffic": saved.get("traffic", {}),
+            "traffic_periods": saved.get("traffic_periods", [])}
 
 
 def _time_to_minutes(t: str) -> int:
