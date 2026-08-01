@@ -8,6 +8,7 @@ import { SuperadminOverview } from '@/components/modules/SuperadminOverview';
 import { SuperadminPartners } from '@/components/SuperadminPartners';
 import { SuperadminDemoRequests } from '@/components/modules/SuperadminDemoRequests';
 import { SuperadminIncidents } from '@/components/modules/SuperadminIncidents';
+import { SuperadminSecurity } from '@/components/modules/SuperadminSecurity';
 import { SuperadminLoginEvents } from '@/components/modules/SuperadminLoginEvents';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -103,6 +104,8 @@ export default function SuperadminModule(): JSX.Element {
       </div>
 
       <SuperadminOverview />
+
+      <SuperadminSecurity />
 
       <SuperadminDemoRequests />
 

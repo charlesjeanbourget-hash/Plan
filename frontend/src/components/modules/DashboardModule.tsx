@@ -4,6 +4,7 @@ import { useHR } from '@/context/HRContext';
 import { useAuth } from '@/context/AuthContext';
 import { ModuleHeader, StatCard, StatusBadge } from '@/components/modules/shared';
 import { HonorRoll } from '@/components/HonorRoll';
+import { ExpiringDocsBanner } from '@/components/ExpiringDocsBanner';
 import { Users, CalendarClock, Briefcase, TreePalm, BadgeAlert } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -36,6 +37,7 @@ export default function DashboardModule(): JSX.Element {
         title={`Bonjour, ${currentUser?.name ?? ''}`}
         subtitle="Voici l'état de votre pharmacie aujourd'hui."
       />
+      <ExpiringDocsBanner />
       {isAdmin && expiringCount > 0 && (
         <div data-testid="license-alert-banner" className="mb-8 flex items-center gap-4 rounded-xl border border-amber-300 bg-amber-50 px-5 py-4">
           <div className="relative">

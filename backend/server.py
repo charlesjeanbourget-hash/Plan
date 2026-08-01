@@ -4777,6 +4777,81 @@ async def my_data_export(user: dict = Depends(get_current_user)):
     return export
 
 
+@api_router.get("/superadmin/security-overview")
+async def security_overview(su: dict = Depends(require_superadmin)):
+    now = datetime.now(timezone.utc)
+    since_7d = (now - timedelta(days=7)).isoformat()
+    suspicious = await db.login_events.find(
+        {"flagged_new_ip": True, "created_at": {"$gte": since_7d}},
+        {"_id": 0}).sort("created_at", -1).to_list(50)
+    locks = await db.login_attempts.find(
+        {"locked_until": {"$gt": now.isoformat()}}, {"_id": 0}).sort("locked_until", -1).to_list(100)
+    incidents = await db.incidents.find(
+        {"status": {"$ne": "clos"}},
+        {"_id": 0, "id": 1, "title": 1, "severity": 1, "status": 1, "created_at": 1}).sort("created_at", -1).to_list(100)
+    temp_pw = await db.users.count_documents({"is_temporary_password": True, "suspended": {"$ne": True}})
+    suspended = await db.users.count_documents({"suspended": True})
+    return {
+        "suspicious_logins_7d": suspicious,
+        "locked_accounts": locks,
+        "open_incidents": incidents,
+        "temporary_password_count": temp_pw,
+        "suspended_count": suspended,
+    }
+
+
+class UnlockIn(BaseModel):
+    identifier: str
+
+
+@api_router.post("/superadmin/unlock")
+async def unlock_identifier(payload: UnlockIn, su: dict = Depends(require_superadmin)):
+    ident = payload.identifier.strip()
+    res = await db.login_attempts.delete_one({"identifier": ident})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Aucun verrou trouvé pour cet identifiant.")
+    await log_audit(su["email"], su["role"], "DEVERROUILLAGE_COMPTE", "compte", ident,
+                    "Verrou de connexion levé par le superadmin", "")
+    return {"ok": True}
+
+
+@api_router.get("/me/expiring")
+async def my_expiring(user: dict = Depends(get_current_user)):
+    out: dict = {"licenses": [], "trainings": []}
+    today = date.today()
+    if user.get("employee_id") and user.get("pharmacy_id"):
+        docs = await db.licenses.find(
+            {"pharmacy_id": user["pharmacy_id"], "employee_id": user["employee_id"], "is_deleted": False},
+            {"_id": 0, "license_number": 1, "position": 1, "expiry_date": 1}).to_list(50)
+        for d in docs:
+            try:
+                days = (date.fromisoformat(d["expiry_date"]) - today).days
+            except ValueError:
+                continue
+            if days <= 60:
+                out["licenses"].append({**d, "days_left": days})
+    assigns = await db.training_assignments.find({"employee_email": user["email"]}, {"_id": 0}).to_list(100)
+    for a in assigns:
+        try:
+            days = (date.fromisoformat(a.get("due_date") or "") - today).days
+        except ValueError:
+            continue
+        if days > 14:
+            continue
+        best = await db.training_attempts.find_one(
+            {"training_id": a["training_id"], "user_email": user["email"], "passed": True}, {"_id": 0, "id": 1})
+        if best:
+            continue
+        training = await db.trainings.find_one({"id": a["training_id"], "status": "published"}, {"_id": 0, "title": 1})
+        if not training:
+            continue
+        out["trainings"].append({"training_id": a["training_id"], "title": training["title"],
+                                 "due_date": a["due_date"], "days_left": days, "overdue": days < 0})
+    out["licenses"].sort(key=lambda x: x["days_left"])
+    out["trainings"].sort(key=lambda x: x["days_left"])
+    return out
+
+
 app.include_router(api_router)
 
 _cors_origins = os.environ.get('CORS_ORIGINS', '').strip()

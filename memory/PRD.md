@@ -253,6 +253,12 @@ Fix post-test : validation titre vide ajoutée sur PUT /incidents (cohérence av
 3. **Export « mes données » complété** : GET /api/me/data-export inclut désormais `evaluations` (évaluations de performance Mongo) et `notifications` (ciblées employé/courriel) en plus du compte, profil, pointages ; les congés/relevés/quarts restent fusionnés côté frontend (localStorage).
 NOTE .env : nouvelle clé `TRUSTED_PROXY_HOPS=3` (préviews Emergent derrière Cloudflare). En déploiement mono-proxy, mettre 1.
 
+## Itération 32 (1 août 2026) — Tableau de bord sécurité (superadmin) + Bannière documents expirants (employé) — testée (curl E2E complet tous rôles + 2 screenshots UI)
+1. **Tableau de bord sécurité** (`SuperadminSecurity.tsx`, testid security-panel, placé après SuperadminOverview) : 4 tuiles (Connexions suspectes 7 j / Comptes verrouillés / Incidents ouverts / Mots de passe temporaires + suspendus) rouges si >0, liste des connexions IP inhabituelles (nom, courriel, IP, date), liste des comptes verrouillés avec bouton **Déverrouiller** (unlock-button-{identifier}), puces des incidents non clos colorées par gravité, bouton Actualiser. Backend : GET /api/superadmin/security-overview (403 admin/employé) ; POST /api/superadmin/unlock {identifier} → supprime le verrou login_attempts (404 si aucun, audit DEVERROUILLAGE_COMPTE) — utile aussi pour les verrous de borne punch (punch:IP).
+2. **Bannière « Vos documents à surveiller »** (`ExpiringDocsBanner.tsx`, testid expiring-docs-banner, rendue en haut du Tableau de bord pour tous les rôles connectés) : licences personnelles ≤60 jours (expiring-license-item, rouge si expirée) + formations assignées non réussies ≤14 jours ou en retard (expiring-training-item, cliquable → module Formations via requestNavigate). Backend : GET /api/me/expiring {licenses[{license_number, position, expiry_date, days_left}], trainings[{title, due_date, days_left, overdue}]} — réutilise la logique passed de training_attempts, formations publiées seulement.
+- Donnée démo : licence ATP-2026-4471 pour Julie (e2), expire 2026-08-26 (~25 j) → bannière ambre visible sur son tableau de bord.
+- Vérifié E2E : 403 rôles, verrouillage 5 échecs → visible dans le panneau → déverrouillage 200 → 404 re-unlock, volet formations testé avec assignation temporaire (créée puis retirée).
+
 ## Notes techniques
 - Ne jamais recréer `jsconfig.json` (conflit CRA avec tsconfig.json)
 - npm interdit — yarn uniquement
