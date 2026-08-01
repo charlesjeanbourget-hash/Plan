@@ -2319,6 +2319,20 @@ async def _mark_shifts_ready(pid: str) -> None:
         {"pharmacy_id": pid}, {"$set": {"pharmacy_id": pid, "shifts_server_ready": True}}, upsert=True)
 
 
+async def _notify_shift_change(pid: str, employee_id: str, title: str, detail: str, tone: str = "sky") -> None:
+    if not employee_id:
+        return
+    await db.notifications.insert_one({
+        "id": str(uuid.uuid4()), "pharmacy_id": pid, "target_employee_id": employee_id,
+        "title": title, "detail": detail, "module": "myspace", "icon": "schedule",
+        "tone": tone, "created_at": datetime.now(timezone.utc).isoformat()})
+
+
+def _fmt_shift_txt(d: dict) -> str:
+    dept = d.get("department") or "Général"
+    return f"le {d['date']} de {d['start']} à {d['end']}" + (f" ({dept})" if dept != "Général" else "")
+
+
 @api_router.get("/shifts")
 async def list_calendar_shifts(user: dict = Depends(get_current_user)):
     pid = user.get("pharmacy_id") or "ph1"
@@ -2331,8 +2345,11 @@ async def list_calendar_shifts(user: dict = Depends(get_current_user)):
 async def create_calendar_shift(payload: ShiftIn, principal: dict = Depends(get_principal)):
     pid = principal["pharmacy_id"] or "ph1"
     doc = _shift_doc(payload, pid)
-    await db.shifts.update_one({"id": doc["id"], "pharmacy_id": pid}, {"$set": doc}, upsert=True)
+    res = await db.shifts.update_one({"id": doc["id"], "pharmacy_id": pid}, {"$set": doc}, upsert=True)
     await _mark_shifts_ready(pid)
+    if res.upserted_id is not None and not doc["ai_generated"]:
+        await _notify_shift_change(pid, doc["employee_id"], "Nouveau quart ajouté",
+                                   f"Vous travaillez {_fmt_shift_txt(doc)}.", "sky")
     return doc
 
 
@@ -2370,16 +2387,33 @@ async def update_calendar_shift(shift_id: str, payload: ShiftPatchIn, principal:
     patch["updated_at"] = datetime.now(timezone.utc).isoformat()
     await db.shifts.update_one({"id": shift_id, "pharmacy_id": pid}, {"$set": patch})
     await _mark_shifts_ready(pid)
-    return {**doc, **patch}
+    merged = {**doc, **patch}
+    relevant = any(patch.get(k) is not None and patch[k] != doc.get(k)
+                   for k in ("date", "start", "end", "department", "employee_id"))
+    if relevant:
+        if patch.get("employee_id") and patch["employee_id"] != doc["employee_id"]:
+            await _notify_shift_change(pid, doc["employee_id"], "Quart retiré",
+                                       f"Votre quart {_fmt_shift_txt(doc)} a été réassigné.", "red")
+            await _notify_shift_change(pid, merged["employee_id"], "Nouveau quart ajouté",
+                                       f"Vous travaillez {_fmt_shift_txt(merged)}.", "sky")
+        else:
+            await _notify_shift_change(pid, doc["employee_id"], "Quart modifié",
+                                       f"Avant : {_fmt_shift_txt(doc)} → maintenant : {_fmt_shift_txt(merged)}.", "amber")
+    return merged
 
 
 @api_router.delete("/shifts/{shift_id}")
 async def delete_calendar_shift(shift_id: str, principal: dict = Depends(get_principal)):
     pid = principal["pharmacy_id"] or "ph1"
-    res = await db.shifts.delete_one({"id": shift_id, "pharmacy_id": pid})
-    await _mark_shifts_ready(pid)
-    if res.deleted_count == 0:
+    doc = await db.shifts.find_one({"id": shift_id, "pharmacy_id": pid}, {"_id": 0})
+    if not doc:
+        await _mark_shifts_ready(pid)
         raise HTTPException(status_code=404, detail="Quart introuvable.")
+    await db.shifts.delete_one({"id": shift_id, "pharmacy_id": pid})
+    await _mark_shifts_ready(pid)
+    if not doc.get("ai_generated"):
+        await _notify_shift_change(pid, doc["employee_id"], "Quart retiré",
+                                   f"Votre quart {_fmt_shift_txt(doc)} a été retiré de l'horaire.", "red")
     return {"status": "supprimé"}
 
 
@@ -4091,6 +4125,42 @@ async def run_monthly_budget_report(month: str = Query(""), principal: dict = De
 async def monthly_budget_report_job():
     sent = await send_monthly_budget_reports()
     logger.info(f"Rapport budget mensuel : {sent} courriel(s) envoyé(s)")
+
+
+@api_router.get("/reports/budget-history")
+async def budget_history(months: int = Query(6, ge=1, le=12), principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    today = datetime.now(timezone.utc).astimezone(MONTREAL_TZ).date()
+    labels = []
+    cur = today.replace(day=1)
+    for _ in range(months):
+        labels.append(cur.strftime("%Y-%m"))
+        cur = (cur - timedelta(days=1)).replace(day=1)
+    labels.reverse()
+    _, last_end = _month_bounds(labels[-1])
+    profiles = await db.employee_profiles.find(
+        {"pharmacy_id": pid}, {"_id": 0, "employee_id": 1, "hourly_rate": 1}).to_list(1000)
+    rate_by = {p["employee_id"]: float(p.get("hourly_rate") or 0) for p in profiles}
+    docs = await db.shifts.find(
+        {"pharmacy_id": pid, "date": {"$gte": f"{labels[0]}-01", "$lte": last_end.isoformat()}},
+        {"_id": 0}).to_list(50000)
+    by_month: dict = {m: {} for m in labels}
+    for s in docs:
+        m = s["date"][:7]
+        if m not in by_month:
+            continue
+        try:
+            h = max(0, _time_to_minutes(s["end"]) - _time_to_minutes(s["start"])) / 60
+        except (ValueError, AttributeError):
+            continue
+        c = h * rate_by.get(s["employee_id"], 0)
+        dept = s.get("department") or "Général"
+        by_month[m][dept] = by_month[m].get(dept, 0) + c
+    depts = [d for d in DEPARTMENTS_BE if any(d in by_month[m] for m in labels)]
+    return {"months": [{"month": m,
+                        "depts": {d: round(v, 2) for d, v in by_month[m].items()},
+                        "total": round(sum(by_month[m].values()), 2)} for m in labels],
+            "departments": depts}
 
 
 # ==================== Livraisons ====================

@@ -4,7 +4,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useHR } from '@/context/HRContext';
 import { ModuleKey, LicenseReportItem, Training, ScheduleProposal, Evaluation, Delivery, Appointment } from '@/types';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Bell, TreePalm, RefreshCw, BadgeCheck, GraduationCap, CheckCheck, CalendarCheck, ClipboardCheck, HandCoins, Truck, Stethoscope } from 'lucide-react';
+import { Bell, TreePalm, RefreshCw, BadgeCheck, GraduationCap, CheckCheck, CalendarCheck, ClipboardCheck, HandCoins, Truck, Stethoscope, X, Trash2 } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -42,13 +42,22 @@ export const NotificationBell = ({ onNavigate }: { onNavigate: (m: ModuleKey) =>
     const raw = localStorage.getItem(`luminahr_notif_read_v1_${currentUser?.id ?? ''}`);
     return raw ? (JSON.parse(raw) as string[]) : [];
   });
+  const dismissKey = `luminahr_notif_dismissed_v1_${currentUser?.id ?? ''}`;
+  const [dismissedIds, setDismissedIds] = useState<string[]>(() => {
+    const raw = localStorage.getItem(`luminahr_notif_dismissed_v1_${currentUser?.id ?? ''}`);
+    return raw ? (JSON.parse(raw) as string[]) : [];
+  });
 
   useEffect(() => {
     if (!token || !currentUser) return;
     const headers = { Authorization: `Bearer ${token}` };
-    axios.get<typeof serverNotifs>(`${API}/notifications`, { headers })
-      .then((r) => setServerNotifs(r.data))
-      .catch(() => undefined);
+    const loadServer = (): void => {
+      axios.get<typeof serverNotifs>(`${API}/notifications`, { headers })
+        .then((r) => setServerNotifs(r.data))
+        .catch(() => undefined);
+    };
+    loadServer();
+    const intervalId = window.setInterval(loadServer, 30000);
     if (currentUser.role === 'employee') {
       axios.get<Training[]>(`${API}/trainings`, { headers })
         .then((r) => setTrainings(r.data))
@@ -72,6 +81,7 @@ export const NotificationBell = ({ onNavigate }: { onNavigate: (m: ModuleKey) =>
         .then((r) => setLicenseItems(r.data.items))
         .catch(() => undefined);
     }
+    return () => window.clearInterval(intervalId);
   }, [token, currentUser]);
 
   const notifs = useMemo<Notif[]>(() => {
@@ -225,14 +235,24 @@ export const NotificationBell = ({ onNavigate }: { onNavigate: (m: ModuleKey) =>
         icon: 'license',
       }));
     }
-    return list;
-  }, [currentUser, state, trainings, licenseItems, proposals, evaluations, deliveries, appointments, serverNotifs, getEmployee]);
+    return list.filter((n) => !dismissedIds.includes(n.id));
+  }, [currentUser, state, trainings, licenseItems, proposals, evaluations, deliveries, appointments, serverNotifs, getEmployee, dismissedIds]);
 
   const unreadCount = notifs.filter((n) => !readIds.includes(n.id)).length;
 
   const persist = (ids: string[]): void => {
     setReadIds(ids);
     localStorage.setItem(readKey, JSON.stringify(ids));
+  };
+
+  const persistDismissed = (ids: string[]): void => {
+    const capped = ids.slice(-300);
+    setDismissedIds(capped);
+    localStorage.setItem(dismissKey, JSON.stringify(capped));
+  };
+
+  const dismissNotif = (id: string): void => {
+    persistDismissed([...dismissedIds, id]);
   };
 
   const clickNotif = (n: Notif): void => {
@@ -264,13 +284,22 @@ export const NotificationBell = ({ onNavigate }: { onNavigate: (m: ModuleKey) =>
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
           <p className="font-heading font-bold text-sm text-slate-900">Notifications</p>
           {notifs.length > 0 && (
-            <button
-              data-testid="mark-all-read-button"
-              onClick={() => persist(notifs.map((n) => n.id))}
-              className="inline-flex items-center gap-1 text-xs text-emerald-700 hover:text-emerald-900 font-semibold"
-            >
-              <CheckCheck className="w-3.5 h-3.5" /> Tout marquer comme lu
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                data-testid="mark-all-read-button"
+                onClick={() => persist(notifs.map((n) => n.id))}
+                className="inline-flex items-center gap-1 text-xs text-emerald-700 hover:text-emerald-900 font-semibold"
+              >
+                <CheckCheck className="w-3.5 h-3.5" /> Tout lu
+              </button>
+              <button
+                data-testid="dismiss-all-button"
+                onClick={() => persistDismissed([...dismissedIds, ...notifs.map((n) => n.id)])}
+                className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-red-600 font-semibold"
+              >
+                <Trash2 className="w-3.5 h-3.5" /> Tout effacer
+              </button>
+            </div>
           )}
         </div>
         <div className="max-h-96 overflow-y-auto">
@@ -281,11 +310,14 @@ export const NotificationBell = ({ onNavigate }: { onNavigate: (m: ModuleKey) =>
             const Icon = ICONS[n.icon];
             const isRead = readIds.includes(n.id);
             return (
-              <button
+              <div
                 key={n.id}
                 data-testid={`notification-item-${n.id}`}
+                role="button"
+                tabIndex={0}
                 onClick={() => clickNotif(n)}
-                className={`w-full flex items-start gap-3 px-4 py-3 text-left border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-colors ${isRead ? 'opacity-60' : ''}`}
+                onKeyDown={(e) => { if (e.key === 'Enter') clickNotif(n); }}
+                className={`group w-full flex items-start gap-3 px-4 py-3 text-left border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-colors cursor-pointer ${isRead ? 'opacity-60' : ''}`}
               >
                 <span className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${TONES[n.tone]}`}>
                   <Icon className="w-4 h-4" />
@@ -295,7 +327,15 @@ export const NotificationBell = ({ onNavigate }: { onNavigate: (m: ModuleKey) =>
                   <span className="block text-xs text-slate-500 truncate">{n.detail}</span>
                 </span>
                 {!isRead && <span className="w-2 h-2 rounded-full bg-emerald-500 mt-1.5 shrink-0" />}
-              </button>
+                <button
+                  data-testid={`notification-dismiss-${n.id}`}
+                  aria-label="Fermer la notification"
+                  onClick={(e) => { e.stopPropagation(); dismissNotif(n.id); }}
+                  className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-slate-300 hover:text-red-600 hover:bg-red-50 transition-colors"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
             );
           })}
         </div>

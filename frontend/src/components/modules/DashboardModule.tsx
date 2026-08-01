@@ -5,6 +5,7 @@ import { useAuth } from '@/context/AuthContext';
 import { ModuleHeader, StatCard, StatusBadge } from '@/components/modules/shared';
 import { HonorRoll } from '@/components/HonorRoll';
 import { ExpiringDocsBanner } from '@/components/ExpiringDocsBanner';
+import { BudgetHistoryChart } from '@/components/BudgetHistoryChart';
 import { Users, CalendarClock, Briefcase, TreePalm, BadgeAlert } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -61,6 +62,8 @@ export default function DashboardModule(): JSX.Element {
         <StatCard label="Demandes de congé" value={String(pendingLeaves)} icon={TreePalm} hint="En attente d'approbation" />
         <StatCard label="Offres actives" value={String(activeOffers)} icon={Briefcase} hint={`${state.candidates.length} candidatures reçues`} />
       </div>
+
+      {isAdmin && <BudgetHistoryChart />}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         <HonorRoll />

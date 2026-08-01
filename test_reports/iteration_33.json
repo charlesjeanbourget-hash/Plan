@@ -1,0 +1,27 @@
+{
+  "summary": "Iteration 33 — Budget history chart + shift-change notifications + dismissible notifications. Backend pytest: 6/6 passed (budget-history 200/422/403, POST/PUT/DELETE shift notifs with correct tones sky/amber/red and 'Avant:…→maintenant:…' detail, reassignment double-notif, AI shift silent, upsert non-duplicate). Frontend Playwright: chart visible for admin (stacked bars + legend juill.26/août 26 data), NOT for Julie, bell shows badge 9+, 'Nouveau quart ajouté' visible, individual X dismiss decrements list and persists across reload, 'Tout effacer' clears list and persists (Aucune notification), mark-all-read-button and Horaires module intact. Cleanup executed (ntest-a/ntest-ai/ntest-fe deleted).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dashboard - BudgetHistoryChart", "issues": ["Recharts console warnings 'width(-1) height(-1)' on first render — cosmetic, chart still renders correctly after resize; consider ensuring parent container has explicit min-height on first paint."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration33.py",
+    "/app/test_reports/pytest/iter33.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Minor: recharts ResponsiveContainer initial-render warning (width/height -1). Wrap in a parent with min-height to silence."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration33.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "Test shifts ntest-a/ntest-ai/ntest-fe created and deleted after test; test notifications remain in db.notifications for e2/e3 targeting 2026-08-07 (not purged — see note below).",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "admin@luminahr.ca / Nlpx!tTE3Aw27 ; julie@luminahr.ca / O1ka!gfVV6e54",
+  "context_for_next_testing_agent": "All 3 features validated E2E. Notification field is 'detail' (not 'message'/'body'). Tones observed: sky/amber/red. Some residual db.notifications entries from tests remain for e2/e3 on 2026-08-07; main agent can purge via mongo shell if desired. Existing shifts and week publications untouched.",
+  "rca_of_the_issue": "N/A — all features pass."
+}
