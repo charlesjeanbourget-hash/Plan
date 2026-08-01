@@ -2,6 +2,7 @@ import { useState, FormEvent } from 'react';
 import { View } from '@/types';
 import { useAuth } from '@/context/AuthContext';
 import { BrandLogo } from '@/components/BrandLogo';
+import { ForgotPasswordDialog } from '@/components/ForgotPasswordDialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -20,6 +21,7 @@ export default function LoginPage({ onNavigate, onSuccess }: Props): JSX.Element
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [forgotOpen, setForgotOpen] = useState(false);
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
@@ -96,13 +98,22 @@ export default function LoginPage({ onNavigate, onSuccess }: Props): JSX.Element
               {loading ? 'Connexion…' : 'Se connecter'}
             </Button>
           </form>
-          <div className="mt-8 rounded-lg bg-slate-50 border border-slate-200 p-4 text-xs text-slate-500 space-y-1">
-            <p className="font-semibold text-slate-700">Comptes de démonstration :</p>
-            <p>Admin — admin@luminahr.ca / admin123</p>
-            <p>Employée — julie@luminahr.ca / employe123</p>
-          </div>
+          <button
+            type="button"
+            data-testid="forgot-password-button"
+            onClick={() => setForgotOpen(true)}
+            className="mt-5 block w-full text-center text-sm text-slate-500 hover:text-emerald-700 transition-colors"
+          >
+            Mot de passe ou identifiant oublié ?
+          </button>
         </div>
       </div>
+      <ForgotPasswordDialog
+        open={forgotOpen}
+        onOpenChange={setForgotOpen}
+        initialEmail={email}
+        onReset={(e) => { setEmail(e); setPassword(''); setError(''); }}
+      />
     </div>
   );
 }

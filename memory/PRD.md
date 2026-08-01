@@ -268,6 +268,12 @@ Choix client : approbation des employés conservée EN OPTION + pastille « IA �
 - Vérifié E2E réel : génération 14 quarts semaine 2026-08-10 → auto-apparus avec pastilles → drag Lun→Sam OK pastille conservée → suppression proposition → 0 pastille restante. (Proposition de test supprimée ; e1cfdd12 semaine 2026-08-02 conservée.)
 - NOTE : les quarts vivent en localStorage par navigateur (architecture existante) — l'auto-ajout se produit sur chaque appareil à l'ouverture du module Horaires.
 
+## Itération 34 (1 août 2026) — Récupération de compte par vérification courriel — testée E2E (curl 8 cas + UI Playwright)
+- **Bouton « Mot de passe ou identifiant oublié ? »** (forgot-password-button) sous le formulaire de connexion → `ForgotPasswordDialog.tsx` en 2 étapes : (1) courriel → envoi ; (2) code 6 chiffres + nouveau mot de passe + confirmation (œil afficher/masquer, lien « Renvoyer un code »). Après succès : courriel prérempli sur la page de connexion.
+- **Backend** : POST /api/auth/forgot-password {email} — réponse TOUJOURS générique 200 (anti-énumération), throttle 5/h par courriel OU IP (429), code 6 chiffres haché (sha256+PUNCH_PEPPER, préfixe reset:) stocké dans Mongo `password_resets` (expiration 15 min, invalidation des codes précédents), courriel Resend avec **l'identifiant de connexion** (récupération du nom d'utilisateur) + code ; audit DEMANDE_REINIT_MDP. POST /api/auth/reset-password {email, code, new_password} — max 5 tentatives par code, politique de mots de passe forts réutilisée, marque le code utilisé, lève le verrou brute-force, is_temporary_password=False, audit REINIT_MDP_COURRIEL + login_event.
+- **Nettoyage sécurité au passage** : le bloc « Comptes de démonstration » (admin123/employe123 — obsolètes et dangereux) a été RETIRÉ de la page de connexion.
+- Vérifié E2E : générique inconnu ✓, mauvais code 400 ✓, mdp faible 400 ✓, reset 200 + login ✓, réutilisation code 400 ✓, throttle 429 ✓, courriel réel livré à charlesjeanbourget@gmail.com ✓ (mode test Resend : seuls les courriels vers le propriétaire partent tant que le domaine n'est pas vérifié).
+
 ## Notes techniques
 - Ne jamais recréer `jsconfig.json` (conflit CRA avec tsconfig.json)
 - npm interdit — yarn uniquement
