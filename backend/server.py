@@ -230,7 +230,27 @@ async def auth_login(payload: LoginIn, request: Request):
     if user.get("suspended"):
         raise HTTPException(status_code=403, detail="Compte suspendu. Contactez votre superadministrateur.")
     await db.login_attempts.delete_one({"identifier": identifier})
+    await record_login_event(user, "CONNEXION", request)
     return {"access_token": create_access_token(user), "user": user_public(user)}
+
+
+def client_ip(request: Request) -> str:
+    fwd = request.headers.get("x-forwarded-for", "")
+    return fwd.split(",")[-1].strip() if fwd else (request.client.host if request.client else "inconnu")
+
+
+async def record_login_event(user: dict, event: str, request: Request):
+    await db.login_events.insert_one({
+        "id": str(uuid.uuid4()),
+        "user_id": user["id"],
+        "email": user["email"],
+        "name": user.get("name", ""),
+        "role": user["role"],
+        "event": event,
+        "ip": client_ip(request),
+        "user_agent": request.headers.get("user-agent", "")[:300],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
 
 
 @api_router.get("/auth/me")
@@ -251,7 +271,7 @@ def validate_password_strength(pw: str) -> Optional[str]:
 
 
 @api_router.post("/auth/change-password")
-async def auth_change_password(payload: ChangePasswordIn, user: dict = Depends(get_current_user)):
+async def auth_change_password(payload: ChangePasswordIn, request: Request, user: dict = Depends(get_current_user)):
     current_password = payload.current_password.strip()
     new_password = payload.new_password.strip()
     if not verify_password(current_password, user["password_hash"]):
@@ -267,6 +287,7 @@ async def auth_change_password(payload: ChangePasswordIn, user: dict = Depends(g
     )
     await log_audit(user["email"], user["role"], "CHANGEMENT_MOT_DE_PASSE", "utilisateur", user["id"],
                     "Mot de passe modifié par l'utilisateur", user.get("pharmacy_id") or "")
+    await record_login_event(user, "CHANGEMENT_MOT_DE_PASSE", request)
     return {"status": "modifié"}
 
 
@@ -4532,6 +4553,109 @@ async def delete_demo_request(req_id: str, su: dict = Depends(require_superadmin
     await log_audit(su["email"], su["role"], "SUPPRESSION_DEMO", "demo", req_id,
                     "Demande de démo supprimée", "")
     return {"ok": True}
+
+
+# ==================== Loi 25 — Journal des connexions, Incidents, Export de données ====================
+
+@api_router.get("/superadmin/login-events")
+async def list_login_events(su: dict = Depends(require_superadmin)):
+    docs = await db.login_events.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    return docs
+
+
+INCIDENT_STATUSES = ("nouveau", "en_cours", "notifie", "clos")
+INCIDENT_SEVERITIES = ("faible", "moyen", "eleve", "critique")
+
+
+class IncidentIn(BaseModel):
+    title: str
+    description: str = ""
+    discovered_at: str = ""
+    severity: str = "moyen"
+    affected_count: int = 0
+    measures: str = ""
+    cai_notified: bool = False
+    persons_notified: bool = False
+    status: str = "nouveau"
+
+
+@api_router.get("/incidents")
+async def list_incidents(su: dict = Depends(require_superadmin)):
+    return await db.incidents.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+
+
+@api_router.post("/incidents")
+async def create_incident(payload: IncidentIn, su: dict = Depends(require_superadmin)):
+    if not payload.title.strip():
+        raise HTTPException(status_code=400, detail="Le titre est requis.")
+    if payload.severity not in INCIDENT_SEVERITIES:
+        raise HTTPException(status_code=400, detail="Gravité invalide.")
+    if payload.status not in INCIDENT_STATUSES:
+        raise HTTPException(status_code=400, detail="Statut invalide.")
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "id": str(uuid.uuid4()), "title": payload.title.strip(), "description": payload.description.strip(),
+        "discovered_at": payload.discovered_at, "severity": payload.severity,
+        "affected_count": max(0, payload.affected_count), "measures": payload.measures.strip(),
+        "cai_notified": payload.cai_notified, "persons_notified": payload.persons_notified,
+        "status": payload.status, "created_by": su["email"], "created_at": now, "updated_at": now,
+    }
+    await db.incidents.insert_one({**doc})
+    await log_audit(su["email"], su["role"], "CREATION_INCIDENT", "incident", doc["id"],
+                    f"Incident de confidentialité : {doc['title']}", "")
+    return doc
+
+
+@api_router.put("/incidents/{incident_id}")
+async def update_incident(incident_id: str, payload: IncidentIn, su: dict = Depends(require_superadmin)):
+    if payload.severity not in INCIDENT_SEVERITIES or payload.status not in INCIDENT_STATUSES:
+        raise HTTPException(status_code=400, detail="Gravité ou statut invalide.")
+    patch = {
+        "title": payload.title.strip(), "description": payload.description.strip(),
+        "discovered_at": payload.discovered_at, "severity": payload.severity,
+        "affected_count": max(0, payload.affected_count), "measures": payload.measures.strip(),
+        "cai_notified": payload.cai_notified, "persons_notified": payload.persons_notified,
+        "status": payload.status, "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    res = await db.incidents.update_one({"id": incident_id}, {"$set": patch})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Incident introuvable.")
+    await log_audit(su["email"], su["role"], "MODIFICATION_INCIDENT", "incident", incident_id,
+                    f"Incident mis à jour : {patch['title']} ({patch['status']})", "")
+    return {"ok": True}
+
+
+@api_router.delete("/incidents/{incident_id}")
+async def delete_incident(incident_id: str, su: dict = Depends(require_superadmin)):
+    res = await db.incidents.delete_one({"id": incident_id})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Incident introuvable.")
+    await log_audit(su["email"], su["role"], "SUPPRESSION_INCIDENT", "incident", incident_id,
+                    "Incident supprimé du registre", "")
+    return {"ok": True}
+
+
+@api_router.get("/me/data-export")
+async def my_data_export(user: dict = Depends(get_current_user)):
+    export = {
+        "genere_le": datetime.now(timezone.utc).isoformat(),
+        "avis": "Copie de vos renseignements personnels détenus par Arrière Plan (droit d'accès — Loi 25).",
+        "compte": user_public(user),
+        "profil": None,
+        "pointages": [],
+    }
+    if user.get("employee_id") and user.get("pharmacy_id"):
+        prof = await db.employee_profiles.find_one(
+            {"pharmacy_id": user["pharmacy_id"], "employee_id": user["employee_id"]}, {"_id": 0})
+        if prof:
+            export["profil"] = sanitize_profile(prof)
+        punches = await db.punches.find(
+            {"pharmacy_id": user["pharmacy_id"], "employee_id": user["employee_id"]},
+            {"_id": 0}).sort("punch_in", -1).to_list(2000)
+        export["pointages"] = punches
+    await log_audit(user["email"], user["role"], "EXPORT_DONNEES_PERSONNELLES", "utilisateur", user["id"],
+                    "Export de ses propres données (droit d'accès Loi 25)", user.get("pharmacy_id") or "")
+    return export
 
 
 app.include_router(api_router)

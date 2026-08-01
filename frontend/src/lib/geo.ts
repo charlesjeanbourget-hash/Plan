@@ -4,9 +4,22 @@ export interface PunchGeo {
   accuracy: number;
 }
 
+const CONSENT_KEY = 'ap_geo_consent';
+
+export type GeoConsent = 'granted' | 'denied' | null;
+
+export const getGeoConsent = (): GeoConsent => {
+  const v = localStorage.getItem(CONSENT_KEY);
+  return v === 'granted' || v === 'denied' ? v : null;
+};
+
+export const setGeoConsent = (value: 'granted' | 'denied'): void => {
+  localStorage.setItem(CONSENT_KEY, value);
+};
+
 export const getPunchGeo = (): Promise<PunchGeo | null> =>
   new Promise((resolve) => {
-    if (!('geolocation' in navigator)) {
+    if (getGeoConsent() !== 'granted' || !('geolocation' in navigator)) {
       resolve(null);
       return;
     }

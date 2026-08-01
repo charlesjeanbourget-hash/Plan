@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { CalendarClock, Download, TreePalm, ArrowLeftRight, Plus } from 'lucide-react';
+import { CalendarClock, Download, TreePalm, ArrowLeftRight, Plus, ShieldCheck } from 'lucide-react';
 import { downloadPayStub } from '@/lib/paystub';
 import { MyPunchCard } from '@/components/MyPunchCard';
 import { NurseDayPanel } from '@/components/NurseDayPanel';
@@ -21,9 +21,36 @@ const LEAVE_TYPES: LeaveType[] = ['Vacances', 'Maladie', 'Personnel', 'Formation
 
 export default function MySpaceModule(): JSX.Element {
   const { state, getEmployee, addLeaveRequest, addShiftSwap, updateShiftSwap, setShiftSwapStatus } = useHR();
-  const { currentUser } = useAuth();
+  const { currentUser, token } = useAuth();
   const me = state.employees.find((e) => e.id === currentUser?.employeeId);
   const pharmacy = state.pharmacies.find((p) => p.id === currentUser?.pharmacyId);
+
+  const exportMyData = async (): Promise<void> => {
+    try {
+      const res = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/me/data-export`, {
+        headers: { Authorization: `Bearer ${token ?? ''}` },
+      });
+      if (!res.ok) throw new Error();
+      const server = await res.json();
+      const full = {
+        ...server,
+        dossier_local: me ?? null,
+        conges: me ? state.leaveRequests.filter((l) => l.employeeId === me.id) : [],
+        releves_de_paie: me ? state.payrollEntries.filter((p) => p.employeeId === me.id) : [],
+        quarts: me ? state.shifts.filter((s) => s.employeeId === me.id) : [],
+      };
+      const blob = new Blob([JSON.stringify(full, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `mes-donnees-arriere-plan-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('Vos données personnelles ont été téléchargées.');
+    } catch {
+      toast.error('Export impossible pour le moment.');
+    }
+  };
 
   const [leaveOpen, setLeaveOpen] = useState(false);
   const [leaveType, setLeaveType] = useState<LeaveType>('Vacances');
@@ -74,6 +101,11 @@ export default function MySpaceModule(): JSX.Element {
       <ModuleHeader
         title="Mon espace"
         subtitle={`${me.position} · ${state.branches.find((b) => b.id === me.branchId)?.name ?? ''}`}
+        action={
+          <Button data-testid="export-my-data-button" variant="outline" onClick={() => void exportMyData()} className="rounded-full border-emerald-300 text-emerald-800 hover:bg-emerald-50">
+            <ShieldCheck className="w-4 h-4 mr-1" /> Télécharger mes données
+          </Button>
+        }
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

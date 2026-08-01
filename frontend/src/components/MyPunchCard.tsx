@@ -5,7 +5,8 @@ import { PunchStatus, PunchActionResult } from '@/types';
 import { fmtTime } from '@/lib/pharmacy';
 import { Button } from '@/components/ui/button';
 import { Timer, LogIn, LogOut } from 'lucide-react';
-import { getPunchGeo } from '@/lib/geo';
+import { getPunchGeo, getGeoConsent, setGeoConsent } from '@/lib/geo';
+import { GeoConsentDialog } from '@/components/GeoConsentDialog';
 import { toast } from 'sonner';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -15,6 +16,7 @@ export const MyPunchCard = (): JSX.Element => {
   const headers = { Authorization: `Bearer ${token ?? ''}` };
   const [status, setStatus] = useState<PunchStatus | null>(null);
   const [busy, setBusy] = useState(false);
+  const [consentOpen, setConsentOpen] = useState(false);
 
   const refresh = useCallback(async (): Promise<void> => {
     try {
@@ -44,6 +46,20 @@ export const MyPunchCard = (): JSX.Element => {
     }
   };
 
+  const onPunchClick = (): void => {
+    if (getGeoConsent() === null) {
+      setConsentOpen(true);
+      return;
+    }
+    void punch();
+  };
+
+  const onConsent = (granted: boolean): void => {
+    setGeoConsent(granted ? 'granted' : 'denied');
+    setConsentOpen(false);
+    void punch();
+  };
+
   const open = status?.open ?? null;
 
   return (
@@ -68,7 +84,7 @@ export const MyPunchCard = (): JSX.Element => {
         <Button
           data-testid="punch-me-button"
           disabled={busy || status === null}
-          onClick={() => void punch()}
+          onClick={onPunchClick}
           className={`rounded-full ${open ? 'bg-sky-600 hover:bg-sky-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}
         >
           {open ? <><LogOut className="w-4 h-4 mr-1" /> Puncher la sortie</> : <><LogIn className="w-4 h-4 mr-1" /> Puncher l'entrée</>}
@@ -87,6 +103,7 @@ export const MyPunchCard = (): JSX.Element => {
       <p className="text-xs text-slate-400 mt-4">
         Seules les heures punchées (NIP ou bouton ci-dessus) ou saisies par l'administration comptent pour la paie.
       </p>
+      <GeoConsentDialog open={consentOpen} onDecision={onConsent} />
     </div>
   );
 };
