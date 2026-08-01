@@ -1,0 +1,25 @@
+{
+  "summary": "Iteration 32 — Testing des 3 nouvelles fonctionnalités : (1) synchronisation multi-appareils des quarts via /api/shifts, (2) jeux de priorités nommés (priority_sets) dans schedule_settings, (3) rapport budget mensuel POST /api/reports/budget-monthly/run + bouton budget-monthly-report-btn. Backend : 14/14 tests pytest PASS (nouveau fichier test_iteration32.py). Frontend : TESTS 2, 3, 4, 5, 6 tous PASS via Playwright multi-contexte. Aucun bug bloquant identifié.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration32.py",
+    "/app/test_reports/pytest/iter32.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "backend/server.py::_validate_shift_core (ligne 2295) : ne valide QUE le format HH:MM. La règle métier 'heures invalides → 400' (mentionnée dans la spec) ne couvre PAS le cas end<=start ; un PUT avec start='14:00' end='10:00' est actuellement accepté (200). À renforcer si la contrainte end>start doit être appliquée côté serveur (actuellement seulement côté UI).",
+    "Idempotence multi-appareils confirmée : POST /api/shifts avec même id → upsert (une seule ligne en base). Bien.",
+    "Sync : polling 15 s + focus fonctionne correctement — l'événement 'focus' déclenche re-fetch et met à jour luminahr_state_v4 côté client B en <4 s après mutation en A."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration32.py (nouveau)"
+  ],
+  "success_rate": {"backend": "100% (14/14)", "frontend": "100% (5/5 tests)"},
+  "seed_data_creation": "Aucune donnée résiduelle. Tous les quarts de test (TEST_shift_*, TEST_sync_*, TEST_upd_*) et jeux de priorités (TEST_Été, TEST_prioset_*) créés durant les tests ont été supprimés. Les ~46 quarts existants et les propositions IA des semaines 2026-08-02/2026-08-03 n'ont pas été touchés.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "admin@luminahr.ca / Nlpx!tTE3Aw27 · julie@luminahr.ca / O1ka!gfVV6e54",
+  "context_for_next_testing_agent": "TEST 1 (backend /api/shifts CRUD): PASS — GET renvoie {shifts:46, migrated:true}, POST upsert idempotent par id (re-POST → 1 seule ligne), PUT patch partiel OK (end/department), département invalide → fallback 'Général' (200), HH:MM invalide → 400, DELETE 404 si inexistant. Employé Julie : GET 200, POST/PUT/DELETE → 403. TEST 2 (sync multi-appareils via 2 contextes navigateurs): PASS — création dans A visible en B après focus (<4 s), suppression dans A disparaît de B, modification (PUT end=15:00) reflétée en B. STATE_KEY côté client = 'luminahr_state_v4' (pas v3). TEST 3 (persistance serveur): PASS — nouveau contexte sans localStorage charge les 46 quarts du serveur. TEST 4 (jeux de priorités): PASS — création 'TEST_Été' via UI persisté côté serveur (priority_sets), sélection re-applique, delete via UI + API. PUT priority_sets sans nom → 400. TEST 5 (rapport budget mensuel): PASS — bouton budget-monthly-report-btn clique, toast 'Aucun courriel envoyé (aucune donnée le mois dernier ou clé Resend manquante).' (attendu en mode test Resend). POST /api/reports/budget-monthly/run?month=2026-08 → 200 {sent:0}. month=13-99 → 400. Employé → 403. TEST 6 (régression): PASS — calendar-dept-filter et dept-totals-panel toujours présents. TEST 7 (nettoyage): PASS — tous objets de test supprimés.",
+  "rca_of_the_issue": "Aucun bug bloquant. Seule remarque : la validation d'heures côté serveur (_validate_shift_core) accepte end<=start tant que le format HH:MM est correct. À renforcer si la contrainte est requise côté API (actuellement seulement UI)."
+}

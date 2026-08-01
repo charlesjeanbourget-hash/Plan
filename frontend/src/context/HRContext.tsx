@@ -1,4 +1,5 @@
-import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react';
+import { createContext, useContext, useEffect, useState, ReactNode, useCallback, useRef } from 'react';
+import axios from 'axios';
 import {
   HRState, Employee, Shift, Task, JobOffer, Candidate, LeaveRequest, ReplacementRequest,
   PayrollEntry, PerformanceReview, OnboardingItem, Contract, Benefit, FAQItem, Pharmacy,
@@ -7,8 +8,60 @@ import {
 import { SEED_STATE } from '@/context/seedData';
 
 const STATE_KEY = 'luminahr_state_v4';
+const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const AUTH_KEY = 'luminahr_auth_v3';
 
 export const uid = (): string => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+
+const getToken = (): string => {
+  try {
+    return (JSON.parse(localStorage.getItem(AUTH_KEY) ?? '{}') as { token?: string }).token ?? '';
+  } catch {
+    return '';
+  }
+};
+
+const authHeaders = (): Record<string, string> => ({ Authorization: `Bearer ${getToken()}` });
+
+interface ServerShift {
+  id: string;
+  employee_id: string;
+  date: string;
+  start: string;
+  end: string;
+  department?: string;
+  resource_ids?: string[];
+  ai_generated?: boolean;
+  proposal_id?: string;
+  notes?: string;
+}
+
+const shiftFromServer = (d: ServerShift): Shift => ({
+  id: d.id,
+  employeeId: d.employee_id,
+  date: d.date,
+  startTime: d.start,
+  endTime: d.end,
+  department: d.department || 'Général',
+  resourceIds: d.resource_ids ?? [],
+  aiGenerated: d.ai_generated || undefined,
+  proposalId: d.proposal_id || undefined,
+  notes: d.notes || undefined,
+});
+
+const shiftToServer = (s: Shift, branchId: string): Record<string, unknown> => ({
+  id: s.id,
+  employee_id: s.employeeId,
+  date: s.date,
+  start: s.startTime,
+  end: s.endTime,
+  department: s.department ?? 'Général',
+  resource_ids: s.resourceIds ?? [],
+  ai_generated: s.aiGenerated ?? false,
+  proposal_id: s.proposalId ?? '',
+  branch_id: branchId,
+  notes: s.notes ?? '',
+});
 
 interface HRContextValue {
   state: HRState;
@@ -17,7 +70,7 @@ interface HRContextValue {
   updateEmployee: (id: string, patch: Partial<Employee>) => void;
   anonymizeEmployee: (id: string) => void;
   deleteEmployee: (id: string) => void;
-  addShift: (s: Omit<Shift, 'id'>) => void;
+  addShift: (s: Omit<Shift, 'id'> & { id?: string }) => void;
   updateShift: (id: string, patch: Partial<Shift>) => void;
   deleteShift: (id: string) => void;
   addShiftSwap: (s: Omit<ShiftSwapRequest, 'id'>) => void;
@@ -68,10 +121,46 @@ const loadState = (): HRState => {
 
 export const HRProvider = ({ children }: { children: ReactNode }) => {
   const [state, setState] = useState<HRState>(loadState);
+  const stateRef = useRef(state);
 
   useEffect(() => {
+    stateRef.current = state;
     localStorage.setItem(STATE_KEY, JSON.stringify(state));
   }, [state]);
+
+  const branchOf = useCallback((employeeId: string): string =>
+    stateRef.current.employees.find((e) => e.id === employeeId)?.branchId ?? '', []);
+
+  const syncShifts = useCallback(async (): Promise<void> => {
+    if (!getToken()) return;
+    try {
+      const res = await axios.get<{ shifts: ServerShift[]; migrated: boolean }>(`${API}/shifts`, { headers: authHeaders() });
+      if (!res.data.migrated) {
+        const local = stateRef.current.shifts;
+        if (local.length > 0) {
+          await axios.post(`${API}/shifts/bulk`,
+            { shifts: local.map((s) => shiftToServer(s, branchOf(s.employeeId))) },
+            { headers: authHeaders() }).catch(() => undefined);
+        }
+        return;
+      }
+      const server = res.data.shifts.map(shiftFromServer);
+      setState((prev) => ({ ...prev, shifts: server }));
+    } catch {
+      /* hors ligne : on garde l'état local */
+    }
+  }, [branchOf]);
+
+  useEffect(() => {
+    void syncShifts();
+    const intervalId = window.setInterval(() => void syncShifts(), 15000);
+    const onFocus = (): void => void syncShifts();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [syncShifts]);
 
   const patchList = useCallback(
     <K extends keyof HRState>(key: K, fn: (items: HRState[K]) => HRState[K]) => {
@@ -104,10 +193,41 @@ export const HRProvider = ({ children }: { children: ReactNode }) => {
       } : i))),
     deleteEmployee: (id) =>
       patchList('employees', (items) => items.filter((i) => i.id !== id)),
-    addShift: (s) => patchList('shifts', (items) => [...items, { ...s, id: uid() }]),
-    updateShift: (id, patch) =>
-      patchList('shifts', (items) => items.map((i) => (i.id === id ? { ...i, ...patch } : i))),
-    deleteShift: (id) => patchList('shifts', (items) => items.filter((i) => i.id !== id)),
+    addShift: (s) => {
+      const id = s.id ?? uid();
+      const shift: Shift = { ...s, id };
+      patchList('shifts', (items) => (items.some((i) => i.id === id) ? items : [...items, shift]));
+      if (getToken()) {
+        void axios.post(`${API}/shifts`, shiftToServer(shift, branchOf(shift.employeeId)), { headers: authHeaders() }).catch(() => undefined);
+      }
+    },
+    updateShift: (id, patch) => {
+      patchList('shifts', (items) => items.map((i) => (i.id === id ? { ...i, ...patch } : i)));
+      if (getToken()) {
+        const body: Record<string, unknown> = {};
+        if (patch.employeeId !== undefined) {
+          body.employee_id = patch.employeeId;
+          body.branch_id = branchOf(patch.employeeId);
+        }
+        if (patch.date !== undefined) body.date = patch.date;
+        if (patch.startTime !== undefined) body.start = patch.startTime;
+        if (patch.endTime !== undefined) body.end = patch.endTime;
+        if (patch.department !== undefined) body.department = patch.department;
+        if (patch.resourceIds !== undefined) body.resource_ids = patch.resourceIds;
+        if (patch.aiGenerated !== undefined) body.ai_generated = patch.aiGenerated;
+        if (patch.proposalId !== undefined) body.proposal_id = patch.proposalId;
+        if (patch.notes !== undefined) body.notes = patch.notes;
+        if (Object.keys(body).length > 0) {
+          void axios.put(`${API}/shifts/${id}`, body, { headers: authHeaders() }).catch(() => undefined);
+        }
+      }
+    },
+    deleteShift: (id) => {
+      patchList('shifts', (items) => items.filter((i) => i.id !== id));
+      if (getToken()) {
+        void axios.delete(`${API}/shifts/${id}`, { headers: authHeaders() }).catch(() => undefined);
+      }
+    },
     addShiftSwap: (s) => patchList('shiftSwaps', (items) => [{ ...s, id: uid() }, ...items]),
     updateShiftSwap: (id, patch) =>
       patchList('shiftSwaps', (items) => items.map((i) => (i.id === id ? { ...i, ...patch } : i))),

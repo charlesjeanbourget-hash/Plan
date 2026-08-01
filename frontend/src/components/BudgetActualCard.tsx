@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { useAuth } from '@/context/AuthContext';
 import { addDaysIso, mondayOf } from '@/lib/schedule';
-import { ChevronLeft, ChevronRight, Scale, ChevronDown, ChevronUp } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Scale, ChevronDown, ChevronUp, Mail } from 'lucide-react';
+import { toast } from 'sonner';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -34,6 +35,21 @@ export const BudgetActualCard = (): JSX.Element => {
   const [offset, setOffset] = useState(0);
   const [data, setData] = useState<CostData | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [sendingReport, setSendingReport] = useState(false);
+
+  const sendMonthlyReport = async (): Promise<void> => {
+    setSendingReport(true);
+    try {
+      const res = await axios.post<{ sent: number }>(`${API}/reports/budget-monthly/run`, null, { headers: { Authorization: `Bearer ${token ?? ''}` } });
+      toast.success(res.data.sent > 0
+        ? `Rapport budget du mois dernier envoyé (${res.data.sent} courriel(s)) — envoi automatique chaque 1er du mois.`
+        : 'Aucun courriel envoyé (aucune donnée le mois dernier ou clé Resend manquante).');
+    } catch {
+      toast.error('Envoi du rapport budget impossible.');
+    } finally {
+      setSendingReport(false);
+    }
+  };
 
   const start = addDaysIso(mondayOf(todayIso()), offset * 7);
   const end = addDaysIso(start, 6);
@@ -61,6 +77,9 @@ export const BudgetActualCard = (): JSX.Element => {
           <Scale className="w-4 h-4 text-bronze-600" /> Budget prévu vs heures punchées
         </h2>
         <div className="flex items-center gap-1.5">
+          <button data-testid="budget-monthly-report-btn" onClick={() => void sendMonthlyReport()} disabled={sendingReport} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full border border-bronze-300 text-bronze-800 text-xs font-semibold hover:bg-bronze-50 transition-colors disabled:opacity-50">
+            <Mail className="w-3.5 h-3.5" /> {sendingReport ? 'Envoi…' : 'Rapport budget mensuel'}
+          </button>
           <button data-testid="budget-week-prev" onClick={() => setOffset((o) => o - 1)} className="w-8 h-8 rounded-full border border-slate-200 flex items-center justify-center text-slate-500 hover:border-emerald-300 hover:text-emerald-700 transition-colors">
             <ChevronLeft className="w-4 h-4" />
           </button>

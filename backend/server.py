@@ -2130,6 +2130,16 @@ TRAFFIC_BLOCKS = {
 }
 
 
+def _sanitize_priorities(pr: dict) -> dict:
+    pr = pr or {}
+    return {
+        "dept_order": [d for d in (pr.get("dept_order") or []) if d in DEPARTMENTS_BE][:6],
+        "employee_type": pr.get("employee_type") if pr.get("employee_type") in ("full_time", "part_time") else "",
+        "availability": pr.get("availability") if pr.get("availability") in ("most", "least") else "",
+        "extra": [x for x in (pr.get("extra") or []) if x in ("seniority", "low_cost", "min_hours_equity")],
+    }
+
+
 class ScheduleSettingsIn(BaseModel):
     weekly_budget: float = 0
     traffic: dict = {}
@@ -2137,6 +2147,7 @@ class ScheduleSettingsIn(BaseModel):
     dept_budgets: dict | None = None
     branch_budgets: list | None = None
     priorities: dict | None = None
+    priority_sets: list | None = None
 
 
 def _sanitize_traffic(raw: dict) -> dict:
@@ -2156,7 +2167,8 @@ async def get_schedule_settings(user: dict = Depends(get_current_user)):
             "traffic_periods": (doc or {}).get("traffic_periods", []),
             "dept_budgets": (doc or {}).get("dept_budgets", {}),
             "branch_budgets": (doc or {}).get("branch_budgets", []),
-            "priorities": (doc or {}).get("priorities", {})}
+            "priorities": (doc or {}).get("priorities", {}),
+            "priority_sets": (doc or {}).get("priority_sets", [])}
 
 
 @api_router.put("/schedule/settings")
@@ -2220,13 +2232,20 @@ async def set_schedule_settings(payload: ScheduleSettingsIn, principal: dict = D
                                     "branch_name": str(b.get("branch_name") or "")[:80], "budget": round(n, 2)})
         update["branch_budgets"] = branch_list
     if payload.priorities is not None:
-        pr = payload.priorities or {}
-        update["priorities"] = {
-            "dept_order": [d for d in (pr.get("dept_order") or []) if d in DEPARTMENTS_BE][:6],
-            "employee_type": pr.get("employee_type") if pr.get("employee_type") in ("full_time", "part_time") else "",
-            "availability": pr.get("availability") if pr.get("availability") in ("most", "least") else "",
-            "extra": [x for x in (pr.get("extra") or []) if x in ("seniority", "low_cost", "min_hours_equity")],
-        }
+        update["priorities"] = _sanitize_priorities(payload.priorities)
+    if payload.priority_sets is not None:
+        if len(payload.priority_sets) > 20:
+            raise HTTPException(status_code=400, detail="Maximum 20 jeux de priorités.")
+        sets = []
+        for ps in payload.priority_sets:
+            if not isinstance(ps, dict):
+                raise HTTPException(status_code=400, detail="Jeu de priorités invalide.")
+            name = str(ps.get("name") or "").strip()
+            if not name:
+                raise HTTPException(status_code=400, detail="Jeu de priorités : nom requis.")
+            sets.append({"id": str(ps.get("id") or uuid.uuid4()), "name": name[:60],
+                         "priorities": _sanitize_priorities(ps.get("priorities") or {})})
+        update["priority_sets"] = sets
     await db.schedule_settings.update_one({"pharmacy_id": pid}, {"$set": update}, upsert=True)
     saved = await db.schedule_settings.find_one({"pharmacy_id": pid}, {"_id": 0})
     periods_note = f", {len(update['traffic_periods'])} période(s)" if "traffic_periods" in update else ""
@@ -2236,7 +2255,130 @@ async def set_schedule_settings(payload: ScheduleSettingsIn, principal: dict = D
             "traffic_periods": saved.get("traffic_periods", []),
             "dept_budgets": saved.get("dept_budgets", {}),
             "branch_budgets": saved.get("branch_budgets", []),
-            "priorities": saved.get("priorities", {})}
+            "priorities": saved.get("priorities", {}),
+            "priority_sets": saved.get("priority_sets", [])}
+
+
+# ==================== Quarts (calendrier synchronisé multi-appareils) ====================
+
+class ShiftIn(BaseModel):
+    id: str = ""
+    employee_id: str
+    date: str
+    start: str
+    end: str
+    department: str = "Général"
+    resource_ids: list[str] = []
+    ai_generated: bool = False
+    proposal_id: str = ""
+    branch_id: str = ""
+    notes: str = ""
+
+
+class ShiftPatchIn(BaseModel):
+    employee_id: Optional[str] = None
+    date: Optional[str] = None
+    start: Optional[str] = None
+    end: Optional[str] = None
+    department: Optional[str] = None
+    resource_ids: Optional[list[str]] = None
+    ai_generated: Optional[bool] = None
+    proposal_id: Optional[str] = None
+    branch_id: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class ShiftsBulkIn(BaseModel):
+    shifts: list[ShiftIn]
+
+
+def _validate_shift_core(date_s: str, start: str, end: str) -> None:
+    try:
+        date.fromisoformat(date_s)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Date de quart invalide.")
+    if not re.fullmatch(r"\d{2}:\d{2}", start or "") or not re.fullmatch(r"\d{2}:\d{2}", end or ""):
+        raise HTTPException(status_code=400, detail="Heures de quart invalides (HH:MM).")
+
+
+def _shift_doc(s: ShiftIn, pid: str) -> dict:
+    _validate_shift_core(s.date, s.start, s.end)
+    return {"id": s.id or str(uuid.uuid4()), "pharmacy_id": pid, "employee_id": s.employee_id,
+            "date": s.date, "start": s.start, "end": s.end,
+            "department": s.department if s.department in DEPARTMENTS_BE else "Général",
+            "resource_ids": [str(r) for r in (s.resource_ids or [])][:20],
+            "ai_generated": bool(s.ai_generated), "proposal_id": s.proposal_id or "",
+            "branch_id": s.branch_id or "", "notes": (s.notes or "")[:500],
+            "updated_at": datetime.now(timezone.utc).isoformat()}
+
+
+async def _mark_shifts_ready(pid: str) -> None:
+    await db.schedule_settings.update_one(
+        {"pharmacy_id": pid}, {"$set": {"pharmacy_id": pid, "shifts_server_ready": True}}, upsert=True)
+
+
+@api_router.get("/shifts")
+async def list_calendar_shifts(user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    docs = await db.shifts.find({"pharmacy_id": pid}, {"_id": 0}).to_list(10000)
+    settings = await db.schedule_settings.find_one({"pharmacy_id": pid}, {"_id": 0, "shifts_server_ready": 1}) or {}
+    return {"shifts": docs, "migrated": bool(settings.get("shifts_server_ready"))}
+
+
+@api_router.post("/shifts")
+async def create_calendar_shift(payload: ShiftIn, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    doc = _shift_doc(payload, pid)
+    await db.shifts.update_one({"id": doc["id"], "pharmacy_id": pid}, {"$set": doc}, upsert=True)
+    await _mark_shifts_ready(pid)
+    return doc
+
+
+@api_router.post("/shifts/bulk")
+async def bulk_import_shifts(payload: ShiftsBulkIn, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    if len(payload.shifts) > 3000:
+        raise HTTPException(status_code=400, detail="Maximum 3000 quarts par import.")
+    count = 0
+    for s in payload.shifts:
+        doc = _shift_doc(s, pid)
+        await db.shifts.update_one({"id": doc["id"], "pharmacy_id": pid}, {"$set": doc}, upsert=True)
+        count += 1
+    await _mark_shifts_ready(pid)
+    await log_audit(principal["email"], principal["role"], "IMPORT_QUARTS", "horaire", pid,
+                    f"Synchronisation initiale du calendrier : {count} quart(s) importés", pid)
+    return {"imported": count}
+
+
+@api_router.put("/shifts/{shift_id}")
+async def update_calendar_shift(shift_id: str, payload: ShiftPatchIn, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    doc = await db.shifts.find_one({"id": shift_id, "pharmacy_id": pid}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Quart introuvable.")
+    patch = {k: v for k, v in payload.model_dump().items() if v is not None}
+    merged_date = patch.get("date", doc["date"])
+    merged_start = patch.get("start", doc["start"])
+    merged_end = patch.get("end", doc["end"])
+    _validate_shift_core(merged_date, merged_start, merged_end)
+    if "department" in patch and patch["department"] not in DEPARTMENTS_BE:
+        patch["department"] = "Général"
+    if "resource_ids" in patch:
+        patch["resource_ids"] = [str(r) for r in patch["resource_ids"]][:20]
+    patch["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.shifts.update_one({"id": shift_id, "pharmacy_id": pid}, {"$set": patch})
+    await _mark_shifts_ready(pid)
+    return {**doc, **patch}
+
+
+@api_router.delete("/shifts/{shift_id}")
+async def delete_calendar_shift(shift_id: str, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    res = await db.shifts.delete_one({"id": shift_id, "pharmacy_id": pid})
+    await _mark_shifts_ready(pid)
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Quart introuvable.")
+    return {"status": "supprimé"}
 
 
 def _time_to_minutes(t: str) -> int:
@@ -3805,6 +3947,150 @@ async def weekly_task_report_job():
     logger.info(f"Rapport hebdo tâches : {sent} courriel(s) envoyé(s)")
 
 
+# ==================== Rapport budget mensuel ====================
+
+def _month_bounds(month: str) -> tuple:
+    y, m = int(month[:4]), int(month[5:7])
+    start = date(y, m, 1)
+    end = date(y + (1 if m == 12 else 0), 1 if m == 12 else m + 1, 1) - timedelta(days=1)
+    return start, end
+
+
+def _budget_row_html(name: str, cost: float, budget: float) -> str:
+    td = "padding:8px 10px;border-bottom:1px solid #e2e8f0"
+    over = budget > 0 and cost > budget
+    state = ("<span style='color:#dc2626;font-weight:bold'>Dépassé</span>" if over
+             else ("<span style='color:#059669;font-weight:bold'>Respecté</span>" if budget > 0 else "—"))
+    budget_txt = f"{budget:.2f} $" if budget > 0 else "—"
+    return (f"<tr><td style='{td}'>{name}</td><td style='{td};text-align:right'>{cost:.2f} $</td>"
+            f"<td style='{td};text-align:right'>{budget_txt}</td><td style='{td}'>{state}</td></tr>")
+
+
+def monthly_budget_html(month: str, dept_rows: list, branch_rows: list,
+                        planned_total: float, punched_total: float, monthly_budget: float) -> str:
+    td = "padding:8px 10px;border-bottom:1px solid #e2e8f0"
+    header = ("<tr style='text-align:left;color:#64748b;font-size:12px;text-transform:uppercase'>"
+              f"<th style='{td}'>Nom</th><th style='{td};text-align:right'>Coût planifié</th>"
+              f"<th style='{td};text-align:right'>Budget (mois)</th><th style='{td}'>État</th></tr>")
+    dept_html = "".join(_budget_row_html(r["name"], r["cost"], r["budget"]) for r in dept_rows) or \
+        f"<tr><td style='{td}' colspan='4'>Aucun quart planifié ce mois-ci.</td></tr>"
+    branch_html = "".join(_budget_row_html(r["name"], r["cost"], r["budget"]) for r in branch_rows)
+    branch_section = ("<h3 style='color:#0f172a'>Par succursale</h3>"
+                      f"<table style='border-collapse:collapse;width:100%'>{header}{branch_html}</table>"
+                      if branch_html else "")
+    global_state = ("<span style='color:#dc2626;font-weight:bold'>Budget global dépassé</span>"
+                    if monthly_budget > 0 and planned_total > monthly_budget
+                    else ("<span style='color:#059669;font-weight:bold'>Budget global respecté</span>"
+                          if monthly_budget > 0 else ""))
+    return (
+        "<div style='font-family:Arial,sans-serif;max-width:640px;margin:0 auto;color:#0f172a'>"
+        "<h2 style='color:#059669'>Arrière Plan — Rapport budget mensuel</h2>"
+        f"<p>Mois de <strong>{month}</strong> — coût planifié total : <strong>{planned_total:.2f} $</strong>"
+        f"{f' / budget mensuel ≈ {monthly_budget:.2f} $' if monthly_budget > 0 else ''}. "
+        f"Coût réel punché : <strong>{punched_total:.2f} $</strong>. {global_state}</p>"
+        "<h3 style='color:#0f172a'>Par département</h3>"
+        f"<table style='border-collapse:collapse;width:100%'>{header}{dept_html}</table>"
+        f"{branch_section}"
+        "<p style='font-size:12px;color:#94a3b8;margin-top:24px'>Budgets mensuels ≈ budgets hebdomadaires × (jours du mois ÷ 7). "
+        "Coûts planifiés = quarts du calendrier × taux horaires des profils. Rapport automatique envoyé le 1er de chaque mois par Arrière Plan.</p>"
+        "</div>")
+
+
+async def send_monthly_budget_reports(month: str = "", only_pharmacy: str = "") -> int:
+    api_key = os.environ.get("RESEND_API_KEY", "")
+    if not api_key:
+        logger.warning("Rapport budget mensuel : RESEND_API_KEY manquante, envoi ignoré.")
+        return 0
+    if not month:
+        today = datetime.now(timezone.utc).astimezone(MONTREAL_TZ).date()
+        prev = today.replace(day=1) - timedelta(days=1)
+        month = prev.strftime("%Y-%m")
+    ms, me = _month_bounds(month)
+    weeks_factor = ((me - ms).days + 1) / 7
+    query: dict = {"date": {"$gte": ms.isoformat(), "$lte": me.isoformat()}}
+    if only_pharmacy:
+        query["pharmacy_id"] = only_pharmacy
+    shift_docs = await db.shifts.find(query, {"_id": 0}).to_list(20000)
+    pids = sorted({s["pharmacy_id"] for s in shift_docs} | ({only_pharmacy} if only_pharmacy else set()))
+    resend.api_key = api_key
+    sender = await get_sender()
+    total_sent = 0
+    for pid in pids:
+        settings = await db.schedule_settings.find_one({"pharmacy_id": pid}, {"_id": 0}) or {}
+        profiles = await db.employee_profiles.find(
+            {"pharmacy_id": pid}, {"_id": 0, "employee_id": 1, "hourly_rate": 1}).to_list(1000)
+        rate_by = {p["employee_id"]: float(p.get("hourly_rate") or 0) for p in profiles}
+        dept_cost: dict = {}
+        branch_cost: dict = {}
+        planned_total = 0.0
+        for s in (x for x in shift_docs if x["pharmacy_id"] == pid):
+            try:
+                h = max(0, _time_to_minutes(s["end"]) - _time_to_minutes(s["start"])) / 60
+            except (ValueError, AttributeError):
+                continue
+            c = h * rate_by.get(s["employee_id"], 0)
+            planned_total += c
+            dept = s.get("department") or "Général"
+            dept_cost[dept] = dept_cost.get(dept, 0) + c
+            bid = s.get("branch_id") or ""
+            branch_cost[bid] = branch_cost.get(bid, 0) + c
+        punches = await db.punches.find(
+            {"pharmacy_id": pid, "date": {"$gte": ms.isoformat(), "$lte": me.isoformat()},
+             "punch_out": {"$ne": None}}, {"_id": 0, "employee_id": 1, "punch_in": 1, "punch_out": 1}).to_list(10000)
+        punched_total = 0.0
+        for p in punches:
+            try:
+                h = (datetime.fromisoformat(p["punch_out"]) - datetime.fromisoformat(p["punch_in"])).total_seconds() / 3600
+            except (ValueError, TypeError):
+                continue
+            punched_total += max(0, h) * rate_by.get(p["employee_id"], 0)
+        if planned_total == 0 and punched_total == 0:
+            continue
+        dept_budgets = settings.get("dept_budgets") or {}
+        branch_budgets = {b.get("branch_id", ""): b for b in (settings.get("branch_budgets") or [])}
+        dept_rows = [{"name": d, "cost": round(c, 2),
+                      "budget": round(float(dept_budgets.get(d, 0)) * weeks_factor, 2)}
+                     for d, c in sorted(dept_cost.items(), key=lambda x: -x[1])]
+        branch_rows = [{"name": (branch_budgets.get(bid, {}).get("branch_name") or bid or "Sans succursale"),
+                        "cost": round(c, 2),
+                        "budget": round(float(branch_budgets.get(bid, {}).get("budget", 0)) * weeks_factor, 2)}
+                       for bid, c in sorted(branch_cost.items(), key=lambda x: -x[1])]
+        monthly_budget = round(float(settings.get("weekly_budget") or 0) * weeks_factor, 2)
+        html = monthly_budget_html(month, dept_rows, branch_rows,
+                                   round(planned_total, 2), round(punched_total, 2), monthly_budget)
+        admins = await db.users.find({"role": {"$in": ["admin", "manager"]}, "pharmacy_id": pid}, {"_id": 0}).to_list(50)
+        sent = 0
+        for a in admins:
+            if not a.get("email"):
+                continue
+            try:
+                await asyncio.to_thread(resend.Emails.send, {
+                    "from": sender, "to": [a["email"]],
+                    "subject": f"Rapport budget — {month}",
+                    "html": html})
+                sent += 1
+            except Exception as exc:
+                logger.error(f"Rapport budget vers {a['email']} échoué : {exc}")
+        await log_audit("système", "system", "RAPPORT_BUDGET_MENSUEL", "horaire", month,
+                        f"Rapport budget mensuel {month} : {sent} courriel(s) envoyé(s)", pid)
+        total_sent += sent
+    return total_sent
+
+
+@api_router.post("/reports/budget-monthly/run")
+async def run_monthly_budget_report(month: str = Query(""), principal: dict = Depends(get_principal)):
+    if month and not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
+        raise HTTPException(status_code=400, detail="Mois invalide (format AAAA-MM).")
+    only = principal["pharmacy_id"] if principal["role"] in ("admin", "manager") else ""
+    sent = await send_monthly_budget_reports(month, only or "")
+    return {"sent": sent}
+
+
+async def monthly_budget_report_job():
+    sent = await send_monthly_budget_reports()
+    logger.info(f"Rapport budget mensuel : {sent} courriel(s) envoyé(s)")
+
+
 # ==================== Livraisons ====================
 
 DELIVERY_STATUSES = ("a_ramasser", "en_route", "livree")
@@ -4880,6 +5166,7 @@ async def startup_tasks():
     scheduler.add_job(shift_task_reminders_job, CronTrigger(hour=17, minute=0), args=["Après-midi"])
     scheduler.add_job(shift_task_reminders_job, CronTrigger(hour=21, minute=30), args=["Soir"])
     scheduler.add_job(weekly_task_report_job, CronTrigger(day_of_week="mon", hour=7, minute=0))
+    scheduler.add_job(monthly_budget_report_job, CronTrigger(day=1, hour=7, minute=30))
     scheduler.start()
 
 

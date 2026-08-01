@@ -14,6 +14,12 @@ import { Sparkles, Loader2, Check, X, Trash2, CalendarPlus, AlertTriangle, Exter
 import { toast } from 'sonner';
 import { DEPARTMENTS } from '@/lib/pharmacy';
 
+interface PrioritySet {
+  id: string;
+  name: string;
+  priorities: { dept_order?: string[]; employee_type?: string; availability?: string; extra?: string[] };
+}
+
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 const normWarning = (w: string | ProposalWarning): ProposalWarning =>
@@ -106,6 +112,9 @@ export const ScheduleProposals = (): JSX.Element => {
   const [prioEmpType, setPrioEmpType] = useState('none');
   const [prioAvail, setPrioAvail] = useState('none');
   const [prioExtra, setPrioExtra] = useState<string[]>([]);
+  const [prioSets, setPrioSets] = useState<PrioritySet[]>([]);
+  const [prioSetName, setPrioSetName] = useState('');
+  const [selectedPrioSet, setSelectedPrioSet] = useState('');
 
   const fillTraffic = (): void => {
     const first = traffic[TRAFFIC_DAYS[0][0]] ?? {};
@@ -132,7 +141,7 @@ export const ScheduleProposals = (): JSX.Element => {
 
   useEffect(() => {
     if (!genOpen || !token) return;
-    axios.get<{ weekly_budget: number; traffic: TrafficGrid; traffic_periods?: TrafficPeriod[]; dept_budgets?: Record<string, number>; branch_budgets?: { branch_id: string; budget: number }[]; priorities?: { dept_order?: string[]; employee_type?: string; availability?: string; extra?: string[] } }>(`${API}/schedule/settings`, { headers: { Authorization: `Bearer ${token}` } })
+    axios.get<{ weekly_budget: number; traffic: TrafficGrid; traffic_periods?: TrafficPeriod[]; dept_budgets?: Record<string, number>; branch_budgets?: { branch_id: string; budget: number }[]; priorities?: { dept_order?: string[]; employee_type?: string; availability?: string; extra?: string[] }; priority_sets?: PrioritySet[] }>(`${API}/schedule/settings`, { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => {
         setBudget(r.data.weekly_budget > 0 ? String(r.data.weekly_budget) : '');
         setTraffic(r.data.traffic ?? {});
@@ -149,6 +158,7 @@ export const ScheduleProposals = (): JSX.Element => {
         setPrioEmpType(pr.employee_type || 'none');
         setPrioAvail(pr.availability || 'none');
         setPrioExtra(pr.extra ?? []);
+        setPrioSets(r.data.priority_sets ?? []);
       })
       .catch(() => undefined);
   }, [genOpen, token]);
@@ -209,6 +219,64 @@ export const ScheduleProposals = (): JSX.Element => {
     toast.success(`Période « ${p.name} » supprimée.`);
   };
 
+  const persistPrioSets = async (next: PrioritySet[]): Promise<PrioritySet[] | null> => {
+    try {
+      const res = await axios.put<{ priority_sets?: PrioritySet[] }>(`${API}/schedule/settings`, {
+        weekly_budget: Math.max(0, Number(budget.replace(',', '.')) || 0),
+        traffic,
+        priority_sets: next,
+      }, { headers });
+      return res.data.priority_sets ?? next;
+    } catch (err) {
+      const detail = axios.isAxiosError(err) && err.response ? (err.response.data as { detail?: unknown }).detail : null;
+      toast.error(typeof detail === 'string' ? detail : 'Enregistrement des jeux de priorités impossible.');
+      return null;
+    }
+  };
+
+  const applyPrioSet = (id: string): void => {
+    const ps = prioSets.find((x) => x.id === id);
+    if (!ps) return;
+    setPrioDeptOrder(ps.priorities.dept_order ?? []);
+    setPrioEmpType(ps.priorities.employee_type || 'none');
+    setPrioAvail(ps.priorities.availability || 'none');
+    setPrioExtra(ps.priorities.extra ?? []);
+    toast.success(`Jeu de priorités « ${ps.name} » appliqué.`);
+  };
+
+  const savePrioSet = async (): Promise<void> => {
+    const name = prioSetName.trim();
+    if (!name) {
+      toast.error('Nommez le jeu de priorités (ex. Été, Fêtes).');
+      return;
+    }
+    const next = [...prioSets, {
+      id: crypto.randomUUID(),
+      name,
+      priorities: {
+        dept_order: prioDeptOrder,
+        employee_type: prioEmpType === 'none' ? '' : prioEmpType,
+        availability: prioAvail === 'none' ? '' : prioAvail,
+        extra: prioExtra,
+      },
+    }];
+    const saved = await persistPrioSets(next);
+    if (!saved) return;
+    setPrioSets(saved);
+    setPrioSetName('');
+    toast.success(`Jeu de priorités « ${name} » enregistré — réutilisable en un clic.`);
+  };
+
+  const deletePrioSet = async (): Promise<void> => {
+    const ps = prioSets.find((x) => x.id === selectedPrioSet);
+    if (!ps) return;
+    const saved = await persistPrioSets(prioSets.filter((x) => x.id !== selectedPrioSet));
+    if (!saved) return;
+    setPrioSets(saved);
+    setSelectedPrioSet('');
+    toast.success(`Jeu « ${ps.name} » supprimé.`);
+  };
+
   useEffect(() => {
     if (!proposals.some((p) => p.effective_status === 'generating')) return undefined;
     const id = window.setInterval(() => void refresh(), 5000);
@@ -239,7 +307,7 @@ export const ScheduleProposals = (): JSX.Element => {
           .forEach((s) => { deleteShift(s.id); removed += 1; });
       }
       p.shifts.forEach((s) => addShift({
-        employeeId: s.employee_id, date: s.date, startTime: s.start, endTime: s.end,
+        id: s.id, employeeId: s.employee_id, date: s.date, startTime: s.start, endTime: s.end,
         aiGenerated: true, proposalId: p.id, department: s.department || p.department || 'Général',
       }));
       toast.success(`Horaire IA de la semaine du ${p.week_start} ajouté au calendrier (${p.shifts.length} quarts${removed > 0 ? ` — ${removed} ancien(s) quart(s) retirés, mode Écraser` : ''}) — ajustez-le par glisser-déposer.`);
@@ -353,7 +421,7 @@ export const ScheduleProposals = (): JSX.Element => {
       const missing = p.shifts.filter((s) => !state.shifts.some((x) =>
         x.employeeId === s.employee_id && x.date === s.date && x.startTime === s.start && x.endTime === s.end));
       missing.forEach((s) => addShift({
-        employeeId: s.employee_id, date: s.date, startTime: s.start, endTime: s.end,
+        id: s.id, employeeId: s.employee_id, date: s.date, startTime: s.start, endTime: s.end,
         aiGenerated: true, proposalId: p.id, department: s.department || p.department || 'Général',
       }));
       toast.success(missing.length === 0
@@ -686,6 +754,35 @@ export const ScheduleProposals = (): JSX.Element => {
                 Priorités de planification (facultatif) — vos règles priment sur celles de l'IA
               </summary>
               <div className="space-y-3 mt-3">
+                <div className="flex flex-wrap items-center gap-2 pb-2 border-b border-slate-100">
+                  <Select value={selectedPrioSet} onValueChange={(v) => { setSelectedPrioSet(v); applyPrioSet(v); }}>
+                    <SelectTrigger data-testid="gen-prio-set-select" className="h-8 w-56 text-xs">
+                      <SelectValue placeholder="Appliquer un jeu enregistré (Été, Fêtes…)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {prioSets.length === 0
+                        ? <SelectItem value="__none" disabled>Aucun jeu enregistré</SelectItem>
+                        : prioSets.map((ps) => <SelectItem key={ps.id} value={ps.id}>{ps.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  {selectedPrioSet && (
+                    <Button type="button" data-testid="gen-prio-set-delete" variant="outline" onClick={() => void deletePrioSet()} className="h-8 rounded-full text-xs text-red-600 border-red-200 hover:bg-red-50">
+                      <Trash2 className="w-3.5 h-3.5 mr-1" /> Supprimer
+                    </Button>
+                  )}
+                  <div className="flex items-center gap-1.5 ml-auto">
+                    <Input
+                      data-testid="gen-prio-set-name"
+                      value={prioSetName}
+                      onChange={(e) => setPrioSetName(e.target.value)}
+                      placeholder="Nom (Été, Fêtes…)"
+                      className="h-8 w-36 text-xs"
+                    />
+                    <Button type="button" data-testid="gen-prio-set-save" variant="outline" onClick={() => void savePrioSet()} className="h-8 rounded-full text-xs border-emerald-300 text-emerald-700 hover:bg-emerald-50">
+                      Enregistrer le jeu
+                    </Button>
+                  </div>
+                </div>
                 <div className="space-y-1.5">
                   <Label className="text-[11px] text-slate-500">Départements à couvrir en premier (cliquez dans l'ordre de priorité)</Label>
                   <div className="flex flex-wrap gap-1.5">
