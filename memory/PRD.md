@@ -290,6 +290,15 @@ Plainte utilisateur : « section laide, sans couleur et coincée » (capture mob
 4. Warning a11y Radix corrigé : DialogDescription ajouté au dialog Nouveau quart.
 5. **Confirmation demande utilisateur « profil complet + vacances approuvées pris en compte par l'IA »** : DÉJÀ EN PLACE et vérifié — le backend transmet à gpt-5.4 le profil Mongo complet de chaque employé (disponibilités/jour, rôles, capacités, restrictions, heures min/max, taux horaire — punch_code exclu) + absences approuvées envoyées par le frontend (leaveRequests 'Approuvée' chevauchant la semaine) avec règle stricte « Ne planifie JAMAIS un employé pendant une absence approuvée » + warnings post-génération sur chaque quart en conflit. Les conflits résiduels sont désormais VISIBLES en rouge dans le calendrier.
 
+## Itération 37 (1 août 2026) — Remplaçants d'agence pris en compte par l'IA — testée E2E (vraie génération gpt-5.4 avec remplaçant seedé)
+Question utilisateur : « l'IA prend-elle en considération les remplaçants d'agence et leurs taux horaires ? » → NON avant cette itération. Corrigé :
+- generate_schedule_content récupère les replacement_requests status 'filled' + chosen_offer (candidate_name, agency_name, hourly_rate) et transmet à l'IA les plages de la semaine sous « remplacants_agence_confirmes » (date, de, a, role, remplacant, agence, taux_horaire).
+- Nouvelle règle SCHEDULE_SYSTEM : plages des remplaçants = déjà couvertes (pas de doublon de personnel) + coût (durée × taux) INCLUS dans le calcul du budget.
+- estimated_cost inclut désormais agency_cost ; alerte budget dépassé mentionne « dont X $ de remplaçants d'agence » ; le contrôle de couverture achalandage considère les plages des remplaçants comme couvertes (plus de fausses alertes).
+- Texte descriptif du panneau IA mis à jour (mentionne remplaçants d'agence confirmés).
+- Vérifié E2E réel : remplaçant seedé (Pharmacien 2026-08-19 09:00-17:00 à 55 $/h = 440 $) + génération semaine 2026-08-17 budget 2500 $ → résumé IA « remplaçant d'agence déjà confirmé le mercredi de 9h à 17h, coût de 440 $ inclus », AUCUN doublon sur la plage (Sophie planifiée 17h-21h seulement ce jour-là), estimated_cost 1268,80 $ = 828,80 $ employés + 440 $ agence ✓. Données de test nettoyées (proposition + remplaçant supprimés).
+- **Ajustement « Appliquer partout » (achalandage)** : fonctionne désormais PAR COLONNE — la 1re case de chaque colonne (ligne Lun : Matin/Après-midi/Soir) est recopiée sur toute sa colonne (l'input de valeur unique gen-traffic-fill-input a été retiré). Testé ✓ (12/25/8 propagés).
+
 ## Notes techniques
 - Ne jamais recréer `jsconfig.json` (conflit CRA avec tsconfig.json)
 - npm interdit — yarn uniquement

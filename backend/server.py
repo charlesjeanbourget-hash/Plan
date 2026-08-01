@@ -2075,6 +2075,9 @@ SCHEDULE_SYSTEM = (
     "si ses disponibilités le permettent; sinon explique pourquoi dans le summary.\n"
     "- N'attribue à un employé qu'un rôle figurant dans ses rôles ou capacités; s'il faut faire autrement, signale-le dans le summary.\n"
     "- Ne dépasse jamais le maximum d'heures hebdomadaires d'un employé; vise au moins son minimum si le budget le permet.\n"
+    "- Des remplaçants d'agence DÉJÀ CONFIRMÉS peuvent être fournis (date, plage horaire, rôle, taux horaire) : considère ces plages "
+    "comme déjà couvertes pour ce rôle (ne planifie pas d'employé en double inutilement sur ces plages) et INCLUS leur coût "
+    "(durée de la plage × taux horaire du remplaçant) dans ton calcul du budget salarial hebdomadaire.\n"
     "- Assure une couverture adéquate pendant les heures d'ouverture (par défaut lun-ven 8h-21h, sam-dim 9h-17h, "
     "sauf indication contraire dans les consignes), en priorité un pharmacien présent en tout temps si disponible.\n"
     "- Répartis équitablement les quarts et attribue à chacun un rôle cohérent avec ses rôles/capacités.\n"
@@ -2619,6 +2622,23 @@ async def generate_schedule_content(proposal_id: str, pharmacy_id: str, week_sta
         week_tasks = await db.shift_tasks.find(
             {"pharmacy_id": pharmacy_id, "date": {"$gte": week_days[0], "$lte": week_days[-1]}},
             {"_id": 0}).to_list(1000)
+        filled_reqs = await db.replacement_requests.find(
+            {"pharmacy_id": pharmacy_id, "status": "filled"}, {"_id": 0}).to_list(200)
+        replacement_slots = []
+        for r in filled_reqs:
+            offer = None
+            if r.get("chosen_offer_id"):
+                offer = await db.replacement_offers.find_one(
+                    {"id": r["chosen_offer_id"]},
+                    {"_id": 0, "candidate_name": 1, "agency_name": 1, "hourly_rate": 1})
+            for sl in r.get("slots", []):
+                if week_days[0] <= sl["date"] <= week_days[-1]:
+                    replacement_slots.append({
+                        "date": sl["date"], "de": sl["start"], "a": sl["end"], "role": r.get("role", ""),
+                        "remplacant": (offer or {}).get("candidate_name", ""),
+                        "agence": (offer or {}).get("agency_name", ""),
+                        "taux_horaire": (offer or {}).get("hourly_rate"),
+                    })
         settings = await db.schedule_settings.find_one({"pharmacy_id": pharmacy_id}, {"_id": 0}) or {}
         traffic = settings.get("traffic") or {}
         traffic_payload = {}
@@ -2639,6 +2659,7 @@ async def generate_schedule_content(proposal_id: str, pharmacy_id: str, week_sta
                 "employee_id": a["employee_id"], "nom": a.get("employee_name", ""),
                 "du": a["start"], "au": a["end"], "type": a.get("type", ""),
             } for a in absences] or "Aucune absence approuvée cette semaine.",
+            "remplacants_agence_confirmes": replacement_slots or "Aucun remplaçant d'agence confirmé cette semaine.",
             "taches_a_faire_cette_semaine": [{
                 "date": t["date"], "quart": t["shift"], "titre": t["title"],
                 "assignee_employee_id": t.get("assignee_employee_id") or "",
@@ -2723,11 +2744,20 @@ async def generate_schedule_content(proposal_id: str, pharmacy_id: str, week_sta
                 estimated_cost += hours * float(rate)
             else:
                 missing_rate_ids.add(s["employee_id"])
-        estimated_cost = round(estimated_cost, 2)
+        agency_cost = 0.0
+        for rs in replacement_slots:
+            if not rs.get("taux_horaire"):
+                continue
+            try:
+                agency_cost += max(0, _time_to_minutes(rs["a"]) - _time_to_minutes(rs["de"])) / 60 * float(rs["taux_horaire"])
+            except (ValueError, AttributeError):
+                continue
+        estimated_cost = round(estimated_cost + agency_cost, 2)
         if weekly_budget > 0 and estimated_cost > weekly_budget:
             alerts.append({"kind": "budget",
-                           "text": f"Budget dépassé : coût estimé {estimated_cost:.2f} $ > budget "
-                                   f"{weekly_budget:.2f} $ (écart +{estimated_cost - weekly_budget:.2f} $)"})
+                           "text": f"Budget dépassé : coût estimé {estimated_cost:.2f} $"
+                                   f"{f' (dont {agency_cost:.2f} $ de remplaçants d’agence)' if agency_cost > 0 else ''}"
+                                   f" > budget {weekly_budget:.2f} $ (écart +{estimated_cost - weekly_budget:.2f} $)"})
         for eid in sorted(missing_rate_ids):
             who = next((e["name"] for e in roster if e["id"] == eid), eid)
             alerts.append({"kind": "profile", "employee_id": eid,
@@ -2740,7 +2770,8 @@ async def generate_schedule_content(proposal_id: str, pharmacy_id: str, week_sta
                 expected = day_blocks.get(key) or 0
                 if expected <= 0:
                     continue
-                covered = any(s["date"] == d and s["start"] < be and s["end"] > bs for s in shifts)
+                covered = any(s["date"] == d and s["start"] < be and s["end"] > bs for s in shifts) \
+                    or any(rs["date"] == d and rs["de"] < be and rs["a"] > bs for rs in replacement_slots)
                 if not covered:
                     alerts.append({"kind": "traffic",
                                    "text": f"Aucune couverture le {d} ({TRAFFIC_DAY_LABELS[i]}) en {label} "
