@@ -155,6 +155,7 @@ def user_public(doc: dict) -> dict:
         "employee_id": doc.get("employee_id"),
         "is_temporary_password": doc.get("is_temporary_password", False),
         "suspended": doc.get("suspended", False),
+        "privacy_accepted_at": doc.get("privacy_accepted_at"),
         "created_at": doc.get("created_at", ""),
     }
 
@@ -230,7 +231,10 @@ async def auth_login(payload: LoginIn, request: Request):
     if user.get("suspended"):
         raise HTTPException(status_code=403, detail="Compte suspendu. Contactez votre superadministrateur.")
     await db.login_attempts.delete_one({"identifier": identifier})
-    await record_login_event(user, "CONNEXION", request)
+    suspicious = await is_new_ip_login(user["id"], client_ip(request))
+    await record_login_event(user, "CONNEXION", request, flagged_new_ip=suspicious)
+    if suspicious:
+        asyncio.create_task(alert_suspicious_login(user, client_ip(request), request))
     return {"access_token": create_access_token(user), "user": user_public(user)}
 
 
@@ -239,7 +243,51 @@ def client_ip(request: Request) -> str:
     return fwd.split(",")[-1].strip() if fwd else (request.client.host if request.client else "inconnu")
 
 
-async def record_login_event(user: dict, event: str, request: Request):
+async def is_new_ip_login(user_id: str, ip: str) -> bool:
+    prior = await db.login_events.count_documents({"user_id": user_id, "event": "CONNEXION"})
+    if prior == 0:
+        return False
+    seen = await db.login_events.find_one({"user_id": user_id, "event": "CONNEXION", "ip": ip})
+    return seen is None
+
+
+async def alert_suspicious_login(user: dict, ip: str, request: Request):
+    if not os.environ.get("RESEND_API_KEY", ""):
+        return
+    supers = await db.users.find({"role": "superadmin", "suspended": {"$ne": True}}, {"_id": 0, "email": 1}).to_list(20)
+    recipients = [s["email"] for s in supers]
+    notify = os.environ.get("DEMO_NOTIFY_EMAIL", "")
+    if notify and notify not in recipients:
+        recipients.append(notify)
+    if not recipients:
+        return
+    when = datetime.now(timezone.utc).astimezone(MONTREAL_TZ).strftime("%Y-%m-%d %H:%M")
+    ua = request.headers.get("user-agent", "inconnu")[:200]
+    html = (
+        "<div style='font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#0f172a'>"
+        "<h2 style='color:#b45309'>⚠️ Connexion depuis une adresse inhabituelle</h2>"
+        f"<p>Une connexion au compte <b>{user['email']}</b> ({user.get('role','')}) a été détectée "
+        "depuis une adresse IP jamais utilisée auparavant.</p>"
+        f"<table style='background:#f8fafc;border-radius:8px'>"
+        f"<tr><td style='padding:6px 12px;color:#64748b'>Utilisateur</td><td style='padding:6px 12px;font-weight:bold'>{user.get('name','')} &lt;{user['email']}&gt;</td></tr>"
+        f"<tr><td style='padding:6px 12px;color:#64748b'>Adresse IP</td><td style='padding:6px 12px;font-weight:bold'>{ip}</td></tr>"
+        f"<tr><td style='padding:6px 12px;color:#64748b'>Date/heure</td><td style='padding:6px 12px'>{when} (Montréal)</td></tr>"
+        f"<tr><td style='padding:6px 12px;color:#64748b'>Appareil</td><td style='padding:6px 12px'>{ua}</td></tr>"
+        "</table>"
+        "<p style='font-size:13px;color:#64748b;margin-top:16px'>Si cette connexion est légitime, ignorez ce message. "
+        "Sinon, réinitialisez le mot de passe de ce compte depuis le tableau de bord superadmin.</p>"
+        "<p style='font-size:12px;color:#94a3b8'>Journal des connexions — Arrière Plan</p></div>"
+    )
+    try:
+        await asyncio.to_thread(resend.Emails.send, {
+            "from": await get_sender(), "to": recipients,
+            "subject": f"⚠️ Connexion inhabituelle — {user['email']}", "html": html,
+        })
+    except Exception as e:
+        logger.warning(f"Alerte connexion inhabituelle non envoyée : {e}")
+
+
+async def record_login_event(user: dict, event: str, request: Request, flagged_new_ip: bool = False):
     await db.login_events.insert_one({
         "id": str(uuid.uuid4()),
         "user_id": user["id"],
@@ -249,8 +297,18 @@ async def record_login_event(user: dict, event: str, request: Request):
         "event": event,
         "ip": client_ip(request),
         "user_agent": request.headers.get("user-agent", "")[:300],
+        "flagged_new_ip": flagged_new_ip,
         "created_at": datetime.now(timezone.utc).isoformat(),
     })
+
+
+@api_router.post("/auth/accept-privacy")
+async def auth_accept_privacy(user: dict = Depends(get_current_user)):
+    now = datetime.now(timezone.utc).isoformat()
+    await db.users.update_one({"id": user["id"]}, {"$set": {"privacy_accepted_at": now}})
+    await log_audit(user["email"], user["role"], "ACCEPTATION_POLITIQUE_CONFIDENTIALITE", "utilisateur", user["id"],
+                    "Politique de confidentialité acceptée", user.get("pharmacy_id") or "")
+    return {"privacy_accepted_at": now}
 
 
 @api_router.get("/auth/me")
@@ -4556,6 +4614,41 @@ async def delete_demo_request(req_id: str, su: dict = Depends(require_superadmin
 
 
 # ==================== Loi 25 — Journal des connexions, Incidents, Export de données ====================
+
+@api_router.post("/employees/{employee_id}/anonymize")
+async def anonymize_employee(employee_id: str, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    label = f"Employé anonymisé ({employee_id[-4:]})"
+    result = {"user": 0, "profile": 0, "punches": 0, "licenses": 0, "label": label}
+
+    user_scrub = {
+        "name": label, "email": f"anonymise+{employee_id}@arriereplan.local",
+        "suspended": True, "anonymized": True,
+        "anonymized_at": datetime.now(timezone.utc).isoformat(),
+    }
+    ures = await db.users.update_one({"employee_id": employee_id}, {"$set": user_scrub})
+    result["user"] = ures.modified_count
+
+    pres = await db.employee_profiles.update_one(
+        {"pharmacy_id": pid, "employee_id": employee_id},
+        {"$set": {"employee_name": label, "notes": "", "anonymized": True},
+         "$unset": {"punch_code_hash": "", "payroll_number": ""}})
+    result["profile"] = pres.modified_count
+
+    punres = await db.punches.update_many(
+        {"pharmacy_id": pid, "employee_id": employee_id},
+        {"$set": {"employee_name": label, "punch_in_location": None, "punch_out_location": None}})
+    result["punches"] = punres.modified_count
+
+    licres = await db.licenses.update_many(
+        {"pharmacy_id": pid, "employee_id": employee_id},
+        {"$set": {"employee_name": label, "employee_email": ""}})
+    result["licenses"] = licres.modified_count
+
+    await log_audit(principal["email"], principal["role"], "ANONYMISATION_EMPLOYE", "employé", employee_id,
+                    f"Renseignements personnels anonymisés (droit à l'oubli Loi 25) — comptes:{result['user']} profil:{result['profile']} pointages:{result['punches']} licences:{result['licenses']}", pid)
+    return {"ok": True, **result}
+
 
 @api_router.get("/superadmin/login-events")
 async def list_login_events(su: dict = Depends(require_superadmin)):

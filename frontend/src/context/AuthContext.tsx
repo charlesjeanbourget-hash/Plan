@@ -13,6 +13,7 @@ interface BackendUser {
   pharmacy_id: string | null;
   employee_id: string | null;
   is_temporary_password: boolean;
+  privacy_accepted_at?: string | null;
 }
 
 interface StoredAuth {
@@ -28,6 +29,7 @@ const mapUser = (u: BackendUser): User => ({
   pharmacyId: u.pharmacy_id ?? undefined,
   employeeId: u.employee_id ?? undefined,
   isTemporaryPassword: u.is_temporary_password,
+  privacyAcceptedAt: u.privacy_accepted_at ?? null,
 });
 
 export const formatApiError = (detail: unknown): string => {
@@ -47,6 +49,7 @@ interface AuthContextValue {
   login: (email: string, password: string) => Promise<string | null>;
   logout: () => void;
   changePassword: (currentPassword: string, newPassword: string) => Promise<string | null>;
+  acceptPrivacy: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -116,9 +119,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const logout = (): void => setAuth(null);
 
+  const acceptPrivacy = async (): Promise<void> => {
+    if (!auth) return;
+    try {
+      const res = await axios.post<{ privacy_accepted_at: string }>(
+        `${API}/auth/accept-privacy`, {}, { headers: { Authorization: `Bearer ${auth.token}` } });
+      setAuth({ ...auth, user: { ...auth.user, privacyAcceptedAt: res.data.privacy_accepted_at } });
+    } catch {
+      /* silencieux — réessai à la prochaine connexion */
+    }
+  };
+
   return (
     <AuthContext.Provider
-      value={{ currentUser: auth?.user ?? null, token: auth?.token ?? null, login, logout, changePassword }}
+      value={{ currentUser: auth?.user ?? null, token: auth?.token ?? null, login, logout, changePassword, acceptPrivacy }}
     >
       {children}
     </AuthContext.Provider>

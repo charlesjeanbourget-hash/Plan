@@ -15,6 +15,7 @@ import EmployeeDossier from '@/components/modules/EmployeeDossier';
 import ResourcesModule from '@/components/modules/ResourcesModule';
 import PrivacyPolicy from '@/components/PrivacyPolicy';
 import { ForcePasswordChangeDialog } from '@/components/ForcePasswordChangeDialog';
+import { PrivacyConsentDialog } from '@/components/PrivacyConsentDialog';
 import SchedulingModule from '@/components/modules/SchedulingModule';
 import RecruitmentModule from '@/components/modules/RecruitmentModule';
 import PayrollModule from '@/components/modules/PayrollModule';
@@ -95,6 +96,13 @@ function App(): JSX.Element {
       return (
         <div className="App">
           <ForcePasswordChangeDialog />
+        </div>
+      );
+    }
+    if (!currentUser.privacyAcceptedAt) {
+      return (
+        <div className="App">
+          <PrivacyConsentDialog />
         </div>
       );
     }

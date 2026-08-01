@@ -32,6 +32,7 @@ export interface User {
   employeeId?: string;
   pharmacyId?: string;
   isTemporaryPassword?: boolean;
+  privacyAcceptedAt?: string | null;
 }
 
 export type Position =
@@ -74,6 +75,7 @@ export interface Employee {
   address: string;
   emergencyContact: string;
   avatarColor: string;
+  anonymized?: boolean;
 }
 
 export interface Shift {

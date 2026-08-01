@@ -15,6 +15,7 @@ interface HRContextValue {
   getEmployee: (id: string) => Employee | undefined;
   addEmployee: (e: Omit<Employee, 'id'>) => Employee;
   updateEmployee: (id: string, patch: Partial<Employee>) => void;
+  anonymizeEmployee: (id: string) => void;
   deleteEmployee: (id: string) => void;
   addShift: (s: Omit<Shift, 'id'>) => void;
   updateShift: (id: string, patch: Partial<Shift>) => void;
@@ -89,6 +90,18 @@ export const HRProvider = ({ children }: { children: ReactNode }) => {
     },
     updateEmployee: (id, patch) =>
       patchList('employees', (items) => items.map((i) => (i.id === id ? { ...i, ...patch } : i))),
+    anonymizeEmployee: (id) =>
+      patchList('employees', (items) => items.map((i) => (i.id === id ? {
+        ...i,
+        firstName: 'Employé',
+        lastName: `anonymisé ${i.id.slice(-4)}`,
+        email: '',
+        phone: '',
+        address: '',
+        emergencyContact: '',
+        status: 'Inactif',
+        anonymized: true,
+      } : i))),
     deleteEmployee: (id) =>
       patchList('employees', (items) => items.filter((i) => i.id !== id)),
     addShift: (s) => patchList('shifts', (items) => [...items, { ...s, id: uid() }]),

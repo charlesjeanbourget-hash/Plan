@@ -1,0 +1,36 @@
+{
+  "summary": "Iteration 28 — Loi 25 features (privacy consent, unusual-IP login alert, employee anonymization). BACKEND pytest 8/8 passed (test_iteration28.py, ~3.3s). Verified: GET /api/auth/me returns privacy_accepted_at; julie already has it set; POST /api/auth/accept-privacy (Bearer admin) persists timestamp and is idempotent, unauthenticated -> 401. login-events: GET /api/superadmin/login-events -> 200 for superadmin, 403 for julie. Each event has ip + flagged_new_ip boolean (repeat login from same source -> false). Anonymize: POST /employees/e_test_anon/anonymize -> 403 for julie, 200 with {ok:true, user, profile, punches, licenses, label starting 'Employé anonymisé'} for admin, 401/403 unauthenticated. FRONTEND Playwright (1920x1080): Julie login -> NO privacy-consent-dialog, sidebar-link-myspace visible. Admin (privacy_accepted_at reset in Mongo before test) -> login triggers privacy-consent-dialog with content 'Protection de vos renseignements' + 5 bullets + privacy-consent-logout button visible. Click privacy-consent-accept -> toast 'Connexion réussie', dialog dismissed, sidebar-link-employees visible. Logout + re-login admin -> dialog does NOT reappear (persistence confirmed). Employees module -> click Karim (e3) -> anonymize-employee-button visible -> anonymize-confirm-dialog opens with warning 'Cette opération est irréversible' and 'Anonymiser définitivement' button -> confirm -> toast 'Renseignements de Karim Benali anonymisés définitivement' -> dossier now shows 'Employé anonymisé e3', 'Inactif' badge, 'Dossier anonymisé (Loi 25)' badge, contact fields blank, no anonymize/retire buttons. Employé anonymisé reste dans la liste (statistiques conservées).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/auth/login (X-Forwarded-For)", "issue": "client_ip() prend le DERNIER élément de XFF, mais dans l'environnement Kubernetes/preview l'ingress AJOUTE sa propre valeur en fin de chaîne (35.186.245.91 observée pour tous les tests). Résultat: l'IP client déclarée dans XFF est ignorée en env preview, et flagged_new_ip reste False. En production single-proxy la logique fonctionne, mais elle est fragile: recommander une whitelist de proxies de confiance ou lecture du 1er élément de XFF."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration28.py",
+    "/app/test_reports/pytest/iter28.xml"
+  ],
+  "action_items": [
+    "(Optionnel/hardening) Revoir client_ip(): l'algorithme 'dernier élément de XFF' est correct seulement si la chaîne est contrôlée. Dans un env avec plusieurs proxies (comme cette preview), l'ingress ajoute une IP à la fin, ce qui masque l'IP client déclarée. Envisager de configurer un nombre de proxies de confiance ou d'utiliser le premier IP non-privée. Non bloquant pour la démo.",
+    "(Optionnel) L'export /api/me/data-export ne couvre pas encore toutes les données (vacances, évaluations, notifications) — carry-over de l'itération 27, à traiter selon interprétation client."
+  ],
+  "critical_code_review_comments": [
+    "server.py:241 client_ip() — take-last-XFF est vulnérable lorsqu'un proxy ajoute son propre IP après réception. Impact fonctionnel: alerte 'IP inhabituelle' n'est pas déclenchée en environnement multi-proxy même si l'appelant fournit une IP nouvelle en XFF.",
+    "server.py:4629 anonymize_employee — accepte n'importe quel employee_id sans vérifier son existence (retourne ok:true même pour des ids fantômes comme 'e_test_anon' avec 0 mises à jour). Cela permet de générer des lignes d'audit vides. Envisager d'exiger au moins une correspondance sur users/profiles."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration28.py"
+  ],
+  "success_rate": {"backend": "100% (8/8)", "frontend": "100% des flux Loi 25 nouveaux"},
+  "seed_data_creation": "Aucune donnée créée. RESET: le champ users.privacy_accepted_at a été retiré pour admin@luminahr.ca AVANT le test UI (pour tester l'affichage du dialogue), puis réaccepté via l'UI -> maintenant défini. ANONYMISATION: l'employé e3 (Karim Benali) a été anonymisé via l'UI admin. Le dossier est désormais 'Employé anonymisé e3' Inactif dans Mongo (users + employee_profiles + punches + licenses scrubbés). Statistiques agrégées conservées comme prévu.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "Inchangés — admin@luminahr.ca/Nlpx!tTE3Aw27 (privacy_accepted_at maintenant défini), julie@luminahr.ca/O1ka!gfVV6e54 (déjà accepté), charlesjeanbourget@gmail.com/OwnerSecure2026!z (privacy_accepted_at PAS encore défini côté UI — ne l'a pas testé pour éviter d'envoyer un vrai courriel d'alerte).",
+  "context_for_next_testing_agent": "1) e3 (Karim Benali) est maintenant anonymisé dans Mongo -> ne pas le réutiliser pour d'autres tests. Créer un nouvel employé si besoin. 2) admin@luminahr.ca a désormais privacy_accepted_at défini -> pour re-tester le dialogue, faire db.users.update_one({email},{$unset:{privacy_accepted_at:''}}). 3) L'alerte IP inhabituelle est difficile à tester en env preview: le K8s ingress append son IP à XFF, donc client_ip() retourne toujours l'IP ingress (35.186.245.91). Recommandation: mocker le header ou tester en unit-test isolé. 4) 2 nouvelles connexions julie + 2 admin + 1 super ont été ajoutées au login-events pendant ce test. 5) Aucun courriel d'alerte n'a été envoyé (RESEND_API_KEY présent mais flagged_new_ip=False systématiquement dans cet env).",
+  "rca_of_the_issue": "Aucun bug bloquant sur les 3 nouvelles fonctionnalités Loi 25. Seule remarque de robustesse: la détection d'IP inhabituelle repose sur 'dernier élément de X-Forwarded-For', ce qui suppose que le seul proxy en amont ajoute l'IP client. Dans un déploiement avec plusieurs couches (LB -> ingress -> app), l'ingress ajoute sa propre IP à la fin, ce qui rend flagged_new_ip=False en permanence. La logique reste fonctionnelle en single-proxy prod, mais fragile. Reste des points d'itération 27 non résolus mentionnés en action_items."
+}

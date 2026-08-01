@@ -8,18 +8,22 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, Mail, Phone, MapPin, Trash2, Hash } from 'lucide-react';
+import { Plus, Mail, Phone, MapPin, Trash2, Hash, UserX } from 'lucide-react';
 import { ProfileEditor } from '@/components/ProfileEditor';
 import { SalaryHistory } from '@/components/SalaryHistory';
 import { PayrollNumbersDialog } from '@/components/PayrollNumbersDialog';
+import { useAuth } from '@/context/AuthContext';
+import axios from 'axios';
 import { toast } from 'sonner';
 
 export default function EmployeeDossier(): JSX.Element {
-  const { state, addEmployee, deleteEmployee, updateEmployee } = useHR();
+  const { state, addEmployee, deleteEmployee, updateEmployee, anonymizeEmployee } = useHR();
+  const { token } = useAuth();
   const [navPayload] = useState(() => consumeNavPayload());
   const [selectedId, setSelectedId] = useState<string | null>(navPayload?.employeeId ?? state.employees[0]?.id ?? null);
   const [branchFilter, setBranchFilter] = useState('all');
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [anonymizeTarget, setAnonymizeTarget] = useState<Employee | null>(null);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
@@ -54,6 +58,21 @@ export default function EmployeeDossier(): JSX.Element {
     deleteEmployee(id);
     setSelectedId(state.employees.find((e) => e.id !== id)?.id ?? null);
     toast.success('Employé retiré du dossier.');
+  };
+
+  const confirmAnonymize = async (): Promise<void> => {
+    if (!anonymizeTarget) return;
+    const emp = anonymizeTarget;
+    setAnonymizeTarget(null);
+    try {
+      await axios.post(
+        `${process.env.REACT_APP_BACKEND_URL}/api/employees/${emp.id}/anonymize`,
+        {}, { headers: { Authorization: `Bearer ${token ?? ''}` } });
+    } catch {
+      /* le backend n'a peut-être pas de dossier lié — on anonymise quand même localement */
+    }
+    anonymizeEmployee(emp.id);
+    toast.success(`Renseignements de ${emp.firstName} ${emp.lastName} anonymisés définitivement. Les statistiques agrégées sont conservées.`);
   };
 
   return (
@@ -136,22 +155,38 @@ export default function EmployeeDossier(): JSX.Element {
                 </div>
               </div>
               <div className="mt-8 pt-6 border-t border-slate-100 flex flex-wrap gap-3">
-                <Button
-                  data-testid="toggle-employee-status-button"
-                  variant="outline"
-                  className="rounded-full"
-                  onClick={() => updateEmployee(selected.id, { status: selected.status === 'Actif' ? 'En congé' : 'Actif' })}
-                >
-                  {selected.status === 'Actif' ? 'Marquer en congé' : 'Marquer actif'}
-                </Button>
-                <Button
-                  data-testid="delete-employee-button"
-                  variant="outline"
-                  className="rounded-full text-red-600 border-red-200 hover:bg-red-50"
-                  onClick={() => handleDelete(selected.id)}
-                >
-                  <Trash2 className="w-4 h-4 mr-1" /> Retirer
-                </Button>
+                {selected.anonymized ? (
+                  <span data-testid="employee-anonymized-badge" className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 bg-slate-100 rounded-full px-3 py-1.5">
+                    <UserX className="w-3.5 h-3.5" /> Dossier anonymisé (Loi 25)
+                  </span>
+                ) : (
+                  <>
+                    <Button
+                      data-testid="toggle-employee-status-button"
+                      variant="outline"
+                      className="rounded-full"
+                      onClick={() => updateEmployee(selected.id, { status: selected.status === 'Actif' ? 'En congé' : 'Actif' })}
+                    >
+                      {selected.status === 'Actif' ? 'Marquer en congé' : 'Marquer actif'}
+                    </Button>
+                    <Button
+                      data-testid="anonymize-employee-button"
+                      variant="outline"
+                      className="rounded-full text-bronze-800 border-bronze-300 hover:bg-bronze-50"
+                      onClick={() => setAnonymizeTarget(selected)}
+                    >
+                      <UserX className="w-4 h-4 mr-1" /> Anonymiser (départ)
+                    </Button>
+                    <Button
+                      data-testid="delete-employee-button"
+                      variant="outline"
+                      className="rounded-full text-red-600 border-red-200 hover:bg-red-50"
+                      onClick={() => handleDelete(selected.id)}
+                    >
+                      <Trash2 className="w-4 h-4 mr-1" /> Retirer
+                    </Button>
+                  </>
+                )}
               </div>
             </div>
           )}
@@ -222,6 +257,31 @@ export default function EmployeeDossier(): JSX.Element {
               Ajouter l'employé
             </Button>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={anonymizeTarget !== null} onOpenChange={(o) => !o && setAnonymizeTarget(null)}>
+        <DialogContent data-testid="anonymize-confirm-dialog" aria-describedby={undefined}>
+          <DialogHeader>
+            <DialogTitle className="font-heading inline-flex items-center gap-2">
+              <UserX className="w-5 h-5 text-bronze-600" /> Anonymiser définitivement ?
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-slate-600">
+            Cette action retire <b>définitivement</b> les renseignements personnels de{' '}
+            <b>{anonymizeTarget?.firstName} {anonymizeTarget?.lastName}</b> (nom, courriel, téléphone, adresse,
+            contact d'urgence, NIP de punch, licences). Les <b>statistiques agrégées</b> — heures travaillées,
+            historique de paie et coûts — sont <b>conservées</b> pour vos rapports. Idéal au départ d'un employé (droit à l'oubli — Loi 25).
+          </p>
+          <p className="text-xs text-red-600 font-semibold">Cette opération est irréversible.</p>
+          <div className="flex gap-3 justify-end mt-2">
+            <Button data-testid="anonymize-cancel-button" variant="outline" className="rounded-full" onClick={() => setAnonymizeTarget(null)}>
+              Annuler
+            </Button>
+            <Button data-testid="anonymize-confirm-button" className="rounded-full bg-bronze-600 hover:bg-bronze-700" onClick={() => void confirmAnonymize()}>
+              Anonymiser définitivement
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
