@@ -264,6 +264,7 @@ export default function LandingPage({ onNavigate }: Props): JSX.Element {
             <div className="flex flex-col gap-2.5 text-sm text-slate-600">
               <button data-testid="footer-demo-link" onClick={() => scrollToId('demo')} className="text-left hover:text-emerald-700 transition-colors">Réserver une démo</button>
               <button data-testid="footer-faq-link" onClick={() => scrollToId('faq')} className="text-left hover:text-emerald-700 transition-colors">Questions fréquentes</button>
+              <button data-testid="footer-privacy-link" onClick={() => onNavigate('privacy')} className="text-left hover:text-emerald-700 transition-colors">Politique de confidentialité</button>
               <button data-testid="footer-testimonials-link" onClick={() => scrollToId('demo')} className="text-left hover:text-emerald-700 transition-colors">Nous joindre</button>
             </div>
           </div>

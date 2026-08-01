@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, FormEvent } from 'react';
 import { ChatMessage } from '@/types';
 import { MessageCircle, X, Send, Sparkles } from 'lucide-react';
 import { uid } from '@/context/HRContext';
+import { useAuth } from '@/context/AuthContext';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -14,6 +15,7 @@ const getSessionId = (): string => {
 };
 
 export default function ChatWidget(): JSX.Element {
+  const { token } = useAuth();
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([
     { id: 'welcome', role: 'assistant', content: "Bonjour ! Je suis Lumina, votre assistante RH. Posez-moi vos questions sur les horaires, la paie, les congés ou toute autre question RH." },
@@ -39,7 +41,7 @@ export default function ChatWidget(): JSX.Element {
     try {
       const res = await fetch(`${API}/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token ?? ''}` },
         body: JSON.stringify({ session_id: getSessionId(), message: text }),
       });
       if (!res.ok || !res.body) throw new Error('Erreur réseau');

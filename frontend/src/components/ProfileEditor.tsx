@@ -91,8 +91,8 @@ export const ProfileEditor = ({ employeeId, employeeName, canManageCode }: Props
   const generateCode = async (): Promise<void> => {
     try {
       const res = await axios.post<{ punch_code: string }>(`${API}/profiles/${employeeId}/punch-code`, {}, { headers });
-      patch({ punch_code: res.data.punch_code });
-      toast.success(`Nouveau NIP de punch : ${res.data.punch_code}`);
+      patch({ punch_code_set: true });
+      toast.success(`Nouveau NIP de punch : ${res.data.punch_code} — notez-le, il ne sera plus jamais affiché.`, { duration: 12000 });
     } catch {
       toast.error('Génération du NIP impossible.');
     }
@@ -113,11 +113,11 @@ export const ProfileEditor = ({ employeeId, employeeName, canManageCode }: Props
         </h2>
         <div className="flex items-center gap-3">
           <span data-testid="punch-code-display" className="inline-flex items-center gap-1.5 text-xs font-semibold bg-slate-100 text-slate-700 rounded-full px-3 py-1.5">
-            <KeyRound className="w-3.5 h-3.5" /> NIP de punch : <span className="font-mono text-sm">{profile.punch_code ?? '— non attribué —'}</span>
+            <KeyRound className="w-3.5 h-3.5" /> NIP de punch : <span className="font-mono text-sm">{profile.punch_code_set ? '•••• (attribué)' : '— non attribué —'}</span>
           </span>
           {canManageCode && (
             <Button data-testid="generate-punch-code-button" size="sm" variant="outline" onClick={() => void generateCode()} className="rounded-full text-xs">
-              {profile.punch_code ? 'Réinitialiser le NIP' : 'Générer un NIP'}
+              {profile.punch_code_set ? 'Réinitialiser le NIP' : 'Générer un NIP'}
             </Button>
           )}
         </div>

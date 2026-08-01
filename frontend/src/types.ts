@@ -1,6 +1,6 @@
 export type Role = 'superadmin' | 'admin' | 'manager' | 'employee';
 
-export type View = 'landing' | 'login' | 'careers' | 'agency' | 'dashboard' | 'punch';
+export type View = 'landing' | 'login' | 'careers' | 'agency' | 'dashboard' | 'punch' | 'privacy';
 
 export type ModuleKey =
   | 'dashboard'
@@ -456,6 +456,7 @@ export interface EmployeeProfile {
   max_hours_week: number;
   availability: Record<WeekDayKey, AvailabilityDay>;
   punch_code: string | null;
+  punch_code_set?: boolean;
   payroll_number?: string | null;
   notes: string;
   updated_at: string;

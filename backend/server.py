@@ -13,6 +13,7 @@ import logging
 import uuid
 import asyncio
 import secrets
+import hashlib
 import requests
 from zoneinfo import ZoneInfo
 from pypdf import PdfReader
@@ -56,8 +57,19 @@ async def root():
     return {"message": "Arrière Plan API"}
 
 
+CHAT_RATE: dict = {}
+CHAT_RATE_LIMIT = 30
+
+
 @api_router.post("/chat")
-async def chat_endpoint(req: ChatRequest):
+async def chat_endpoint(req: ChatRequest, request: Request):
+    user = await get_current_user(request)
+    now_ts = datetime.now(timezone.utc).timestamp()
+    stamps = [t for t in CHAT_RATE.get(user["id"], []) if now_ts - t < 3600]
+    if len(stamps) >= CHAT_RATE_LIMIT:
+        raise HTTPException(status_code=429, detail="Limite de messages atteinte. Réessayez dans une heure.")
+    stamps.append(now_ts)
+    CHAT_RATE[user["id"]] = stamps
     await db.chat_messages.insert_one({
         "id": str(uuid.uuid4()),
         "session_id": req.session_id,
@@ -152,7 +164,7 @@ def create_access_token(user: dict) -> str:
         "sub": user["id"],
         "email": user["email"],
         "role": user["role"],
-        "exp": datetime.now(timezone.utc) + timedelta(days=7),
+        "exp": datetime.now(timezone.utc) + timedelta(hours=24),
         "type": "access",
     }
     return jwt.encode(payload, get_jwt_secret(), algorithm=JWT_ALGORITHM)
@@ -186,6 +198,11 @@ async def get_current_user(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Utilisateur introuvable.")
     if user.get("suspended"):
         raise HTTPException(status_code=403, detail="Compte suspendu. Contactez votre superadministrateur.")
+    if user.get("is_temporary_password") and request.url.path not in (
+            "/api/auth/change-password", "/api/auth/me"):
+        raise HTTPException(status_code=403,
+                            detail="Vous devez d'abord remplacer votre mot de passe temporaire.",
+                            headers={"X-Password-Change-Required": "1"})
     return user
 
 
@@ -221,14 +238,29 @@ async def auth_me(user: dict = Depends(get_current_user)):
     return user_public(user)
 
 
+def validate_password_strength(pw: str) -> Optional[str]:
+    if len(pw) < 10:
+        return "Le mot de passe doit contenir au moins 10 caractères."
+    if not any(c.isupper() for c in pw):
+        return "Le mot de passe doit contenir au moins une majuscule."
+    if not any(c.islower() for c in pw):
+        return "Le mot de passe doit contenir au moins une minuscule."
+    if not any(c.isdigit() for c in pw):
+        return "Le mot de passe doit contenir au moins un chiffre."
+    return None
+
+
 @api_router.post("/auth/change-password")
 async def auth_change_password(payload: ChangePasswordIn, user: dict = Depends(get_current_user)):
     current_password = payload.current_password.strip()
     new_password = payload.new_password.strip()
     if not verify_password(current_password, user["password_hash"]):
         raise HTTPException(status_code=400, detail="Mot de passe actuel incorrect.")
-    if len(new_password) < 8:
-        raise HTTPException(status_code=400, detail="Le nouveau mot de passe doit contenir au moins 8 caractères.")
+    err = validate_password_strength(new_password)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    if new_password == current_password:
+        raise HTTPException(status_code=400, detail="Le nouveau mot de passe doit être différent de l'actuel.")
     await db.users.update_one(
         {"id": user["id"]},
         {"$set": {"password_hash": hash_password(new_password), "is_temporary_password": False}},
@@ -239,38 +271,53 @@ async def auth_change_password(payload: ChangePasswordIn, user: dict = Depends(g
 
 
 AUTH_SEED_USERS = [
-    {"email": "admin@luminahr.ca", "password": "admin123", "name": "Dr. Sophie Lavoie", "role": "admin",
-     "pharmacy_id": "ph1", "employee_id": "e1", "temp": False},
-    {"email": "julie@luminahr.ca", "password": "employe123", "name": "Julie Gagnon", "role": "employee",
-     "pharmacy_id": "ph1", "employee_id": "e2", "temp": False},
-    {"email": "gestion@luminahr.ca", "password": "gestion123", "name": "Marc-André Roy", "role": "manager",
-     "pharmacy_id": "ph1", "employee_id": None, "temp": False},
-    {"email": "jeffmenard78@hotmail.com", "password": "Lumina-Jeff!2941", "name": "Jeff Ménard",
-     "role": "superadmin", "temp": True},
-    {"email": "charles-jbourget@hotmail.com", "password": "Lumina-Charles!7358", "name": "Charles-J. Bourget",
-     "role": "superadmin", "temp": True},
-    {"email": "charlesjeanbourget@gmail.com", "password": "Lumina-Owner!5127", "name": "Charles Jean-Bourget",
-     "role": "superadmin", "temp": True},
+    {"email": "admin@luminahr.ca", "name": "Dr. Sophie Lavoie", "role": "admin",
+     "pharmacy_id": "ph1", "employee_id": "e1"},
+    {"email": "julie@luminahr.ca", "name": "Julie Gagnon", "role": "employee",
+     "pharmacy_id": "ph1", "employee_id": "e2"},
+    {"email": "gestion@luminahr.ca", "name": "Marc-André Roy", "role": "manager",
+     "pharmacy_id": "ph1", "employee_id": None},
+    {"email": "jeffmenard78@hotmail.com", "name": "Jeff Ménard", "role": "superadmin"},
+    {"email": "charles-jbourget@hotmail.com", "name": "Charles-J. Bourget", "role": "superadmin"},
+    {"email": "charlesjeanbourget@gmail.com", "name": "Charles Jean-Bourget", "role": "superadmin"},
 ]
 
 
+def hash_punch_code(code: str) -> str:
+    pepper = os.environ["PUNCH_PEPPER"]
+    return hashlib.sha256(f"{pepper}:{code}".encode("utf-8")).hexdigest()
+
+
+async def migrate_punch_codes():
+    async for prof in db.employee_profiles.find({"punch_code": {"$nin": [None, ""]}}, {"_id": 0, "id": 1, "punch_code": 1}):
+        await db.employee_profiles.update_one(
+            {"id": prof["id"]},
+            {"$set": {"punch_code_hash": hash_punch_code(prof["punch_code"])}, "$unset": {"punch_code": ""}})
+
+
 async def seed_users():
+    seed_password = os.environ.get("SEED_DEFAULT_PASSWORD", "")
     for su in AUTH_SEED_USERS:
         existing = await db.users.find_one({"email": su["email"]})
         if existing is None:
+            if not seed_password:
+                logger.warning(f"SEED_DEFAULT_PASSWORD absent — compte {su['email']} non créé.")
+                continue
             await db.users.insert_one({
                 "id": str(uuid.uuid4()),
                 "email": su["email"],
-                "password_hash": hash_password(su["password"]),
+                "password_hash": hash_password(seed_password),
                 "name": su["name"],
                 "role": su["role"],
                 "pharmacy_id": su.get("pharmacy_id"),
                 "employee_id": su.get("employee_id"),
-                "is_temporary_password": su["temp"],
+                "is_temporary_password": True,
                 "created_at": datetime.now(timezone.utc).isoformat(),
             })
     await db.users.create_index("email", unique=True)
     await db.login_attempts.create_index("identifier")
+    await db.employee_profiles.create_index("punch_code_hash")
+    await migrate_punch_codes()
 
 
 # ==================== Gestion des comptes (superadmin) ====================
@@ -599,20 +646,26 @@ async def list_licenses(branch_id: Optional[str] = Query(None), pharmacy_id: Opt
     return [license_public(d) for d in docs]
 
 
+def get_fernet():
+    from cryptography.fernet import Fernet
+    return Fernet(os.environ["LICENSE_ENCRYPTION_KEY"].encode("utf-8"))
+
+
 async def upload_certificate(pharmacy_id: str, file: UploadFile) -> dict:
     if file.content_type not in ALLOWED_CERT_TYPES:
         raise HTTPException(status_code=400, detail="Format non autorisé (PDF, PNG, JPG ou WEBP uniquement).")
     data = await file.read()
     if len(data) > MAX_CERT_SIZE:
         raise HTTPException(status_code=400, detail="Fichier trop volumineux (maximum 10 Mo).")
-    ext = file.filename.rsplit(".", 1)[-1].lower() if "." in (file.filename or "") else "bin"
-    path = f"{APP_NAME}/licences/{pharmacy_id}/{uuid.uuid4()}.{ext}"
-    result = await asyncio.to_thread(put_object, path, data, file.content_type or "application/octet-stream")
+    encrypted = get_fernet().encrypt(data)
+    path = f"{APP_NAME}/licences/{pharmacy_id}/{uuid.uuid4()}.enc"
+    result = await asyncio.to_thread(put_object, path, encrypted, "application/octet-stream")
     return {
         "storage_path": result["path"],
         "certificate_filename": file.filename,
         "certificate_content_type": file.content_type,
         "certificate_size": len(data),
+        "certificate_encrypted": True,
     }
 
 
@@ -697,6 +750,8 @@ async def get_certificate(license_id: str, principal: dict = Depends(get_princip
     if not doc or not doc.get("storage_path"):
         raise HTTPException(status_code=404, detail="Certificat introuvable.")
     content, ctype = await asyncio.to_thread(get_object, doc["storage_path"])
+    if doc.get("certificate_encrypted"):
+        content = get_fernet().decrypt(content)
     await log_audit(principal["email"], principal["role"], "CONSULTATION_CERTIFICAT", "licence", license_id,
                     f"Certificat consulté ({doc['employee_name']})", doc["pharmacy_id"])
     filename = doc.get("certificate_filename") or "certificat"
@@ -1327,19 +1382,26 @@ class ProfileIn(BaseModel):
     payroll_number: Optional[str] = None
 
 
+def sanitize_profile(doc: dict) -> dict:
+    doc["punch_code_set"] = bool(doc.get("punch_code_hash") or doc.get("punch_code"))
+    doc.pop("punch_code", None)
+    doc.pop("punch_code_hash", None)
+    return doc
+
+
 async def get_or_create_profile(pharmacy_id: str, employee_id: str, employee_name: str = "") -> dict:
     doc = await db.employee_profiles.find_one({"pharmacy_id": pharmacy_id, "employee_id": employee_id}, {"_id": 0})
     if doc:
-        return doc
+        return sanitize_profile(doc)
     doc = {
         "id": str(uuid.uuid4()), "pharmacy_id": pharmacy_id, "employee_id": employee_id,
         "employee_name": employee_name, "roles": [], "capacities": [], "restrictions": [],
         "min_hours_week": 0, "max_hours_week": 40, "availability": default_availability(),
-        "punch_code": None, "notes": "",
+        "punch_code_hash": None, "notes": "",
         "updated_at": datetime.now(timezone.utc).isoformat(), "updated_by": "",
     }
     await db.employee_profiles.insert_one({**doc})
-    return doc
+    return sanitize_profile(doc)
 
 
 def check_profile_access(user: dict, employee_id: str) -> str:
@@ -1358,7 +1420,8 @@ async def list_profiles(user: dict = Depends(get_current_user)):
     if user["role"] in ("admin", "manager", "superadmin"):
         pid = user.get("pharmacy_id") or ""
         query = {"pharmacy_id": pid} if pid else {}
-        return await db.employee_profiles.find(query, {"_id": 0}).to_list(1000)
+        docs = await db.employee_profiles.find(query, {"_id": 0}).to_list(1000)
+        return [sanitize_profile(d) for d in docs]
     if not user.get("employee_id"):
         return []
     return [await get_or_create_profile(user.get("pharmacy_id") or "", user["employee_id"], user["name"])]
@@ -1396,12 +1459,14 @@ async def generate_punch_code(employee_id: str, principal: dict = Depends(get_pr
     doc = await get_or_create_profile(pid, employee_id)
     for _ in range(50):
         code = f"{secrets.randbelow(10000):04d}"
-        exists = await db.employee_profiles.find_one({"punch_code": code})
+        exists = await db.employee_profiles.find_one({"punch_code_hash": hash_punch_code(code)})
         if not exists:
             break
     else:
         raise HTTPException(status_code=500, detail="Impossible de générer un NIP unique.")
-    await db.employee_profiles.update_one({"id": doc["id"]}, {"$set": {"punch_code": code}})
+    await db.employee_profiles.update_one(
+        {"id": doc["id"]},
+        {"$set": {"punch_code_hash": hash_punch_code(code)}, "$unset": {"punch_code": ""}})
     await log_audit(principal["email"], principal["role"], "GENERATION_NIP", "profil", employee_id,
                     f"Nouveau NIP de punch généré pour {doc.get('employee_name') or employee_id}", pid)
     return {"punch_code": code}
@@ -1455,7 +1520,7 @@ async def do_punch(pharmacy_id: str, employee_id: str, employee_name: str, sourc
 
 async def punch_throttle_check(request: Request) -> str:
     fwd = request.headers.get("x-forwarded-for", "")
-    ip = fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else "inconnu")
+    ip = fwd.split(",")[-1].strip() if fwd else (request.client.host if request.client else "inconnu")
     identifier = f"punch:{ip}"
     now = datetime.now(timezone.utc)
     attempt = await db.login_attempts.find_one({"identifier": identifier}, {"_id": 0})
@@ -1469,7 +1534,7 @@ async def punch_throttle_check(request: Request) -> str:
 async def resolve_punch_code(code: str, identifier: str) -> dict:
     if len(code) != 4 or not code.isdigit():
         raise HTTPException(status_code=400, detail="NIP invalide (4 chiffres).")
-    prof = await db.employee_profiles.find_one({"punch_code": code}, {"_id": 0})
+    prof = await db.employee_profiles.find_one({"punch_code_hash": hash_punch_code(code)}, {"_id": 0})
     if not prof:
         now = datetime.now(timezone.utc)
         attempt = await db.login_attempts.find_one({"identifier": identifier}, {"_id": 0})
@@ -1490,7 +1555,10 @@ async def punch_preview(payload: PunchCodeIn, request: Request):
     prof = await resolve_punch_code(payload.code.strip(), identifier)
     open_p = await db.punches.find_one(
         {"pharmacy_id": prof["pharmacy_id"], "employee_id": prof["employee_id"], "punch_out": None}, {"_id": 0})
-    return {"employee_name": prof.get("employee_name", ""), "next_action": "out" if open_p else "in",
+    full_name = (prof.get("employee_name", "") or "").strip()
+    parts = full_name.split()
+    display = f"{parts[0]} {parts[-1][0]}." if len(parts) > 1 else full_name
+    return {"employee_name": display, "next_action": "out" if open_p else "in",
             "since": open_p["punch_in"] if open_p else None}
 
 
@@ -4387,7 +4455,7 @@ async def create_demo_request(payload: DemoRequestIn, request: Request):
     if not name or not email or "@" not in email or "." not in email.split("@")[-1]:
         raise HTTPException(status_code=400, detail="Nom et courriel valide requis.")
     fwd = request.headers.get("x-forwarded-for", "")
-    ip = fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else "inconnu")
+    ip = fwd.split(",")[-1].strip() if fwd else (request.client.host if request.client else "inconnu")
     since = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
     recent = await db.demo_requests.count_documents({"ip": ip, "created_at": {"$gte": since}})
     if recent >= 5:
@@ -4468,13 +4536,23 @@ async def delete_demo_request(req_id: str, su: dict = Depends(require_superadmin
 
 app.include_router(api_router)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+_cors_origins = os.environ.get('CORS_ORIGINS', '').strip()
+if _cors_origins and _cors_origins != '*':
+    app.add_middleware(
+        CORSMiddleware,
+        allow_credentials=True,
+        allow_origins=[o.strip() for o in _cors_origins.split(',') if o.strip()],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+else:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_credentials=True,
+        allow_origin_regex=r"https://[a-z0-9-]+\.(preview\.)?emergentagent\.com",
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 
 @app.on_event("shutdown")
