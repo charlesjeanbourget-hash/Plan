@@ -238,9 +238,20 @@ async def auth_login(payload: LoginIn, request: Request):
     return {"access_token": create_access_token(user), "user": user_public(user)}
 
 
+TRUSTED_PROXY_HOPS = max(1, int(os.environ.get("TRUSTED_PROXY_HOPS", "1")))
+
+
 def client_ip(request: Request) -> str:
+    cf = request.headers.get("cf-connecting-ip", "").strip()
+    if cf:
+        return cf
     fwd = request.headers.get("x-forwarded-for", "")
-    return fwd.split(",")[-1].strip() if fwd else (request.client.host if request.client else "inconnu")
+    if not fwd:
+        return request.client.host if request.client else "inconnu"
+    ips = [p.strip() for p in fwd.split(",") if p.strip()]
+    if not ips:
+        return request.client.host if request.client else "inconnu"
+    return ips[-min(TRUSTED_PROXY_HOPS, len(ips))]
 
 
 async def is_new_ip_login(user_id: str, ip: str) -> bool:
@@ -1598,8 +1609,7 @@ async def do_punch(pharmacy_id: str, employee_id: str, employee_name: str, sourc
 
 
 async def punch_throttle_check(request: Request) -> str:
-    fwd = request.headers.get("x-forwarded-for", "")
-    ip = fwd.split(",")[-1].strip() if fwd else (request.client.host if request.client else "inconnu")
+    ip = client_ip(request)
     identifier = f"punch:{ip}"
     now = datetime.now(timezone.utc)
     attempt = await db.login_attempts.find_one({"identifier": identifier}, {"_id": 0})
@@ -4533,8 +4543,7 @@ async def create_demo_request(payload: DemoRequestIn, request: Request):
     email = payload.email.strip().lower()
     if not name or not email or "@" not in email or "." not in email.split("@")[-1]:
         raise HTTPException(status_code=400, detail="Nom et courriel valide requis.")
-    fwd = request.headers.get("x-forwarded-for", "")
-    ip = fwd.split(",")[-1].strip() if fwd else (request.client.host if request.client else "inconnu")
+    ip = client_ip(request)
     since = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
     recent = await db.demo_requests.count_documents({"ip": ip, "created_at": {"$gte": since}})
     if recent >= 5:
@@ -4618,6 +4627,10 @@ async def delete_demo_request(req_id: str, su: dict = Depends(require_superadmin
 @api_router.post("/employees/{employee_id}/anonymize")
 async def anonymize_employee(employee_id: str, principal: dict = Depends(get_principal)):
     pid = principal["pharmacy_id"] or "ph1"
+    exists = await db.users.find_one({"employee_id": employee_id}, {"_id": 0, "id": 1}) \
+        or await db.employee_profiles.find_one({"pharmacy_id": pid, "employee_id": employee_id}, {"_id": 0, "id": 1})
+    if not exists:
+        raise HTTPException(status_code=404, detail="Employé introuvable — aucun dossier serveur à anonymiser.")
     label = f"Employé anonymisé ({employee_id[-4:]})"
     result = {"user": 0, "profile": 0, "punches": 0, "licenses": 0, "label": label}
 
@@ -4738,6 +4751,8 @@ async def my_data_export(user: dict = Depends(get_current_user)):
         "compte": user_public(user),
         "profil": None,
         "pointages": [],
+        "evaluations": [],
+        "notifications": [],
     }
     if user.get("employee_id") and user.get("pharmacy_id"):
         prof = await db.employee_profiles.find_one(
@@ -4748,6 +4763,15 @@ async def my_data_export(user: dict = Depends(get_current_user)):
             {"pharmacy_id": user["pharmacy_id"], "employee_id": user["employee_id"]},
             {"_id": 0}).sort("punch_in", -1).to_list(2000)
         export["pointages"] = punches
+        export["evaluations"] = await db.evaluations.find(
+            {"pharmacy_id": user["pharmacy_id"], "employee_id": user["employee_id"]},
+            {"_id": 0}).sort("created_at", -1).to_list(500)
+    notif_ors: list[dict] = [{"target_email": user["email"]}]
+    if user.get("employee_id"):
+        notif_ors.append({"target_employee_id": user["employee_id"]})
+    export["notifications"] = await db.notifications.find(
+        {"pharmacy_id": user.get("pharmacy_id") or "ph1", "$or": notif_ors},
+        {"_id": 0}).sort("created_at", -1).to_list(500)
     await log_audit(user["email"], user["role"], "EXPORT_DONNEES_PERSONNELLES", "utilisateur", user["id"],
                     "Export de ses propres données (droit d'accès Loi 25)", user.get("pharmacy_id") or "")
     return export

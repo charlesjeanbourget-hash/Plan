@@ -247,6 +247,12 @@ Reste FAIBLE non bloquant : /api/chat valide Pydantic avant auth (probe 422 vs 4
 4. **Export des données personnelles** (droit d'accès Loi 25) : bouton « Télécharger mes données » (export-my-data-button) dans Mon espace → GET /api/me/data-export (compte + profil assaini + pointages) combiné aux données localStorage (dossier, congés, relevés de paie, quarts) → fichier JSON téléchargé. Audit EXPORT_DONNEES_PERSONNELLES.
 Fix post-test : validation titre vide ajoutée sur PUT /incidents (cohérence avec POST).
 
+## Itération 31 (1 août 2026) — Durcissements post-audit (3 correctifs recommandés par testing agent iter 28) — testée (curl E2E complet + screenshot)
+1. **client_ip() robuste et anti-spoof** : préférence au header `CF-Connecting-IP` (si transmis), sinon lecture de X-Forwarded-For à `TRUSTED_PROXY_HOPS` positions de la fin (backend/.env = 3 : chaîne réelle mesurée = client → Cloudflare → LB GCP → ingress). Vérifié empiriquement : IP réelle du client enregistrée (34.170.12.145), XFF falsifié ignoré, CF-Connecting-IP falsifié rejeté 403 par Cloudflare. **La détection « IP inhabituelle » (flagged_new_ip) fonctionne désormais réellement** : 1re connexion depuis nouvelle IP → flagged=True + courriel d'alerte tenté ; connexions suivantes → False. punch_throttle_check et le throttle démo utilisent maintenant client_ip() (DRY).
+2. **Anonymisation : 404 pour ID fantôme** : POST /employees/{id}/anonymize exige une correspondance dans users OU employee_profiles (404 « Employé introuvable » sinon) — plus de lignes d'audit vides. Employé réel → 200 idempotent. Le frontend gère déjà le 404 (catch → anonymisation locale seule).
+3. **Export « mes données » complété** : GET /api/me/data-export inclut désormais `evaluations` (évaluations de performance Mongo) et `notifications` (ciblées employé/courriel) en plus du compte, profil, pointages ; les congés/relevés/quarts restent fusionnés côté frontend (localStorage).
+NOTE .env : nouvelle clé `TRUSTED_PROXY_HOPS=3` (préviews Emergent derrière Cloudflare). En déploiement mono-proxy, mettre 1.
+
 ## Notes techniques
 - Ne jamais recréer `jsconfig.json` (conflit CRA avec tsconfig.json)
 - npm interdit — yarn uniquement
