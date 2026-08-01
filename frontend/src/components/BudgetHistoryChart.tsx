@@ -57,7 +57,7 @@ export const BudgetHistoryChart = (): JSX.Element | null => {
           Aucun coût planifié sur les 6 derniers mois — ajoutez des quarts et des taux horaires aux profils.
         </p>
       ) : (
-        <div className="h-72">
+        <div className="h-72 min-h-[288px]">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={rows} margin={{ top: 4, right: 8, left: 8, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
