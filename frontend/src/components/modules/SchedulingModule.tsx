@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ChevronLeft, ChevronRight, Plus, X, ArrowLeftRight, Check, Stethoscope, CopyPlus, LayoutTemplate, FileDown, Megaphone, Hourglass, BookOpenCheck, MapPin, Wrench, Hand } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, X, ArrowLeftRight, Check, Stethoscope, CopyPlus, LayoutTemplate, FileDown, Megaphone, Hourglass, BookOpenCheck, MapPin, Wrench, Hand, Sparkles } from 'lucide-react';
 import { ScheduleProposals } from '@/components/ScheduleProposals';
 import { AppointmentDialog } from '@/components/AppointmentDialog';
 import { DuplicateWeekDialog } from '@/components/DuplicateWeekDialog';
@@ -361,6 +361,11 @@ export default function SchedulingModule(): JSX.Element {
                           onDragEnd={() => { setDragShiftId(null); setDropTarget(null); }}
                           className={`group relative bg-emerald-600 text-white rounded-lg px-2 py-1.5 mb-1 text-xs font-semibold text-center ${isAdmin ? 'cursor-grab active:cursor-grabbing' : ''} ${dragShiftId === s.id ? 'opacity-40' : ''}`}
                         >
+                          {s.aiGenerated && (
+                            <span data-testid={`ai-shift-badge-${s.id}`} className="absolute -top-1.5 -left-1.5 inline-flex items-center gap-0.5 rounded-full bg-violet-600 text-white text-[8px] font-bold px-1.5 py-0.5 shadow-sm" title="Quart généré par l'IA">
+                              <Sparkles className="w-2 h-2" /> IA
+                            </span>
+                          )}
                           {s.startTime}–{s.endTime}
                           {(s.resourceIds ?? []).length > 0 && (
                             <span className="mt-1 flex flex-wrap justify-center gap-1">

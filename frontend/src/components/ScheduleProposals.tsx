@@ -24,11 +24,11 @@ const normAlert = (a: string | ProposalAlert): ProposalAlert =>
 const STATUS_META: Record<ProposalStatus, { label: string; cls: string }> = {
   generating: { label: 'Génération par l\'IA…', cls: 'bg-sky-100 text-sky-800' },
   error: { label: 'Erreur', cls: 'bg-red-100 text-red-800' },
-  pending: { label: 'En attente d\'approbations', cls: 'bg-amber-100 text-amber-800' },
+  pending: { label: 'Au calendrier — envoi aux employés facultatif', cls: 'bg-violet-100 text-violet-800' },
   attention: { label: 'Refus d\'employé — à réviser', cls: 'bg-orange-100 text-orange-800' },
-  approved: { label: 'Approuvé — prêt à appliquer', cls: 'bg-emerald-100 text-emerald-800' },
+  approved: { label: 'Approuvé par les employés', cls: 'bg-emerald-100 text-emerald-800' },
   rejected: { label: 'Rejeté par l\'admin', cls: 'bg-red-100 text-red-800' },
-  applied: { label: 'Appliqué à l\'horaire', cls: 'bg-slate-200 text-slate-700' },
+  applied: { label: 'Confirmé à l\'horaire', cls: 'bg-slate-200 text-slate-700' },
 };
 
 const TRAFFIC_DAYS: [string, string][] = [
@@ -50,9 +50,21 @@ const nextMonday = (): string => {
   return d.toISOString().slice(0, 10);
 };
 
+const AUTO_KEY = 'ap_auto_added_proposals_v1';
+
+const loadAutoAdded = (): Set<string> => {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(AUTO_KEY) ?? '[]') as string[]);
+  } catch {
+    return new Set();
+  }
+};
+
+const saveAutoAdded = (s: Set<string>): void => localStorage.setItem(AUTO_KEY, JSON.stringify([...s]));
+
 export const ScheduleProposals = (): JSX.Element => {
   const { token } = useAuth();
-  const { state, addShift } = useHR();
+  const { state, addShift, deleteShift } = useHR();
   const headers = { Authorization: `Bearer ${token ?? ''}` };
   const [proposals, setProposals] = useState<ScheduleProposal[]>([]);
   const [genOpen, setGenOpen] = useState(false);
@@ -92,6 +104,29 @@ export const ScheduleProposals = (): JSX.Element => {
     return () => window.clearInterval(id);
   }, [proposals, refresh]);
 
+  useEffect(() => {
+    if (proposals.length === 0) return;
+    if (localStorage.getItem(AUTO_KEY) === null) {
+      saveAutoAdded(new Set(proposals.filter((p) => p.effective_status !== 'generating').map((p) => p.id)));
+      return;
+    }
+    const added = loadAutoAdded();
+    let changed = false;
+    proposals.forEach((p) => {
+      if (added.has(p.id) || p.effective_status === 'generating') return;
+      added.add(p.id);
+      changed = true;
+      if (!['pending', 'attention', 'approved'].includes(p.effective_status) || p.shifts.length === 0) return;
+      p.shifts.forEach((s) => addShift({
+        employeeId: s.employee_id, date: s.date, startTime: s.start, endTime: s.end,
+        aiGenerated: true, proposalId: p.id,
+      }));
+      toast.success(`Horaire IA de la semaine du ${p.week_start} ajouté au calendrier (${p.shifts.length} quarts) — ajustez-le par glisser-déposer.`);
+    });
+    if (changed) saveAutoAdded(added);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [proposals]);
+
   const setTrafficVal = (day: string, block: string, value: string): void => {
     const n = Math.max(0, Math.min(500, Number(value) || 0));
     setTraffic((t) => ({ ...t, [day]: { ...(t[day] ?? {}), [block]: n } }));
@@ -129,8 +164,8 @@ export const ScheduleProposals = (): JSX.Element => {
         })),
       }, { headers });
       toast.success(budgetNum > 0
-        ? `L'IA prépare l'horaire en respectant le budget de ${cad(budgetNum)}, l'achalandage, les tâches et les profils…`
-        : 'L\'IA prépare l\'horaire en respectant l\'achalandage, les tâches et les profils…');
+        ? `L'IA prépare l'horaire (budget ${cad(budgetNum)}) — les quarts apparaîtront automatiquement dans le calendrier.`
+        : 'L\'IA prépare l\'horaire — les quarts apparaîtront automatiquement dans le calendrier.');
       setGenOpen(false);
       await refresh();
     } catch (err) {
@@ -141,12 +176,21 @@ export const ScheduleProposals = (): JSX.Element => {
     }
   };
 
+  const removeAiShifts = (proposalId: string): number => {
+    const linked = state.shifts.filter((s) => s.proposalId === proposalId);
+    linked.forEach((s) => deleteShift(s.id));
+    return linked.length;
+  };
+
   const decide = async (id: string, status: 'approved' | 'rejected'): Promise<void> => {
     try {
       await axios.post(`${API}/schedule/proposals/${id}/decision`, { status }, { headers });
-      toast.success(status === 'approved'
-        ? 'Approuvé. L\'horaire sera final quand les employés auront répondu (ou au délai écoulé).'
-        : 'Proposition rejetée.');
+      if (status === 'rejected') {
+        const n = removeAiShifts(id);
+        toast.success(n > 0 ? `Proposition rejetée — ${n} quart(s) IA retirés du calendrier.` : 'Proposition rejetée.');
+      } else {
+        toast.success('Envoyé aux employés pour approbation (sans réponse au délai, l\'approbation est tacite).');
+      }
       await refresh();
     } catch {
       toast.error('Action impossible.');
@@ -156,8 +200,15 @@ export const ScheduleProposals = (): JSX.Element => {
   const apply = async (p: ScheduleProposal): Promise<void> => {
     try {
       await axios.post(`${API}/schedule/proposals/${p.id}/apply`, {}, { headers });
-      p.shifts.forEach((s) => addShift({ employeeId: s.employee_id, date: s.date, startTime: s.start, endTime: s.end }));
-      toast.success(`${p.shifts.length} quart(s) ajoutés à l'horaire de la semaine du ${p.week_start}.`);
+      const missing = p.shifts.filter((s) => !state.shifts.some((x) =>
+        x.employeeId === s.employee_id && x.date === s.date && x.startTime === s.start && x.endTime === s.end));
+      missing.forEach((s) => addShift({
+        employeeId: s.employee_id, date: s.date, startTime: s.start, endTime: s.end,
+        aiGenerated: true, proposalId: p.id,
+      }));
+      toast.success(missing.length === 0
+        ? `Horaire de la semaine du ${p.week_start} confirmé — tous les quarts étaient déjà au calendrier.`
+        : `Horaire confirmé — ${missing.length} quart(s) ajoutés, ${p.shifts.length - missing.length} déjà au calendrier.`);
       await refresh();
     } catch (err) {
       const detail = axios.isAxiosError(err) && err.response ? (err.response.data as { detail?: unknown }).detail : null;
@@ -168,7 +219,8 @@ export const ScheduleProposals = (): JSX.Element => {
   const remove = async (id: string): Promise<void> => {
     try {
       await axios.delete(`${API}/schedule/proposals/${id}`, { headers });
-      toast.success('Proposition supprimée.');
+      const n = removeAiShifts(id);
+      toast.success(n > 0 ? `Proposition supprimée — ${n} quart(s) IA retirés du calendrier.` : 'Proposition supprimée.');
       await refresh();
     } catch {
       toast.error('Suppression impossible.');
@@ -186,10 +238,11 @@ export const ScheduleProposals = (): JSX.Element => {
         </Button>
       </div>
       <p className="text-xs text-slate-500 mb-4">
-        L'IA respecte le budget salarial hebdomadaire, l'achalandage (clients/heure par plage), les profils (disponibilités, rôles, restrictions,
-        heures min/max, taux horaire), les absences approuvées et les tâches de la semaine. Les points douteux (budget dépassé, plage achalandée
-        sans couverture, qualification manquante, conflit d'absence) sont signalés — approuvez ou rejetez en connaissance de cause,
-        puis chaque employé approuve dans le délai fixé (sans réponse, l'approbation est tacite).
+        Dès la génération terminée, les quarts apparaissent <strong>directement dans le calendrier</strong> (pastille violette « IA ») —
+        ajustez-les librement par glisser-déposer. L'IA respecte le budget, l'achalandage, les profils (disponibilités, rôles, restrictions,
+        heures min/max, taux horaire), les absences approuvées et les tâches de la semaine ; les points douteux sont signalés.
+        Facultatif : « Envoyer aux employés » lance l'approbation par chacun dans le délai fixé (sans réponse, l'approbation est tacite).
+        Rejeter ou supprimer une proposition retire ses quarts IA du calendrier.
       </p>
 
       {proposals.length === 0 && <p className="text-sm text-slate-500">Aucune proposition. Générez votre premier horaire par IA.</p>}
@@ -231,7 +284,7 @@ export const ScheduleProposals = (): JSX.Element => {
                   {p.admin_status === 'pending' && p.effective_status !== 'generating' && p.effective_status !== 'error' && (
                     <>
                       <Button data-testid={`admin-approve-${p.id}`} size="sm" onClick={() => void decide(p.id, 'approved')} className="rounded-full bg-emerald-600 hover:bg-emerald-700 text-xs">
-                        <Check className="w-3.5 h-3.5 mr-1" /> Approuver (admin)
+                        <Check className="w-3.5 h-3.5 mr-1" /> Envoyer aux employés
                       </Button>
                       <Button data-testid={`admin-reject-${p.id}`} size="sm" variant="outline" onClick={() => void decide(p.id, 'rejected')} className="rounded-full text-xs text-red-600 border-red-200 hover:bg-red-50">
                         <X className="w-3.5 h-3.5 mr-1" /> Rejeter
@@ -240,7 +293,7 @@ export const ScheduleProposals = (): JSX.Element => {
                   )}
                   {p.effective_status === 'approved' && (
                     <Button data-testid={`apply-proposal-${p.id}`} size="sm" onClick={() => void apply(p)} className="rounded-full bg-emerald-600 hover:bg-emerald-700 text-xs">
-                      <CalendarPlus className="w-3.5 h-3.5 mr-1" /> Appliquer à l'horaire
+                      <CalendarPlus className="w-3.5 h-3.5 mr-1" /> Confirmer à l'horaire
                     </Button>
                   )}
                   <Button data-testid={`delete-proposal-${p.id}`} size="sm" variant="outline" onClick={() => void remove(p.id)} className="rounded-full text-xs text-red-600 border-red-200 hover:bg-red-50">

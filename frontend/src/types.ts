@@ -86,6 +86,8 @@ export interface Shift {
   endTime: string;
   notes?: string;
   resourceIds?: string[];
+  aiGenerated?: boolean;
+  proposalId?: string;
 }
 
 export type ResourceType = 'lieu' | 'equipement';

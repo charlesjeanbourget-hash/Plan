@@ -259,6 +259,15 @@ NOTE .env : nouvelle clé `TRUSTED_PROXY_HOPS=3` (préviews Emergent derrière C
 - Donnée démo : licence ATP-2026-4471 pour Julie (e2), expire 2026-08-26 (~25 j) → bannière ambre visible sur son tableau de bord.
 - Vérifié E2E : 403 rôles, verrouillage 5 échecs → visible dans le panneau → déverrouillage 200 → 404 re-unlock, volet formations testé avec assignation temporaire (créée puis retirée).
 
+## Itération 33 (1 août 2026) — Horaire IA directement dans le calendrier (style Agendrix) — testée E2E (vraie génération gpt-5.4 + Playwright 3 scénarios ✓)
+Choix client : approbation des employés conservée EN OPTION + pastille « IA » violette distincte.
+- **Ajout automatique au calendrier** : dès la fin de la génération IA, les quarts tombent directement dans la grille Horaires (aiGenerated:true + proposalId sur Shift — types.ts) avec toast. Mécanisme : useEffect dans ScheduleProposals sur le polling des propositions ; anti-redéclenchement via localStorage `ap_auto_added_proposals_v1` (Set d'ids traités, seedé au premier chargement avec les propositions existantes NON generating pour ne pas déverser les anciennes ; fonctionne aussi sur un 2e appareil).
+- **Pastille « IA » violette** (ai-shift-badge-{id}, Sparkles, coin haut-gauche du chip) sur chaque quart généré — le drag & drop existant fonctionne tel quel et la pastille suit le quart déplacé (updateShift conserve les flags). Copie Alt+drag = quart normal sans pastille.
+- **Approbation facultative** : bouton « Approuver (admin) » renommé **« Envoyer aux employés »** (même endpoint /decision) ; statut pending → « Au calendrier — envoi aux employés facultatif » (violet) ; « Appliquer à l'horaire » → **« Confirmer à l'horaire »**, désormais IDEMPOTENT (n'ajoute que les quarts absents de la grille — pas de doublons après l'auto-ajout).
+- **Nettoyage automatique** : Rejeter ou Supprimer une proposition retire ses quarts IA du calendrier (removeAiShifts par proposalId, toast « X quart(s) IA retirés »).
+- Vérifié E2E réel : génération 14 quarts semaine 2026-08-10 → auto-apparus avec pastilles → drag Lun→Sam OK pastille conservée → suppression proposition → 0 pastille restante. (Proposition de test supprimée ; e1cfdd12 semaine 2026-08-02 conservée.)
+- NOTE : les quarts vivent en localStorage par navigateur (architecture existante) — l'auto-ajout se produit sur chaque appareil à l'ouverture du module Horaires.
+
 ## Notes techniques
 - Ne jamais recréer `jsconfig.json` (conflit CRA avec tsconfig.json)
 - npm interdit — yarn uniquement
