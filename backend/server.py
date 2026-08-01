@@ -2299,6 +2299,8 @@ def _validate_shift_core(date_s: str, start: str, end: str) -> None:
         raise HTTPException(status_code=400, detail="Date de quart invalide.")
     if not re.fullmatch(r"\d{2}:\d{2}", start or "") or not re.fullmatch(r"\d{2}:\d{2}", end or ""):
         raise HTTPException(status_code=400, detail="Heures de quart invalides (HH:MM).")
+    if end <= start:
+        raise HTTPException(status_code=400, detail="L'heure de fin doit être après l'heure de début.")
 
 
 def _shift_doc(s: ShiftIn, pid: str) -> dict:
