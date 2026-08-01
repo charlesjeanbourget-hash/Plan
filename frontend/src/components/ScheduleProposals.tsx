@@ -10,8 +10,9 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Sparkles, Loader2, Check, X, Trash2, CalendarPlus, AlertTriangle, ExternalLink, Wallet, Users } from 'lucide-react';
+import { Sparkles, Loader2, Check, X, Trash2, CalendarPlus, AlertTriangle, ExternalLink, Wallet, Users, Layers } from 'lucide-react';
 import { toast } from 'sonner';
+import { DEPARTMENTS } from '@/lib/pharmacy';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -97,6 +98,8 @@ export const ScheduleProposals = (): JSX.Element => {
   const [periodEnd, setPeriodEnd] = useState('');
   const [expanded, setExpanded] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [genMode, setGenMode] = useState<'adjust' | 'overwrite'>('adjust');
+  const [genDept, setGenDept] = useState('all');
 
   const fillTraffic = (): void => {
     const first = traffic[TRAFFIC_DAYS[0][0]] ?? {};
@@ -208,11 +211,21 @@ export const ScheduleProposals = (): JSX.Element => {
       added.add(p.id);
       changed = true;
       if (!['pending', 'attention', 'approved'].includes(p.effective_status) || p.shifts.length === 0) return;
+      let removed = 0;
+      if (p.existing_mode === 'overwrite') {
+        const end = new Date(`${p.week_start}T00:00:00`);
+        end.setDate(end.getDate() + 6);
+        const wEnd = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')}`;
+        state.shifts
+          .filter((s) => s.date >= p.week_start && s.date <= wEnd && s.proposalId !== p.id
+            && (!p.department || (s.department ?? 'Général') === p.department))
+          .forEach((s) => { deleteShift(s.id); removed += 1; });
+      }
       p.shifts.forEach((s) => addShift({
         employeeId: s.employee_id, date: s.date, startTime: s.start, endTime: s.end,
-        aiGenerated: true, proposalId: p.id,
+        aiGenerated: true, proposalId: p.id, department: p.department || 'Général',
       }));
-      toast.success(`Horaire IA de la semaine du ${p.week_start} ajouté au calendrier (${p.shifts.length} quarts) — ajustez-le par glisser-déposer.`);
+      toast.success(`Horaire IA de la semaine du ${p.week_start} ajouté au calendrier (${p.shifts.length} quarts${removed > 0 ? ` — ${removed} ancien(s) quart(s) retirés, mode Écraser` : ''}) — ajustez-le par glisser-déposer.`);
     });
     if (changed) saveAutoAdded(added);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -250,6 +263,18 @@ export const ScheduleProposals = (): JSX.Element => {
         approval_deadline_hours: Number(deadlineHours),
         weekly_budget: budgetNum,
         absences,
+        department: genDept === 'all' ? '' : genDept,
+        existing_mode: genMode,
+        existing_shifts: genMode === 'adjust'
+          ? state.shifts.filter((s) => s.date >= weekStart && s.date <= weekEnd).map((s) => {
+            const emp = state.employees.find((e2) => e2.id === s.employeeId);
+            return {
+              employee_id: s.employeeId,
+              employee_name: emp ? `${emp.firstName} ${emp.lastName}` : '',
+              date: s.date, start: s.startTime, end: s.endTime,
+            };
+          })
+          : [],
         employees: state.employees.filter((emp) => emp.status === 'Actif').map((emp) => ({
           id: emp.id, name: `${emp.firstName} ${emp.lastName}`, position: emp.position,
         })),
@@ -295,7 +320,7 @@ export const ScheduleProposals = (): JSX.Element => {
         x.employeeId === s.employee_id && x.date === s.date && x.startTime === s.start && x.endTime === s.end));
       missing.forEach((s) => addShift({
         employeeId: s.employee_id, date: s.date, startTime: s.start, endTime: s.end,
-        aiGenerated: true, proposalId: p.id,
+        aiGenerated: true, proposalId: p.id, department: p.department || 'Général',
       }));
       toast.success(missing.length === 0
         ? `Horaire de la semaine du ${p.week_start} confirmé — tous les quarts étaient déjà au calendrier.`
@@ -352,6 +377,14 @@ export const ScheduleProposals = (): JSX.Element => {
                   {p.effective_status === 'generating' && <Loader2 className="w-4 h-4 text-sky-600 animate-spin" />}
                   <p className="text-sm font-bold text-slate-800">Semaine du {p.week_start}</p>
                   <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${meta.cls}`}>{meta.label}</span>
+                  {p.department && (
+                    <span data-testid={`proposal-dept-${p.id}`} className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-200">
+                      <Layers className="w-3 h-3" /> {p.department}
+                    </span>
+                  )}
+                  {p.existing_mode === 'overwrite' && (
+                    <span data-testid={`proposal-mode-${p.id}`} className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-50 text-red-700 border border-red-200">Mode Écraser</span>
+                  )}
                   {p.estimated_cost != null && p.effective_status !== 'generating' && (
                     <span
                       data-testid={`proposal-cost-${p.id}`}
@@ -514,6 +547,48 @@ export const ScheduleProposals = (): JSX.Element => {
                 <Input data-testid="gen-budget-input" value={budget} onChange={(e) => setBudget(e.target.value)} inputMode="decimal" placeholder="Ex. 8500 — vide = sans limite" />
               </div>
             </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Quarts déjà au calendrier</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    data-testid="gen-mode-adjust"
+                    onClick={() => setGenMode('adjust')}
+                    className={`rounded-lg border px-3 py-2 text-xs font-semibold transition-colors ${genMode === 'adjust' ? 'border-emerald-500 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300'}`}
+                  >
+                    S'ajuster
+                    <span className="block font-normal text-[10px] mt-0.5">l'IA complète autour des quarts existants</span>
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="gen-mode-overwrite"
+                    onClick={() => setGenMode('overwrite')}
+                    className={`rounded-lg border px-3 py-2 text-xs font-semibold transition-colors ${genMode === 'overwrite' ? 'border-red-400 bg-red-50 text-red-700' : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300'}`}
+                  >
+                    Écraser
+                    <span className="block font-normal text-[10px] mt-0.5">l'IA repart à zéro pour la semaine</span>
+                  </button>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label className="inline-flex items-center gap-1.5"><Layers className="w-3.5 h-3.5 text-bronze-600" /> Département</Label>
+                <Select value={genDept} onValueChange={setGenDept}>
+                  <SelectTrigger data-testid="gen-dept-select"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Tous les départements</SelectItem>
+                    {DEPARTMENTS.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-slate-400">Les quarts générés porteront ce département (filtrable dans le calendrier).</p>
+              </div>
+            </div>
+            {genMode === 'overwrite' && (
+              <div data-testid="gen-overwrite-warning" className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+                <span className="font-bold">Attention — mode Écraser :</span> dès que l'horaire IA sera prêt, les quarts existants de la semaine
+                {genDept === 'all' ? ' de TOUS les départements' : ` du département « ${genDept} »`} seront retirés du calendrier et remplacés par les quarts générés.
+              </div>
+            )}
             <p className="text-xs text-slate-500">Les absences approuvées, les tâches planifiées et les taux horaires des profils sont transmis automatiquement à l'IA. Le coût estimé de l'horaire sera comparé au budget.</p>
             <div className="space-y-2">
               <Label className="inline-flex items-center gap-1.5"><Users className="w-3.5 h-3.5 text-bronze-600" /> Achalandage estimé (clients à l'heure)</Label>

@@ -2648,7 +2648,7 @@ def proposal_view(doc: dict) -> dict:
 async def generate_schedule_content(proposal_id: str, pharmacy_id: str, week_start: str,
                                     instructions: str, roster: list, profiles: list, absences: list,
                                     weekly_budget: float = 0, existing_shifts: list | None = None,
-                                    existing_mode: str = "adjust"):
+                                    existing_mode: str = "adjust", department: str = ""):
     existing_shifts = existing_shifts or []
     try:
         start = date.fromisoformat(week_start)
@@ -2686,6 +2686,8 @@ async def generate_schedule_content(proposal_id: str, pharmacy_id: str, week_sta
         payload = {
             "semaine": week_days,
             "consignes_du_gestionnaire": instructions or "Aucune consigne particulière.",
+            "departement_vise": (f"{department} — génère les quarts pour CE département seulement"
+                                 if department else "Tous les départements"),
             "budget_salarial_hebdomadaire": (
                 f"{weekly_budget:.2f} $ — masse salariale MAXIMALE pour l'ensemble des quarts de la semaine"
                 if weekly_budget > 0 else "Aucun budget imposé."),
@@ -2908,7 +2910,7 @@ async def schedule_generate(payload: ScheduleGenIn, principal: dict = Depends(ge
                     f"{f' (budget {weekly_budget:.2f} $)' if weekly_budget > 0 else ''}", pid)
     asyncio.create_task(generate_schedule_content(doc["id"], pid, payload.week_start, payload.instructions,
                                                   roster, profiles, absences, weekly_budget,
-                                                  existing, existing_mode))
+                                                  existing, existing_mode, department))
     return proposal_view(doc)
 
 

@@ -1,0 +1,26 @@
+{
+  "summary": "Tested the new AI schedule generation dialog (adjust vs overwrite + department selector), calendar department filter and per-shift department badges, real AI generation in overwrite/plancher and adjust/all modes on week 2026-08-24, and cleanup of the created proposals. Frontend only, per request. Two real AI generations were performed (gpt-5.4) — both returned pending within ~5s (very fast this run). All functional expectations passed. Only cosmetic wording discrepancy noted (see minor).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Horaires — filtre calendrier", "issues": ["Le libellé de l'option 'Tous' du Select data-testid='calendar-dept-filter' est 'Tous les calendriers' alors que la review et le placeholder du dialogue IA parlent de 'Tous les départements'. Harmoniser le libellé pour éviter la confusion utilisateur."]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "(cosmétique) Uniformiser le libellé de l'option 'all' dans calendar-dept-filter en 'Tous les départements' (ou aligner l'ensemble du produit sur 'Tous les calendriers')."
+  ],
+  "critical_code_review_comments": [
+    "ScheduleProposals.tsx ligne 202-206 : lorsque AUTO_KEY n'existe pas dans localStorage, TOUTES les propositions déjà chargées (non 'generating') sont marquées comme déjà 'auto-added' et aucun shift IA n'est réinjecté au calendrier. Conséquence pour les utilisateurs qui vident leur localStorage ou changent de navigateur : les quarts IA d'une proposition existante ne réapparaissent pas dans leur calendrier alors que la carte reste 'Au calendrier — envoi aux employés facultatif'. Envisager un mécanisme serveur ou une clé de synchronisation stable pour re-hydrater les quarts IA sur nouvel appareil."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped)", "frontend": "100%"},
+  "seed_data_creation": "Créé 2 quarts manuels sur 2026-08-24 (Julie/Plancher 09:00-13:00, Karim/Laboratoire 09:00-13:00) via l'UI, puis re-injectés via localStorage pour valider le flux auto-add (le tool relance des contextes navigateurs neufs entre les appels). Deux propositions IA créées pour la semaine 2026-08-24, puis supprimées à la fin (delete-proposal). Les propositions existantes des semaines 2026-08-02 et 2026-08-03 sont préservées.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "admin@luminahr.ca / Nlpx!tTE3Aw27",
+  "context_for_next_testing_agent": "TEST 1 (filtre + badge shift-dept-{id}) : PASS — 7 items dans calendar-dept-filter, badge visible en mode 'Tous', filtre Laboratoire n'affiche que le quart Laboratoire, Plancher masque. TEST 2 (dialogue IA) : PASS — gen-mode-adjust émeraude par défaut, gen-overwrite-warning apparaît/disparaît correctement et mentionne le département sélectionné (« Plancher »). TEST 3 (overwrite Plancher pour 2026-08-24) : PASS via seeding manuel — le quart manuel Plancher est retiré, le quart Laboratoire est conservé, le quart IA (Julie 08:00-16:00 dept=Plancher, aiGenerated=true, proposalId défini) est ajouté ; proposal-dept-{id}='Plancher' et proposal-mode-{id}='Mode Écraser' visibles. TEST 4 (adjust 'Tous' pour 2026-08-24) : PASS — nouvelle proposition (dept='', mode='adjust', 4 quarts IA), 3 quarts IA ajoutés au calendrier dept='Général', AUCUN badge proposal-mode (adjust) et proposal-dept absent (dept vide). TEST 5 (nettoyage) : PASS — delete-proposal des 2 propositions test provoque un toast 'Proposition supprimée — 4 quart(s) IA retirés du calendrier.' et vide 2026-08-24 des quarts IA. Les propositions 2026-08-02 et 2026-08-03 sont intactes. NOTE technique : mcp_browser_automation crée un nouveau contexte navigateur à chaque appel, ce qui réinitialise localStorage ; le useEffect auto-add saute alors la proposition existante (branche AUTO_KEY===null). Nous avons contourné en réinjectant l'état HRContext + en purgeant la clé AUTO_KEY. La génération réelle (gpt-5.4) a été très rapide (~5s) au moment du test — plus rapide que les 60-90s attendus dans la revue. Résultat visuel et backend cohérents.",
+  "rca_of_the_issue": "Aucun bug bloquant. Le seul comportement à documenter est celui du useEffect d'auto-ajout dans ScheduleProposals.tsx : si localStorage 'ap_auto_added_proposals_v1' est vide (nouvel appareil / cache purgé), toutes les propositions déjà 'pending/attention/approved' sont directement marquées comme traitées sans injecter les quarts IA au calendrier. Ce n'est pas un défaut de la fonctionnalité livrée mais un piège UX documenté ici pour éviter les rapports futurs de type 'les quarts IA ne s'affichent pas sur mon second navigateur'."
+}
