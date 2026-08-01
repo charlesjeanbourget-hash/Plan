@@ -449,10 +449,10 @@ export default function SchedulingModule(): JSX.Element {
         <div className="ml-auto flex w-full sm:w-auto flex-wrap gap-2">
           <Select value={deptFilter} onValueChange={setDeptFilter}>
             <SelectTrigger data-testid="calendar-dept-filter" className="w-full sm:w-52">
-              <SelectValue placeholder="Tous les calendriers" />
+              <SelectValue placeholder="Tous les départements" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">Tous les calendriers</SelectItem>
+              <SelectItem value="all">Tous les départements</SelectItem>
               {DEPARTMENTS.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
             </SelectContent>
           </Select>

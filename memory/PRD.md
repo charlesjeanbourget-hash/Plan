@@ -34,6 +34,14 @@ Développer « LuminaHR », un SIRH complet conçu pour les pharmacies. SPA Reac
 ## Identifiants (voir /app/memory/test_credentials.md)
 admin@luminahr.ca/admin123 · julie@luminahr.ca/employe123 · super@luminahr.ca/super123 · code agence AGENCE2024
 
+## Itération 37 (1 août 2026) — Mode « Écraser / S'ajuster » pour l'IA + génération par département — testée 100 % (iteration_30.json : frontend 100 %, backend validé curl E2E réel)
+- **Dialogue « Générer par IA »** : choix `gen-mode-adjust` (« S'ajuster », défaut — l'IA conserve les quarts existants de la semaine, transmis au backend via existing_shifts, et complète les manques) vs `gen-mode-overwrite` (« Écraser » — l'IA repart à zéro) + sélecteur `gen-dept-select` (Tous les départements / Général / Plancher / Laboratoire / Entrepôt / Livraison / Administration). Encadré rouge `gen-overwrite-warning` (mentionne le département visé) avant génération.
+- **Mode Écraser scoping département** : à l'arrivée de l'horaire IA au calendrier (useEffect auto-add), les quarts existants de la semaine du département choisi (ou tous si « Tous ») sont retirés — les autres départements restent intacts. Toast récapitulatif « X ancien(s) quart(s) retirés ».
+- **Quarts IA départementalisés** : les quarts générés portent department (auto-add + « Confirmer à l'horaire ») → visibles avec le bon filtre `calendar-dept-filter`. Badges sur la carte de proposition : `proposal-dept-{id}` + `proposal-mode-{id}` (« Mode Écraser »).
+- **Backend** : ScheduleGenIn {department, existing_mode, existing_shifts} ; payload IA enrichi de `departement_vise` ; proposition stocke department/existing_mode ; en adjust, quarts existants transmis à l'IA (règle « ne pas recréer / ne pas chevaucher »), coût existant inclus au budget, warnings « Dédoublement possible » (kind overlap).
+- Libellé harmonisé : « Tous les départements » dans le filtre calendrier.
+- PIÈGE UX documenté (testing agent) : sur un NOUVEL appareil / localStorage purgé, la clé ap_auto_added_proposals_v1 est seedée avec les propositions existantes → leurs quarts IA ne sont pas réinjectés (comportement voulu anti-déversement, mais peut surprendre).
+
 ## Backlog priorisé
 - **P0** : Fournir RESEND_API_KEY (resend.com) pour activer l'envoi réel des rapports mensuels
 - **P1** : Vue succursale généralisée (filtres dans Horaires/Paie), notifications internes, mode sombre
