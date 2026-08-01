@@ -240,6 +240,13 @@ Suite à un audit de sécurité (verdict initial : NE PAS LANCER). Tous les corr
 NOTE Loi 25 organisationnel (hors logiciel, à faire par le client) : registre des incidents, EFVP, consentement géoloc dans les contrats, désignation officielle du RPRP, calendrier de conservation.
 Reste FAIBLE non bloquant : /api/chat valide Pydantic avant auth (probe 422 vs 401, impact négligeable).
 
+## Itération 30 (1 août 2026) — 4 fonctionnalités Loi 25 (Registre incidents / Journal connexions / Consentement géoloc / Export données) — testée (testing_agent iteration_27.json : backend 18/18, frontend 100 %)
+1. **Registre des incidents de confidentialité** (superadmin) : `SuperadminIncidents.tsx` (incidents-panel) — CRUD complet, gravité (faible→critique), statut (nouveau→en_cours→notifie→clos), nb personnes touchées, mesures, bascules « CAI avisée » / « Personnes avisées », lien vers déclaration CAI. Backend : GET/POST/PUT/DELETE /api/incidents (superadmin, 400 titre vide/gravité/statut invalides, audit). Collection Mongo `incidents`.
+2. **Journal des connexions** (superadmin) : `SuperadminLoginEvents.tsx` (login-events-panel) — 200 derniers événements (CONNEXION + CHANGEMENT_MOT_DE_PASSE) avec date, utilisateur, IP réelle, appareil. Backend : record_login_event() sur login réussi et changement de mdp + client_ip() (dernier X-Forwarded-For). GET /api/superadmin/login-events (superadmin). Collection `login_events`.
+3. **Consentement géolocalisation** : `GeoConsentDialog.tsx` + geo.ts (getGeoConsent/setGeoConsent, localStorage ap_geo_consent). MyPunchCard : premier clic punch → dialogue de consentement AVANT le punch ; accepté/refusé mémorisé ; punch réussit dans les deux cas ; getPunchGeo ne capte la position que si consentement 'granted'.
+4. **Export des données personnelles** (droit d'accès Loi 25) : bouton « Télécharger mes données » (export-my-data-button) dans Mon espace → GET /api/me/data-export (compte + profil assaini + pointages) combiné aux données localStorage (dossier, congés, relevés de paie, quarts) → fichier JSON téléchargé. Audit EXPORT_DONNEES_PERSONNELLES.
+Fix post-test : validation titre vide ajoutée sur PUT /incidents (cohérence avec POST).
+
 ## Notes techniques
 - Ne jamais recréer `jsconfig.json` (conflit CRA avec tsconfig.json)
 - npm interdit — yarn uniquement

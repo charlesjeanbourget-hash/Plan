@@ -4608,6 +4608,8 @@ async def create_incident(payload: IncidentIn, su: dict = Depends(require_supera
 
 @api_router.put("/incidents/{incident_id}")
 async def update_incident(incident_id: str, payload: IncidentIn, su: dict = Depends(require_superadmin)):
+    if not payload.title.strip():
+        raise HTTPException(status_code=400, detail="Le titre est requis.")
     if payload.severity not in INCIDENT_SEVERITIES or payload.status not in INCIDENT_STATUSES:
         raise HTTPException(status_code=400, detail="Gravité ou statut invalide.")
     patch = {
