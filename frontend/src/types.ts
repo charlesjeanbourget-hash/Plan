@@ -463,6 +463,7 @@ export interface EmployeeProfile {
   punch_code: string | null;
   punch_code_set?: boolean;
   payroll_number?: string | null;
+  department?: string;
   notes: string;
   updated_at: string;
   updated_by: string;
@@ -559,6 +560,7 @@ export interface ProposalShift {
   start: string;
   end: string;
   role: string;
+  department?: string;
   warnings?: (string | ProposalWarning)[];
 }
 
@@ -588,6 +590,12 @@ export interface ScheduleProposal {
   existing_mode?: string;
   employee_approvals: Record<string, ApprovalSlot>;
   admin_status: 'pending' | 'approved' | 'rejected';
+  priorities?: {
+    dept_order?: string[];
+    employee_type?: string;
+    availability?: string;
+    extra?: string[];
+  };
   approval_deadline: string;
   approval_deadline_hours: number;
   deadline_passed: boolean;

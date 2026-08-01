@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Sparkles, Loader2, Check, X, Trash2, CalendarPlus, AlertTriangle, ExternalLink, Wallet, Users, Layers } from 'lucide-react';
+import { Sparkles, Loader2, Check, X, Trash2, CalendarPlus, AlertTriangle, ExternalLink, Wallet, Users, Layers, ListOrdered } from 'lucide-react';
 import { toast } from 'sonner';
 import { DEPARTMENTS } from '@/lib/pharmacy';
 
@@ -100,6 +100,12 @@ export const ScheduleProposals = (): JSX.Element => {
   const [busy, setBusy] = useState(false);
   const [genMode, setGenMode] = useState<'adjust' | 'overwrite'>('adjust');
   const [genDept, setGenDept] = useState('all');
+  const [deptBudgets, setDeptBudgets] = useState<Record<string, string>>({});
+  const [branchBudgets, setBranchBudgets] = useState<Record<string, string>>({});
+  const [prioDeptOrder, setPrioDeptOrder] = useState<string[]>([]);
+  const [prioEmpType, setPrioEmpType] = useState('none');
+  const [prioAvail, setPrioAvail] = useState('none');
+  const [prioExtra, setPrioExtra] = useState<string[]>([]);
 
   const fillTraffic = (): void => {
     const first = traffic[TRAFFIC_DAYS[0][0]] ?? {};
@@ -126,12 +132,23 @@ export const ScheduleProposals = (): JSX.Element => {
 
   useEffect(() => {
     if (!genOpen || !token) return;
-    axios.get<{ weekly_budget: number; traffic: TrafficGrid; traffic_periods?: TrafficPeriod[] }>(`${API}/schedule/settings`, { headers: { Authorization: `Bearer ${token}` } })
+    axios.get<{ weekly_budget: number; traffic: TrafficGrid; traffic_periods?: TrafficPeriod[]; dept_budgets?: Record<string, number>; branch_budgets?: { branch_id: string; budget: number }[]; priorities?: { dept_order?: string[]; employee_type?: string; availability?: string; extra?: string[] } }>(`${API}/schedule/settings`, { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => {
         setBudget(r.data.weekly_budget > 0 ? String(r.data.weekly_budget) : '');
         setTraffic(r.data.traffic ?? {});
         setDefaultTraffic(r.data.traffic ?? {});
         setPeriods(r.data.traffic_periods ?? []);
+        const db2: Record<string, string> = {};
+        Object.entries(r.data.dept_budgets ?? {}).forEach(([k, v]) => { db2[k] = String(v); });
+        setDeptBudgets(db2);
+        const bb: Record<string, string> = {};
+        (r.data.branch_budgets ?? []).forEach((b) => { bb[b.branch_id] = String(b.budget); });
+        setBranchBudgets(bb);
+        const pr = r.data.priorities ?? {};
+        setPrioDeptOrder(pr.dept_order ?? []);
+        setPrioEmpType(pr.employee_type || 'none');
+        setPrioAvail(pr.availability || 'none');
+        setPrioExtra(pr.extra ?? []);
       })
       .catch(() => undefined);
   }, [genOpen, token]);
@@ -223,7 +240,7 @@ export const ScheduleProposals = (): JSX.Element => {
       }
       p.shifts.forEach((s) => addShift({
         employeeId: s.employee_id, date: s.date, startTime: s.start, endTime: s.end,
-        aiGenerated: true, proposalId: p.id, department: p.department || 'Général',
+        aiGenerated: true, proposalId: p.id, department: s.department || p.department || 'Général',
       }));
       toast.success(`Horaire IA de la semaine du ${p.week_start} ajouté au calendrier (${p.shifts.length} quarts${removed > 0 ? ` — ${removed} ancien(s) quart(s) retirés, mode Écraser` : ''}) — ajustez-le par glisser-déposer.`);
     });
@@ -256,7 +273,21 @@ export const ScheduleProposals = (): JSX.Element => {
         };
       });
     try {
-      await axios.put(`${API}/schedule/settings`, { weekly_budget: budgetNum, traffic }, { headers });
+      const deptB: Record<string, number> = {};
+      DEPARTMENTS.forEach((d) => {
+        const n = Math.max(0, Number((deptBudgets[d] ?? '').replace(',', '.')) || 0);
+        if (n > 0) deptB[d] = n;
+      });
+      const branchB = state.branches
+        .map((b) => ({ branch_id: b.id, branch_name: b.name, budget: Math.max(0, Number((branchBudgets[b.id] ?? '').replace(',', '.')) || 0) }))
+        .filter((b) => b.budget > 0);
+      const priorities = {
+        dept_order: prioDeptOrder,
+        employee_type: prioEmpType === 'none' ? '' : prioEmpType,
+        availability: prioAvail === 'none' ? '' : prioAvail,
+        extra: prioExtra,
+      };
+      await axios.put(`${API}/schedule/settings`, { weekly_budget: budgetNum, traffic, dept_budgets: deptB, branch_budgets: branchB, priorities }, { headers });
       await axios.post(`${API}/schedule/generate`, {
         week_start: weekStart,
         instructions,
@@ -277,6 +308,9 @@ export const ScheduleProposals = (): JSX.Element => {
           : [],
         employees: state.employees.filter((emp) => emp.status === 'Actif').map((emp) => ({
           id: emp.id, name: `${emp.firstName} ${emp.lastName}`, position: emp.position,
+          branch_id: emp.branchId ?? '',
+          branch_name: state.branches.find((b) => b.id === emp.branchId)?.name ?? '',
+          hire_date: emp.hireDate ?? '',
         })),
       }, { headers });
       toast.success(budgetNum > 0
@@ -320,7 +354,7 @@ export const ScheduleProposals = (): JSX.Element => {
         x.employeeId === s.employee_id && x.date === s.date && x.startTime === s.start && x.endTime === s.end));
       missing.forEach((s) => addShift({
         employeeId: s.employee_id, date: s.date, startTime: s.start, endTime: s.end,
-        aiGenerated: true, proposalId: p.id, department: p.department || 'Général',
+        aiGenerated: true, proposalId: p.id, department: s.department || p.department || 'Général',
       }));
       toast.success(missing.length === 0
         ? `Horaire de la semaine du ${p.week_start} confirmé — tous les quarts étaient déjà au calendrier.`
@@ -385,6 +419,24 @@ export const ScheduleProposals = (): JSX.Element => {
                   {p.existing_mode === 'overwrite' && (
                     <span data-testid={`proposal-mode-${p.id}`} className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-50 text-red-700 border border-red-200">Mode Écraser</span>
                   )}
+                  {(() => {
+                    const pr = p.priorities;
+                    const n = pr ? (pr.dept_order?.length ?? 0) + (pr.employee_type ? 1 : 0) + (pr.availability ? 1 : 0) + (pr.extra?.length ?? 0) : 0;
+                    if (n === 0) return null;
+                    const parts = [
+                      ...(pr?.dept_order?.length ? [`Départements : ${pr.dept_order.join(' > ')}`] : []),
+                      ...(pr?.employee_type === 'full_time' ? ['Temps pleins d\'abord'] : pr?.employee_type === 'part_time' ? ['Temps partiels d\'abord'] : []),
+                      ...(pr?.availability === 'most' ? ['Grandes disponibilités d\'abord'] : pr?.availability === 'least' ? ['Disponibilités restreintes casées d\'abord'] : []),
+                      ...(pr?.extra?.includes('seniority') ? ['Ancienneté'] : []),
+                      ...(pr?.extra?.includes('low_cost') ? ['Taux les plus bas'] : []),
+                      ...(pr?.extra?.includes('min_hours_equity') ? ['Équité des minimums'] : []),
+                    ];
+                    return (
+                      <span data-testid={`proposal-priorities-${p.id}`} title={parts.join(' · ')} className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-bronze-50 text-bronze-800 border border-bronze-200 cursor-help">
+                        <ListOrdered className="w-3 h-3" /> {n} priorité(s)
+                      </span>
+                    );
+                  })()}
                   {p.estimated_cost != null && p.effective_status !== 'generating' && (
                     <span
                       data-testid={`proposal-cost-${p.id}`}
@@ -589,6 +641,117 @@ export const ScheduleProposals = (): JSX.Element => {
                 {genDept === 'all' ? ' de TOUS les départements' : ` du département « ${genDept} »`} seront retirés du calendrier et remplacés par les quarts générés.
               </div>
             )}
+            <details data-testid="gen-detail-budgets" className="rounded-lg border border-slate-200 p-3">
+              <summary className="text-xs font-semibold text-slate-600 cursor-pointer select-none">
+                Budgets par département et par succursale (facultatif)
+              </summary>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-3">
+                {DEPARTMENTS.map((d) => (
+                  <div key={d} className="space-y-1">
+                    <Label className="text-[11px] text-slate-500">{d}</Label>
+                    <Input
+                      data-testid={`gen-dept-budget-${d}`}
+                      value={deptBudgets[d] ?? ''}
+                      onChange={(e) => setDeptBudgets((m) => ({ ...m, [d]: e.target.value }))}
+                      inputMode="decimal"
+                      placeholder="$ max"
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                ))}
+              </div>
+              {state.branches.length > 0 && (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-3 pt-3 border-t border-slate-100">
+                  {state.branches.map((b) => (
+                    <div key={b.id} className="space-y-1">
+                      <Label className="text-[11px] text-slate-500">Succursale {b.name}</Label>
+                      <Input
+                        data-testid={`gen-branch-budget-${b.id}`}
+                        value={branchBudgets[b.id] ?? ''}
+                        onChange={(e) => setBranchBudgets((m) => ({ ...m, [b.id]: e.target.value }))}
+                        inputMode="decimal"
+                        placeholder="$ max"
+                        className="h-8 text-xs"
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+              <p className="text-[11px] text-slate-400 mt-2">
+                Vide = sans limite. L'IA respecte ces plafonds en plus du budget global de la semaine ; tout dépassement est signalé dans les points à vérifier.
+              </p>
+            </details>
+            <details data-testid="gen-detail-priorities" className="rounded-lg border border-slate-200 p-3" open={prioDeptOrder.length > 0 || prioEmpType !== 'none' || prioAvail !== 'none' || prioExtra.length > 0}>
+              <summary className="text-xs font-semibold text-slate-600 cursor-pointer select-none">
+                Priorités de planification (facultatif) — vos règles priment sur celles de l'IA
+              </summary>
+              <div className="space-y-3 mt-3">
+                <div className="space-y-1.5">
+                  <Label className="text-[11px] text-slate-500">Départements à couvrir en premier (cliquez dans l'ordre de priorité)</Label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {DEPARTMENTS.map((d) => {
+                      const idx = prioDeptOrder.indexOf(d);
+                      return (
+                        <button
+                          key={d}
+                          type="button"
+                          data-testid={`gen-prio-dept-${d}`}
+                          onClick={() => setPrioDeptOrder((o) => (o.includes(d) ? o.filter((x) => x !== d) : [...o, d]))}
+                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${idx >= 0 ? 'bg-emerald-600 border-emerald-600 text-white' : 'bg-white border-slate-200 text-slate-600 hover:border-emerald-300'}`}
+                        >
+                          {idx >= 0 && <span className="inline-flex w-4 h-4 items-center justify-center rounded-full bg-white/25 text-[10px] font-bold">{idx + 1}</span>}
+                          {d}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-[11px] text-slate-500">Type d'employés à prioriser</Label>
+                    <Select value={prioEmpType} onValueChange={setPrioEmpType}>
+                      <SelectTrigger data-testid="gen-prio-emptype" className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Aucune préférence</SelectItem>
+                        <SelectItem value="full_time">Temps pleins d'abord (≈30 h+/sem)</SelectItem>
+                        <SelectItem value="part_time">Temps partiels d'abord</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-[11px] text-slate-500">Disponibilités</Label>
+                    <Select value={prioAvail} onValueChange={setPrioAvail}>
+                      <SelectTrigger data-testid="gen-prio-avail" className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Aucune préférence</SelectItem>
+                        <SelectItem value="most">Grandes disponibilités d'abord</SelectItem>
+                        <SelectItem value="least">Caser d'abord les disponibilités restreintes</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-x-4 gap-y-2">
+                  {([
+                    ['seniority', 'Ancienneté d\'abord'],
+                    ['low_cost', 'Taux horaires les plus bas d\'abord'],
+                    ['min_hours_equity', 'Équité : minimums d\'heures d\'abord'],
+                  ] as [string, string][]).map(([key, label]) => (
+                    <label key={key} data-testid={`gen-prio-extra-${key}`} className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={prioExtra.includes(key)}
+                        onChange={() => setPrioExtra((l) => (l.includes(key) ? l.filter((x) => x !== key) : [...l, key]))}
+                        className="accent-emerald-600 w-3.5 h-3.5"
+                      />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  Sans priorité, l'IA applique les règles par défaut (priorité Laboratoire et caisse). Vos choix sont mémorisés pour les prochaines générations.
+                </p>
+              </div>
+            </details>
             <p className="text-xs text-slate-500">Les absences approuvées, les tâches planifiées et les taux horaires des profils sont transmis automatiquement à l'IA. Le coût estimé de l'horaire sera comparé au budget.</p>
             <div className="space-y-2">
               <Label className="inline-flex items-center gap-1.5"><Users className="w-3.5 h-3.5 text-bronze-600" /> Achalandage estimé (clients à l'heure)</Label>

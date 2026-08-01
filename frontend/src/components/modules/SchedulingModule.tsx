@@ -9,11 +9,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ChevronLeft, ChevronRight, Plus, X, ArrowLeftRight, Check, Stethoscope, CopyPlus, LayoutTemplate, FileDown, Megaphone, Hourglass, BookOpenCheck, MapPin, Wrench, Hand, Sparkles, AlertTriangle } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, X, ArrowLeftRight, Check, Stethoscope, CopyPlus, LayoutTemplate, FileDown, Megaphone, Hourglass, BookOpenCheck, MapPin, Wrench, Hand, Sparkles, AlertTriangle, Layers } from 'lucide-react';
 import { ScheduleProposals } from '@/components/ScheduleProposals';
 import { AppointmentDialog } from '@/components/AppointmentDialog';
 import { DuplicateWeekDialog } from '@/components/DuplicateWeekDialog';
 import { WeekTemplatesDialog } from '@/components/WeekTemplatesDialog';
+import { DeptCopyDialog } from '@/components/DeptCopyDialog';
 import { BudgetActualCard } from '@/components/BudgetActualCard';
 import { ReadReceiptsDialog } from '@/components/ReadReceiptsDialog';
 import { downloadSchedulePdf } from '@/lib/schedulePdf';
@@ -80,6 +81,7 @@ export default function SchedulingModule(): JSX.Element {
   const [apptOpen, setApptOpen] = useState(false);
   const [dupOpen, setDupOpen] = useState(false);
   const [tplOpen, setTplOpen] = useState(false);
+  const [copyDeptOpen, setCopyDeptOpen] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [receiptsOpen, setReceiptsOpen] = useState(false);
   const [selectedResources, setSelectedResources] = useState<string[]>([]);
@@ -94,14 +96,24 @@ export default function SchedulingModule(): JSX.Element {
   }, [isAdmin, token]);
 
   const [rates, setRates] = useState<Record<string, number>>({});
+  const [deptDefaults, setDeptDefaults] = useState<Record<string, string>>({});
+  const [weekDeptBudgets, setWeekDeptBudgets] = useState<Record<string, number>>({});
   useEffect(() => {
     if (!isAdmin || !token) return;
-    axios.get<{ employee_id: string; hourly_rate?: number }[]>(`${API}/profiles`, { headers: { Authorization: `Bearer ${token}` } })
+    axios.get<{ employee_id: string; hourly_rate?: number; department?: string }[]>(`${API}/profiles`, { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => {
         const m: Record<string, number> = {};
-        r.data.forEach((p) => { m[p.employee_id] = p.hourly_rate ?? 0; });
+        const dd: Record<string, string> = {};
+        r.data.forEach((p) => {
+          m[p.employee_id] = p.hourly_rate ?? 0;
+          if (p.department) dd[p.employee_id] = p.department;
+        });
         setRates(m);
+        setDeptDefaults(dd);
       })
+      .catch(() => undefined);
+    axios.get<{ dept_budgets?: Record<string, number> }>(`${API}/schedule/settings`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => setWeekDeptBudgets(r.data.dept_budgets ?? {}))
       .catch(() => undefined);
   }, [isAdmin, token]);
 
@@ -109,6 +121,7 @@ export default function SchedulingModule(): JSX.Element {
     setEmployeeId(empId);
     setDate(d);
     if (deptFilter !== 'all') setDepartment(deptFilter);
+    else setDepartment(deptDefaults[empId] ?? 'Général');
     setDialogOpen(true);
   };
 
@@ -310,6 +323,9 @@ export default function SchedulingModule(): JSX.Element {
                 </Button>
                 <Button data-testid="duplicate-week-button" variant="outline" onClick={() => setDupOpen(true)} className="rounded-full border-bronze-300 text-bronze-800 hover:bg-bronze-50">
                   <CopyPlus className="w-4 h-4 mr-1" /> Dupliquer la semaine
+                </Button>
+                <Button data-testid="copy-dept-button" variant="outline" onClick={() => setCopyDeptOpen(true)} className="rounded-full border-bronze-300 text-bronze-800 hover:bg-bronze-50">
+                  <Layers className="w-4 h-4 mr-1" /> Copier entre départements
                 </Button>
                 <Button data-testid="schedule-pdf-button" variant="outline" onClick={exportPdf} className="rounded-full">
                   <FileDown className="w-4 h-4 mr-1" /> PDF
@@ -716,6 +732,47 @@ export default function SchedulingModule(): JSX.Element {
       </div>
       )}
 
+      {viewMode === 'week' && isAdmin && (() => {
+        const filteredIds = new Set(state.employees.filter((e) => branchFilter === 'all' || e.branchId === branchFilter).map((e) => e.id));
+        const weekShifts = state.shifts.filter((s) => s.date >= days[0] && s.date <= days[6] && filteredIds.has(s.employeeId));
+        const byDept = new Map<string, { hours: number; cost: number }>();
+        weekShifts.forEach((s) => {
+          const dept = s.department ?? 'Général';
+          const h = hoursBetween(s.startTime, s.endTime);
+          const cur = byDept.get(dept) ?? { hours: 0, cost: 0 };
+          cur.hours += h;
+          cur.cost += h * (rates[s.employeeId] ?? 0);
+          byDept.set(dept, cur);
+        });
+        if (byDept.size === 0) return null;
+        return (
+          <div data-testid="dept-totals-panel" className="mt-4 bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+            <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400 font-semibold mb-3 inline-flex items-center gap-1.5">
+              <Layers className="w-3.5 h-3.5 text-bronze-600" /> Heures et coûts par département — semaine du {days[0]}
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+              {DEPARTMENTS.filter((d) => byDept.has(d)).map((d) => {
+                const v = byDept.get(d)!;
+                const budget = weekDeptBudgets[d] ?? 0;
+                const over = budget > 0 && v.cost > budget;
+                return (
+                  <div key={d} data-testid={`dept-total-${d}`} className={`rounded-xl border p-3 ${over ? 'border-red-300 bg-red-50' : 'border-slate-200 bg-slate-50/60'}`}>
+                    <p className="text-xs font-bold text-slate-700 truncate">{d}</p>
+                    <p className="text-sm font-bold text-slate-900 mt-1">{fmtHours(v.hours)}</p>
+                    {v.cost > 0 && (
+                      <p data-testid={`dept-cost-${d}`} className={`text-xs font-semibold mt-0.5 ${over ? 'text-red-700' : 'text-emerald-700'}`}>
+                        {fmtCad(v.cost)}{budget > 0 && <span className="text-slate-400 font-normal"> / {fmtCad(budget)}</span>}
+                      </p>
+                    )}
+                    {over && <p data-testid={`dept-over-${d}`} className="text-[10px] text-red-600 font-semibold mt-0.5">Budget dépassé</p>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
       {viewMode === 'month' && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden" data-testid="month-grid">
           <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50/80">
@@ -794,6 +851,7 @@ export default function SchedulingModule(): JSX.Element {
       <AppointmentDialog open={apptOpen} onOpenChange={setApptOpen} onCreated={() => void refreshAppointments()} />
       {isAdmin && <DuplicateWeekDialog open={dupOpen} onClose={() => setDupOpen(false)} days={days} />}
       {isAdmin && <WeekTemplatesDialog open={tplOpen} onClose={() => setTplOpen(false)} days={days} />}
+      {isAdmin && <DeptCopyDialog open={copyDeptOpen} onClose={() => setCopyDeptOpen(false)} days={days} />}
       {isAdmin && <ReadReceiptsDialog open={receiptsOpen} onClose={() => setReceiptsOpen(false)} weekStart={days[0]} />}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -805,7 +863,7 @@ export default function SchedulingModule(): JSX.Element {
           <form onSubmit={handleAdd} className="space-y-4">
             <div className="space-y-2">
               <Label>Employé</Label>
-              <Select value={employeeId} onValueChange={setEmployeeId}>
+              <Select value={employeeId} onValueChange={(v) => { setEmployeeId(v); if (deptFilter === 'all' && deptDefaults[v]) setDepartment(deptDefaults[v]); }}>
                 <SelectTrigger data-testid="shift-employee-select"><SelectValue placeholder="Choisir un employé" /></SelectTrigger>
                 <SelectContent>
                   {state.employees.map((e) => (

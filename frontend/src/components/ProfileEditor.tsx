@@ -2,12 +2,13 @@ import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { useAuth } from '@/context/AuthContext';
 import { EmployeeProfile, WeekDayKey } from '@/types';
-import { PHARMACY_ROLES, PHARMACY_TASKS, PHARMACY_RESTRICTIONS, DAY_KEYS, DAY_NAMES } from '@/lib/pharmacy';
+import { PHARMACY_ROLES, PHARMACY_TASKS, PHARMACY_RESTRICTIONS, DAY_KEYS, DAY_NAMES, DEPARTMENTS } from '@/lib/pharmacy';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { UserCog, KeyRound, Save, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -79,6 +80,7 @@ export const ProfileEditor = ({ employeeId, employeeName, canManageCode }: Props
         availability: profile.availability,
         notes: profile.notes,
         payroll_number: profile.payroll_number ?? '',
+        department: profile.department ?? '',
       }, { headers });
       toast.success('Profil enregistré — il sera pris en compte par l\'IA pour les horaires.');
     } catch {
@@ -152,6 +154,16 @@ export const ProfileEditor = ({ employeeId, employeeName, canManageCode }: Props
             <div className="space-y-2">
               <Label>Heures max. / semaine</Label>
               <Input data-testid="max-hours-input" type="number" min={0} max={80} value={profile.max_hours_week} onChange={(e) => patch({ max_hours_week: Number(e.target.value) })} />
+            </div>
+            <div className="space-y-2 col-span-2">
+              <Label>Département par défaut</Label>
+              <Select value={profile.department || 'Général'} onValueChange={(v) => patch({ department: v })}>
+                <SelectTrigger data-testid="profile-dept-select"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {DEPARTMENTS.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-slate-400">Les nouveaux quarts de cet employé se classeront automatiquement dans ce département (modifiable au cas par cas).</p>
             </div>
             <div className="space-y-2 col-span-2">
               <Label>Matricule paie (numéro d'employé dans votre logiciel de paie)</Label>

@@ -1570,6 +1570,7 @@ class ProfileIn(BaseModel):
     availability: Optional[dict] = None
     notes: Optional[str] = None
     payroll_number: Optional[str] = None
+    department: Optional[str] = None
 
 
 def sanitize_profile(doc: dict) -> dict:
@@ -1587,7 +1588,7 @@ async def get_or_create_profile(pharmacy_id: str, employee_id: str, employee_nam
         "id": str(uuid.uuid4()), "pharmacy_id": pharmacy_id, "employee_id": employee_id,
         "employee_name": employee_name, "roles": [], "capacities": [], "restrictions": [],
         "min_hours_week": 0, "max_hours_week": 40, "availability": default_availability(),
-        "punch_code_hash": None, "notes": "",
+        "punch_code_hash": None, "notes": "", "department": "",
         "updated_at": datetime.now(timezone.utc).isoformat(), "updated_by": "",
     }
     await db.employee_profiles.insert_one({**doc})
@@ -2070,6 +2071,18 @@ SCHEDULE_SYSTEM = (
     "- ADAPTE le nombre d'employés présents à l'achalandage fourni (clients/heure) pour chaque jour et plage : "
     "plus de personnel aux plages achalandées, personnel réduit aux plages calmes. Règle pratique : environ 1 employé "
     "au service pour 12 à 15 clients/heure, en plus du pharmacien au laboratoire.\n"
+    "- COUVERTURE MINIMALE PAR DÉPARTEMENT : chaque employé a un département par défaut (champ department de son profil) et la liste "
+    "des départements est fournie (departements_disponibles). Assure AU MINIMUM une personne présente par département actif pendant "
+    "les heures d'ouverture, MÊME en période de faible achalandage, tant qu'il y a assez de personnel disponible et que le budget et "
+    "les disponibilités le permettent. PRIORITÉ ABSOLUE au Laboratoire et à la caisse (service au comptoir — département Plancher) : "
+    "s'il faut faire des compromis, couvre-les en premier et explique le compromis dans le summary.\n"
+    "- BUDGETS PAR DÉPARTEMENT ET PAR SUCCURSALE : s'ils sont fournis (budgets_par_departement, budgets_par_succursale), la masse "
+    "salariale des quarts de chaque département — et celle des employés de chaque succursale (champ succursale de l'employé) — ne doit "
+    "pas dépasser son budget respectif, en plus du budget hebdomadaire global.\n"
+    "- PRIORITÉS DU GESTIONNAIRE : si priorites_du_gestionnaire est fourni, ces priorités PRIMENT sur les règles de priorisation "
+    "par défaut (y compris la priorité Laboratoire/caisse), tout en respectant les contraintes dures (disponibilités, restrictions, "
+    "absences, budgets, heures max). Repères : temps plein ≈ 30 h et plus par semaine selon min/max du profil ; ancienneté = date "
+    "d'embauche la plus ancienne. Explique dans le summary comment tu as appliqué ces priorités.\n"
     "- Tiens compte des tâches à faire : si une tâche est assignée à un employé un jour donné, planifie-le ce jour-là "
     "sur une plage couvrant le quart de la tâche (Matin ≈ 8h-12h, Après-midi ≈ 12h-17h, Soir ≈ 17h-21h30), "
     "si ses disponibilités le permettent; sinon explique pourquoi dans le summary.\n"
@@ -2091,7 +2104,8 @@ SCHEDULE_SYSTEM = (
     '  "summary": "Explication en français des choix effectués (3 à 6 phrases).",\n'
     '  "shifts": [\n'
     '    {"employee_id": "id", "employee_name": "Prénom Nom", "date": "YYYY-MM-DD", '
-    '"start": "08:00", "end": "16:00", "role": "Rôle pour ce quart"}\n'
+    '"start": "08:00", "end": "16:00", "role": "Rôle pour ce quart", '
+    '"department": "Département du quart, parmi departements_disponibles (défaut : le département de l\'employé)"}\n'
     "  ]\n"
     "}"
 )
@@ -2101,9 +2115,13 @@ class RosterEmployee(BaseModel):
     id: str
     name: str
     position: str
+    branch_id: str = ""
+    branch_name: str = ""
+    hire_date: str = ""
 
 
 TRAFFIC_DAY_KEYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+DEPARTMENTS_BE = ("Général", "Plancher", "Laboratoire", "Entrepôt", "Livraison", "Administration")
 TRAFFIC_DAY_LABELS = ("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche")
 TRAFFIC_BLOCKS = {
     "matin": ("Matin (8h-12h)", "08:00", "12:00"),
@@ -2116,6 +2134,9 @@ class ScheduleSettingsIn(BaseModel):
     weekly_budget: float = 0
     traffic: dict = {}
     traffic_periods: list | None = None
+    dept_budgets: dict | None = None
+    branch_budgets: list | None = None
+    priorities: dict | None = None
 
 
 def _sanitize_traffic(raw: dict) -> dict:
@@ -2132,7 +2153,10 @@ async def get_schedule_settings(user: dict = Depends(get_current_user)):
     doc = await db.schedule_settings.find_one({"pharmacy_id": pid}, {"_id": 0})
     return {"weekly_budget": (doc or {}).get("weekly_budget", 0),
             "traffic": (doc or {}).get("traffic", {}),
-            "traffic_periods": (doc or {}).get("traffic_periods", [])}
+            "traffic_periods": (doc or {}).get("traffic_periods", []),
+            "dept_budgets": (doc or {}).get("dept_budgets", {}),
+            "branch_budgets": (doc or {}).get("branch_budgets", []),
+            "priorities": (doc or {}).get("priorities", {})}
 
 
 @api_router.put("/schedule/settings")
@@ -2164,13 +2188,55 @@ async def set_schedule_settings(payload: ScheduleSettingsIn, principal: dict = D
             except (ValueError, TypeError, AttributeError):
                 raise HTTPException(status_code=400, detail="Valeurs d'achalandage invalides dans une période.")
         update["traffic_periods"] = periods
+    if payload.dept_budgets is not None:
+        dept_map = {}
+        for k, v in payload.dept_budgets.items():
+            if k not in DEPARTMENTS_BE:
+                continue
+            try:
+                n = float(v)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="Budget de département invalide.")
+            if not (0 <= n <= 1_000_000):
+                raise HTTPException(status_code=400, detail="Budget de département invalide.")
+            if n > 0:
+                dept_map[k] = round(n, 2)
+        update["dept_budgets"] = dept_map
+    if payload.branch_budgets is not None:
+        if len(payload.branch_budgets) > 20:
+            raise HTTPException(status_code=400, detail="Maximum 20 budgets de succursale.")
+        branch_list = []
+        for b in payload.branch_budgets:
+            if not isinstance(b, dict):
+                raise HTTPException(status_code=400, detail="Budget de succursale invalide.")
+            try:
+                n = float(b.get("budget") or 0)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="Budget de succursale invalide.")
+            if not (0 <= n <= 1_000_000):
+                raise HTTPException(status_code=400, detail="Budget de succursale invalide.")
+            if n > 0:
+                branch_list.append({"branch_id": str(b.get("branch_id") or ""),
+                                    "branch_name": str(b.get("branch_name") or "")[:80], "budget": round(n, 2)})
+        update["branch_budgets"] = branch_list
+    if payload.priorities is not None:
+        pr = payload.priorities or {}
+        update["priorities"] = {
+            "dept_order": [d for d in (pr.get("dept_order") or []) if d in DEPARTMENTS_BE][:6],
+            "employee_type": pr.get("employee_type") if pr.get("employee_type") in ("full_time", "part_time") else "",
+            "availability": pr.get("availability") if pr.get("availability") in ("most", "least") else "",
+            "extra": [x for x in (pr.get("extra") or []) if x in ("seniority", "low_cost", "min_hours_equity")],
+        }
     await db.schedule_settings.update_one({"pharmacy_id": pid}, {"$set": update}, upsert=True)
     saved = await db.schedule_settings.find_one({"pharmacy_id": pid}, {"_id": 0})
     periods_note = f", {len(update['traffic_periods'])} période(s)" if "traffic_periods" in update else ""
     await log_audit(principal["email"], principal["role"], "MODIF_PARAMS_HORAIRE", "horaire", pid,
                     f"Budget hebdo : {payload.weekly_budget:.2f} $, achalandage mis à jour{periods_note}", pid)
     return {"weekly_budget": saved.get("weekly_budget", 0), "traffic": saved.get("traffic", {}),
-            "traffic_periods": saved.get("traffic_periods", [])}
+            "traffic_periods": saved.get("traffic_periods", []),
+            "dept_budgets": saved.get("dept_budgets", {}),
+            "branch_budgets": saved.get("branch_budgets", []),
+            "priorities": saved.get("priorities", {})}
 
 
 def _time_to_minutes(t: str) -> int:
@@ -2645,6 +2711,30 @@ def proposal_view(doc: dict) -> dict:
     return d
 
 
+def _priorities_text(pr: dict) -> object:
+    if not pr or not any((pr.get("dept_order"), pr.get("employee_type"), pr.get("availability"), pr.get("extra"))):
+        return "Aucune priorité particulière — applique les règles par défaut (priorité Laboratoire et caisse)."
+    lines = []
+    if pr.get("dept_order"):
+        lines.append("Ordre de priorité des départements : " + " > ".join(pr["dept_order"]) + " (couvre-les dans cet ordre)")
+    if pr.get("employee_type") == "full_time":
+        lines.append("Prioriser les employés à TEMPS PLEIN (≈30 h et plus/semaine selon le profil) dans l'attribution des heures.")
+    elif pr.get("employee_type") == "part_time":
+        lines.append("Prioriser les employés à TEMPS PARTIEL (moins de 30 h/semaine selon le profil) dans l'attribution des heures.")
+    if pr.get("availability") == "most":
+        lines.append("Prioriser les employés offrant les PLUS GRANDES disponibilités (plus de jours/plages disponibles = plus d'heures).")
+    elif pr.get("availability") == "least":
+        lines.append("Placer D'ABORD les employés aux disponibilités les plus RESTREINTES (les caser en premier), puis compléter avec les plus flexibles.")
+    extra = pr.get("extra") or []
+    if "seniority" in extra:
+        lines.append("À conditions égales, prioriser l'ancienneté (date d'embauche la plus ancienne d'abord).")
+    if "low_cost" in extra:
+        lines.append("À qualification égale, privilégier les taux horaires les plus bas pour optimiser le budget.")
+    if "min_hours_equity" in extra:
+        lines.append("Équité : atteindre d'abord le minimum d'heures hebdomadaire de CHAQUE employé avant de dépasser celui des autres.")
+    return lines
+
+
 async def generate_schedule_content(proposal_id: str, pharmacy_id: str, week_start: str,
                                     instructions: str, roster: list, profiles: list, absences: list,
                                     weekly_budget: float = 0, existing_shifts: list | None = None,
@@ -2676,6 +2766,9 @@ async def generate_schedule_content(proposal_id: str, pharmacy_id: str, week_sta
                     })
         settings = await db.schedule_settings.find_one({"pharmacy_id": pharmacy_id}, {"_id": 0}) or {}
         traffic = settings.get("traffic") or {}
+        dept_budgets = settings.get("dept_budgets") or {}
+        branch_budgets = settings.get("branch_budgets") or []
+        priorities = settings.get("priorities") or {}
         traffic_payload = {}
         for i, d in enumerate(week_days):
             day_blocks = traffic.get(TRAFFIC_DAY_KEYS[i]) or {}
@@ -2688,6 +2781,12 @@ async def generate_schedule_content(proposal_id: str, pharmacy_id: str, week_sta
             "consignes_du_gestionnaire": instructions or "Aucune consigne particulière.",
             "departement_vise": (f"{department} — génère les quarts pour CE département seulement"
                                  if department else "Tous les départements"),
+            "departements_disponibles": list(DEPARTMENTS_BE),
+            "budgets_par_departement": ({d: f"{b:.2f} $ maximum" for d, b in dept_budgets.items()}
+                                        or "Aucun budget par département."),
+            "budgets_par_succursale": ([{"succursale": b.get("branch_name", ""), "budget_max": f"{b.get('budget', 0):.2f} $"}
+                                        for b in branch_budgets] or "Aucun budget par succursale."),
+            "priorites_du_gestionnaire": _priorities_text(priorities),
             "budget_salarial_hebdomadaire": (
                 f"{weekly_budget:.2f} $ — masse salariale MAXIMALE pour l'ensemble des quarts de la semaine"
                 if weekly_budget > 0 else "Aucun budget imposé."),
@@ -2706,6 +2805,8 @@ async def generate_schedule_content(proposal_id: str, pharmacy_id: str, week_sta
             } for t in week_tasks] or "Aucune tâche planifiée cette semaine.",
             "employes": [{
                 "employee_id": e["id"], "nom": e["name"], "poste": e["position"],
+                "succursale": e.get("branch_name") or "non précisée",
+                "date_embauche": e.get("hire_date") or "inconnue",
                 "taux_horaire": next((p.get("hourly_rate") for p in profiles if p["employee_id"] == e["id"]
                                       and p.get("hourly_rate")), "inconnu"),
                 "profil": next((p for p in profiles if p["employee_id"] == e["id"]), None),
@@ -2722,17 +2823,21 @@ async def generate_schedule_content(proposal_id: str, pharmacy_id: str, week_sta
         data = parse_llm_json(raw)
         shifts = []
         roster_ids = {e["id"] for e in roster}
+        prof_by_id = {p["employee_id"]: p for p in profiles}
         for s in data.get("shifts", []):
             if s.get("employee_id") not in roster_ids or s.get("date") not in week_days:
                 continue
             if not s.get("start") or not s.get("end"):
                 continue
+            ai_dept = str(s.get("department") or "")
+            dept = department or (ai_dept if ai_dept in DEPARTMENTS_BE else "") \
+                or ((prof_by_id.get(s["employee_id"]) or {}).get("department") or "") or "Général"
             shifts.append({"id": str(uuid.uuid4()), "employee_id": s["employee_id"],
                            "employee_name": str(s.get("employee_name", "")), "date": s["date"],
-                           "start": str(s["start"]), "end": str(s["end"]), "role": str(s.get("role", ""))})
+                           "start": str(s["start"]), "end": str(s["end"]), "role": str(s.get("role", "")),
+                           "department": dept})
         if not shifts:
             raise ValueError("L'IA n'a généré aucun quart valide")
-        prof_by_id = {p["employee_id"]: p for p in profiles}
         shift_hours = {"Matin": ("08:00", "12:00"), "Après-midi": ("12:00", "17:00"), "Soir": ("17:00", "21:30")}
         for s in shifts:
             warnings = []
@@ -2821,6 +2926,46 @@ async def generate_schedule_content(proposal_id: str, pharmacy_id: str, week_sta
             who = next((e["name"] for e in roster if e["id"] == eid), eid)
             alerts.append({"kind": "profile", "employee_id": eid,
                            "text": f"Taux horaire manquant au profil de {who} — le coût estimé est sous-évalué"})
+
+        def _shift_cost(s: dict) -> float:
+            rate = (prof_by_id.get(s["employee_id"]) or {}).get("hourly_rate")
+            if not rate:
+                return 0.0
+            try:
+                return max(0, _time_to_minutes(s["end"]) - _time_to_minutes(s["start"])) / 60 * float(rate)
+            except (ValueError, AttributeError):
+                return 0.0
+
+        if dept_budgets:
+            dept_costs: dict = {}
+            for s in shifts:
+                dept_costs[s["department"]] = dept_costs.get(s["department"], 0) + _shift_cost(s)
+            for d_name, b in dept_budgets.items():
+                c = dept_costs.get(d_name, 0)
+                if b > 0 and c > b:
+                    alerts.append({"kind": "budget",
+                                   "text": f"Budget du département {d_name} dépassé : coût estimé {c:.2f} $ > {b:.2f} $"})
+        if branch_budgets:
+            branch_by_emp = {e["id"]: (e.get("branch_id") or "") for e in roster}
+            branch_costs: dict = {}
+            for s in shifts:
+                bid = branch_by_emp.get(s["employee_id"], "")
+                branch_costs[bid] = branch_costs.get(bid, 0) + _shift_cost(s)
+            for b in branch_budgets:
+                c = branch_costs.get(b.get("branch_id", ""), 0)
+                if b.get("budget", 0) > 0 and c > b["budget"]:
+                    alerts.append({"kind": "budget",
+                                   "text": f"Budget de la succursale {b.get('branch_name', '')} dépassé : "
+                                           f"coût estimé {c:.2f} $ > {b['budget']:.2f} $"})
+        if not department:
+            staffed_depts = {(prof_by_id.get(e["id"]) or {}).get("department") for e in roster}
+            for d_name in DEPARTMENTS_BE:
+                if d_name == "Général" or d_name not in staffed_depts:
+                    continue
+                if not any(s["department"] == d_name for s in shifts):
+                    alerts.append({"kind": "traffic",
+                                   "text": f"Aucun quart au département {d_name} cette semaine malgré du personnel "
+                                           "rattaché — couverture minimale à vérifier (priorité Laboratoire et caisse)"})
         traffic_settings = (await db.schedule_settings.find_one(
             {"pharmacy_id": pharmacy_id}, {"_id": 0}) or {}).get("traffic") or {}
         for i, d in enumerate(week_days):
@@ -2896,6 +3041,7 @@ async def schedule_generate(payload: ScheduleGenIn, principal: dict = Depends(ge
         "status": "generating", "error": None, "summary": "", "shifts": [],
         "instructions": payload.instructions, "absences": absences,
         "department": department, "existing_mode": existing_mode,
+        "priorities": settings.get("priorities") or {},
         "alerts": [], "warnings_count": 0,
         "estimated_cost": None, "weekly_budget": weekly_budget,
         "employee_approvals": {}, "admin_status": "pending", "admin_decided_by": None,
