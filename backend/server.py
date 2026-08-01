@@ -4127,6 +4127,54 @@ async def monthly_budget_report_job():
     logger.info(f"Rapport budget mensuel : {sent} courriel(s) envoyé(s)")
 
 
+async def send_shift_reminders(only_pharmacy: str = "") -> int:
+    tomorrow = (datetime.now(timezone.utc).astimezone(MONTREAL_TZ).date() + timedelta(days=1)).isoformat()
+    query: dict = {"date": tomorrow}
+    if only_pharmacy:
+        query["pharmacy_id"] = only_pharmacy
+    docs = await db.shifts.find(query, {"_id": 0}).to_list(20000)
+    by_key: dict = {}
+    for s in docs:
+        by_key.setdefault((s["pharmacy_id"], s["employee_id"]), []).append(s)
+    sent = 0
+    for (pid, eid), day_shifts in by_key.items():
+        exists = await db.notifications.find_one(
+            {"pharmacy_id": pid, "target_employee_id": eid, "kind": "shift_reminder", "reminder_date": tomorrow})
+        if exists:
+            continue
+        day_shifts.sort(key=lambda x: x["start"])
+        total_h = 0.0
+        parts = []
+        for s in day_shifts:
+            try:
+                total_h += max(0, _time_to_minutes(s["end"]) - _time_to_minutes(s["start"])) / 60
+            except (ValueError, AttributeError):
+                pass
+            dept = s.get("department") or "Général"
+            parts.append(f"{s['start']}–{s['end']}" + (f" ({dept})" if dept != "Général" else ""))
+        await db.notifications.insert_one({
+            "id": str(uuid.uuid4()), "pharmacy_id": pid, "target_employee_id": eid,
+            "kind": "shift_reminder", "reminder_date": tomorrow,
+            "title": "Rappel — vous travaillez demain",
+            "detail": f"Demain ({tomorrow}) : {' · '.join(parts)} — total ~{round(total_h, 2):g} h.",
+            "module": "myspace", "icon": "schedule", "tone": "sky",
+            "created_at": datetime.now(timezone.utc).isoformat()})
+        sent += 1
+    return sent
+
+
+@api_router.post("/notifications/shift-reminders/run")
+async def run_shift_reminders(principal: dict = Depends(get_principal)):
+    only = principal["pharmacy_id"] if principal["role"] in ("admin", "manager") else ""
+    sent = await send_shift_reminders(only or "")
+    return {"sent": sent}
+
+
+async def shift_reminder_job():
+    sent = await send_shift_reminders()
+    logger.info(f"Rappels de quart demain : {sent} notification(s) créée(s)")
+
+
 @api_router.get("/reports/budget-history")
 async def budget_history(months: int = Query(6, ge=1, le=12), principal: dict = Depends(get_principal)):
     pid = principal["pharmacy_id"] or "ph1"
@@ -5239,6 +5287,7 @@ async def startup_tasks():
     scheduler.add_job(shift_task_reminders_job, CronTrigger(hour=21, minute=30), args=["Soir"])
     scheduler.add_job(weekly_task_report_job, CronTrigger(day_of_week="mon", hour=7, minute=0))
     scheduler.add_job(monthly_budget_report_job, CronTrigger(day=1, hour=7, minute=30))
+    scheduler.add_job(shift_reminder_job, CronTrigger(hour=18, minute=0))
     scheduler.start()
 
 
