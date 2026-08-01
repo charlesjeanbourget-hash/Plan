@@ -75,6 +75,18 @@ export const ScheduleProposals = (): JSX.Element => {
   const [traffic, setTraffic] = useState<TrafficGrid>({});
   const [expanded, setExpanded] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [fillValue, setFillValue] = useState('');
+
+  const fillTraffic = (): void => {
+    const n = Math.max(0, Math.min(500, Number(fillValue.replace(',', '.')) || 0));
+    const t: TrafficGrid = {};
+    TRAFFIC_DAYS.forEach(([day]) => {
+      t[day] = {};
+      TRAFFIC_BLOCKS.forEach(([block]) => { t[day][block] = n; });
+    });
+    setTraffic(t);
+    toast.success(`Achalandage fixé à ${n} clients/h sur toutes les plages.`);
+  };
 
   const refresh = useCallback(async (): Promise<void> => {
     try {
@@ -425,6 +437,27 @@ export const ScheduleProposals = (): JSX.Element => {
             <p className="text-xs text-slate-500">Les absences approuvées, les tâches planifiées et les taux horaires des profils sont transmis automatiquement à l'IA. Le coût estimé de l'horaire sera comparé au budget.</p>
             <div className="space-y-2">
               <Label className="inline-flex items-center gap-1.5"><Users className="w-3.5 h-3.5 text-bronze-600" /> Achalandage estimé (clients à l'heure)</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  data-testid="gen-traffic-fill-input"
+                  value={fillValue}
+                  onChange={(e) => setFillValue(e.target.value)}
+                  inputMode="numeric"
+                  placeholder="Ex. 20"
+                  className="h-8 w-24 text-xs"
+                />
+                <Button
+                  type="button"
+                  data-testid="gen-traffic-fill-button"
+                  size="sm"
+                  variant="outline"
+                  onClick={fillTraffic}
+                  className="rounded-full text-xs border-bronze-300 text-bronze-800 hover:bg-bronze-50"
+                >
+                  Appliquer partout
+                </Button>
+                <span className="text-[11px] text-slate-400">remplit les 21 plages d'un coup</span>
+              </div>
               <div data-testid="gen-traffic-grid" className="rounded-lg border border-slate-200 overflow-hidden">
                 <table className="w-full text-xs">
                   <thead>

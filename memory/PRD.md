@@ -274,6 +274,15 @@ Choix client : approbation des employés conservée EN OPTION + pastille « IA �
 - **Nettoyage sécurité au passage** : le bloc « Comptes de démonstration » (admin123/employe123 — obsolètes et dangereux) a été RETIRÉ de la page de connexion.
 - Vérifié E2E : générique inconnu ✓, mauvais code 400 ✓, mdp faible 400 ✓, reset 200 + login ✓, réutilisation code 400 ✓, throttle 429 ✓, courriel réel livré à charlesjeanbourget@gmail.com ✓ (mode test Resend : seuls les courriels vers le propriétaire partent tant que le domaine n'est pas vérifié).
 
+## Itération 35 (1 août 2026) — Refonte visuelle du calendrier Horaires (style Agendrix) + totaux par employé + bouton achalandage — testée (Playwright drag&drop, totaux, mobile 0px overflow, fill 21 plages)
+Plainte utilisateur : « section laide, sans couleur et coincée » (capture mobile avec pastilles qui se chevauchaient).
+1. **Nouvelle grille aérée** (SchedulingModule.tsx) : conteneur rounded-2xl + shadow, min-w 1100px (défilement horizontal propre sur mobile, 0px overflow body), en-têtes jours complets (Lundi + « 04 août »), jour courant en pilier émeraude plein, avatars colorés des employés (initiales), cellules min-h 76px espacées.
+2. **Cartes de quart colorées** : fond teinté + barre d'accent gauche selon le moment (Matin=émeraude, Après-midi=sky, Soir=bronze — légende au-dessus de la grille, testid schedule-legend), heure en gras + durée (« 8 h »), badge « IA » violet INLINE (plus de chevauchement mobile), chips ressources blanches, bouton supprimer discret en bas-droit (hover desktop, visible mobile, admin seulement désormais), drag & drop intact (testé ✓, curseur grab).
+3. **Bouton d'ajout rapide** (quick-add-{empId}-{date}) : « + » pointillé au survol de chaque cellule (admin) → ouvre « Nouveau quart » prérempli employé+date.
+4. **Colonne « Total » par employé** (row-total-{empId}) : heures de la semaine en gras + **coût hebdo** (heures × hourly_rate des profils Mongo, GET /api/profiles, admin seulement, testid row-cost-{empId}) ou « taux manquant ». **Ligne « Totaux »** en pied (schedule-totals-row) : heures par jour (day-total-{date}) + total semaine (week-total-hours) + coût total (week-total-cost, admin).
+5. **Achalandage : bouton « Appliquer partout »** (gen-traffic-fill-button + gen-traffic-fill-input) dans le dialogue Générer par IA : remplit les 21 plages (7 jours × 3 blocs) d'une seule valeur (clampée 0-500). Testé ✓ (20 partout).
+- DAY_LABELS supprimé (remplacé par FULL_DAYS). Chips remplacements agence restylées (accent bronze) + cellule vide sous colonne Total.
+
 ## Notes techniques
 - Ne jamais recréer `jsconfig.json` (conflit CRA avec tsconfig.json)
 - npm interdit — yarn uniquement

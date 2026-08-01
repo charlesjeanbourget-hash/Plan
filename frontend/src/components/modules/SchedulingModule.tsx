@@ -19,7 +19,6 @@ import { ReadReceiptsDialog } from '@/components/ReadReceiptsDialog';
 import { downloadSchedulePdf } from '@/lib/schedulePdf';
 import { hoursBetween } from '@/lib/schedule';
 import { toast } from 'sonner';
-const DAY_LABELS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -32,6 +31,21 @@ const getWeekStart = (offsetWeeks: number): Date => {
 };
 
 const iso = (d: Date): string => d.toISOString().slice(0, 10);
+
+const FULL_DAYS = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
+
+const dayPart = (start: string): { bar: string; bg: string } => {
+  const h = Number(start.slice(0, 2));
+  if (h < 12) return { bar: 'bg-emerald-500', bg: 'bg-emerald-50' };
+  if (h < 17) return { bar: 'bg-sky-500', bg: 'bg-sky-50' };
+  return { bar: 'bg-bronze-500', bg: 'bg-bronze-50' };
+};
+
+const fmtHours = (n: number): string => `${(Math.round(n * 10) / 10).toLocaleString('fr-CA')} h`;
+
+const fmtCad = (n: number): string => n.toLocaleString('fr-CA', { style: 'currency', currency: 'CAD', maximumFractionDigits: 0 });
+
+const dayDate = (d: string): string => new Date(`${d}T00:00:00`).toLocaleDateString('fr-CA', { day: '2-digit', month: 'short' });
 
 export default function SchedulingModule(): JSX.Element {
   const { state, addShift, deleteShift, updateShift, setShiftSwapStatus, getEmployee } = useHR();
@@ -61,6 +75,24 @@ export default function SchedulingModule(): JSX.Element {
       .then((r) => setReplacements(r.data.filter((q) => q.status === 'filled' && !!q.chosen_offer)))
       .catch(() => undefined);
   }, [isAdmin, token]);
+
+  const [rates, setRates] = useState<Record<string, number>>({});
+  useEffect(() => {
+    if (!isAdmin || !token) return;
+    axios.get<{ employee_id: string; hourly_rate?: number }[]>(`${API}/profiles`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => {
+        const m: Record<string, number> = {};
+        r.data.forEach((p) => { m[p.employee_id] = p.hourly_rate ?? 0; });
+        setRates(m);
+      })
+      .catch(() => undefined);
+  }, [isAdmin, token]);
+
+  const quickAdd = (empId: string, d: string): void => {
+    setEmployeeId(empId);
+    setDate(d);
+    setDialogOpen(true);
+  };
 
   const weekStart = getWeekStart(weekOffset);
   const days: string[] = Array.from({ length: 7 }, (_, i) => {
@@ -320,24 +352,48 @@ export default function SchedulingModule(): JSX.Element {
         </div>
       </div>
 
-      <div className="overflow-x-auto bg-white rounded-xl border border-slate-200">
-        <table className="w-full text-sm border-collapse min-w-[900px]">
+      <div className="hidden sm:flex flex-wrap items-center gap-4 mb-3 text-xs text-slate-500" data-testid="schedule-legend">
+        <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> Matin</span>
+        <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-sky-500" /> Après-midi</span>
+        <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-bronze-500" /> Soir</span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="inline-flex items-center gap-0.5 rounded-full bg-violet-600 text-white text-[9px] font-bold px-1.5 py-px"><Sparkles className="w-2 h-2" /> IA</span>
+          généré par l'IA
+        </span>
+      </div>
+
+      <div className="overflow-x-auto bg-white rounded-2xl border border-slate-200 shadow-sm">
+        <table className="w-full text-sm border-collapse min-w-[1100px]">
           <thead>
-            <tr>
-              <th className="text-left p-4 border-b border-r border-slate-200 text-xs uppercase tracking-[0.15em] text-slate-500 w-48">Employé</th>
+            <tr className="bg-slate-50/80">
+              <th className="text-left px-5 py-4 border-b border-r border-slate-200 text-[11px] uppercase tracking-[0.18em] text-slate-400 font-semibold w-52">Employé</th>
               {days.map((d, i) => (
-                <th key={d} className={`p-3 border-b border-r border-slate-200 last:border-r-0 text-xs font-semibold ${d === today ? 'bg-emerald-50 text-emerald-800' : 'text-slate-600'}`}>
-                  {DAY_LABELS[i]} <span className="block text-[11px] font-normal text-slate-400">{d.slice(5)}</span>
+                <th key={d} className={`px-3 py-3 border-b border-r border-slate-200 text-center ${d === today ? 'bg-emerald-600 text-white' : 'text-slate-700'}`}>
+                  <span className="block text-sm font-bold font-heading">{FULL_DAYS[i]}</span>
+                  <span className={`block text-[11px] font-normal mt-0.5 ${d === today ? 'text-emerald-100' : 'text-slate-400'}`}>{dayDate(d)}</span>
                 </th>
               ))}
+              <th className="px-4 py-3 border-b border-slate-200 text-right text-[11px] uppercase tracking-[0.18em] text-slate-400 font-semibold w-32 bg-slate-100/60">Total</th>
             </tr>
           </thead>
           <tbody>
-            {state.employees.filter((e) => branchFilter === 'all' || e.branchId === branchFilter).map((emp) => (
+            {state.employees.filter((e) => branchFilter === 'all' || e.branchId === branchFilter).map((emp) => {
+              const rowHours = state.shifts
+                .filter((s) => s.employeeId === emp.id && s.date >= days[0] && s.date <= days[6])
+                .reduce((sum, s) => sum + hoursBetween(s.startTime, s.endTime), 0);
+              const rate = rates[emp.id] ?? 0;
+              return (
               <tr key={emp.id}>
-                <td className="p-4 border-b border-r border-slate-200 align-top">
-                  <p className="font-semibold text-slate-800">{emp.firstName} {emp.lastName}</p>
-                  <p className="text-xs text-slate-500">{emp.position}</p>
+                <td className="px-5 py-4 border-b border-r border-slate-200 align-top">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-9 h-9 rounded-full ${emp.avatarColor} flex items-center justify-center text-white text-xs font-bold shrink-0`}>
+                      {emp.firstName[0]}{emp.lastName[0]}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-semibold text-slate-800 truncate">{emp.firstName} {emp.lastName}</p>
+                      <p className="text-xs text-slate-500 truncate">{emp.position}</p>
+                    </div>
+                  </div>
                 </td>
                 {days.map((d) => {
                   const shifts = state.shifts.filter((s) => s.employeeId === emp.id && s.date === d);
@@ -350,71 +406,135 @@ export default function SchedulingModule(): JSX.Element {
                       onDragOver={(e) => { if (isAdmin && dragShiftId) { e.preventDefault(); e.dataTransfer.dropEffect = e.altKey ? 'copy' : 'move'; setDropTarget(cellKey); } }}
                       onDragLeave={() => setDropTarget((t) => (t === cellKey ? null : t))}
                       onDrop={(e) => { e.preventDefault(); handleDrop(emp.id, d, e.altKey); }}
-                      className={`p-2 border-b border-r border-slate-200 last:border-r-0 align-top transition-colors ${d === today ? 'bg-emerald-50/50' : ''} ${dropTarget === cellKey && dragShiftId ? 'bg-bronze-50 ring-2 ring-inset ring-bronze-400' : ''}`}
+                      className={`group/cell p-2 border-b border-r border-slate-200 align-top transition-colors ${d === today ? 'bg-emerald-50/40' : ''} ${dropTarget === cellKey && dragShiftId ? 'bg-bronze-50 ring-2 ring-inset ring-bronze-400' : ''}`}
                     >
-                      {shifts.map((s) => (
+                      <div className="min-h-[76px] space-y-1.5">
+                      {shifts.map((s) => {
+                        const part = dayPart(s.startTime);
+                        return (
                         <div
                           key={s.id}
                           data-testid={`shift-chip-${s.id}`}
                           draggable={isAdmin}
                           onDragStart={(e) => { setDragShiftId(s.id); e.dataTransfer.effectAllowed = 'copyMove'; }}
                           onDragEnd={() => { setDragShiftId(null); setDropTarget(null); }}
-                          className={`group relative bg-emerald-600 text-white rounded-lg px-2 py-1.5 mb-1 text-xs font-semibold text-center ${isAdmin ? 'cursor-grab active:cursor-grabbing' : ''} ${dragShiftId === s.id ? 'opacity-40' : ''}`}
+                          className={`group relative overflow-hidden rounded-lg border border-slate-200/80 ${part.bg} pl-3.5 pr-2 py-2 shadow-sm transition-shadow hover:shadow-md ${isAdmin ? 'cursor-grab active:cursor-grabbing' : ''} ${dragShiftId === s.id ? 'opacity-40' : ''}`}
                         >
-                          {s.aiGenerated && (
-                            <span data-testid={`ai-shift-badge-${s.id}`} className="absolute -top-1.5 -left-1.5 inline-flex items-center gap-0.5 rounded-full bg-violet-600 text-white text-[8px] font-bold px-1.5 py-0.5 shadow-sm" title="Quart généré par l'IA">
-                              <Sparkles className="w-2 h-2" /> IA
-                            </span>
-                          )}
-                          {s.startTime}–{s.endTime}
+                          <span className={`absolute inset-y-0 left-0 w-1.5 ${part.bar}`} />
+                          <div className="flex items-center justify-between gap-1.5">
+                            <p className="text-xs font-bold text-slate-900 whitespace-nowrap">{s.startTime}–{s.endTime}</p>
+                            {s.aiGenerated && (
+                              <span data-testid={`ai-shift-badge-${s.id}`} className="inline-flex items-center gap-0.5 rounded-full bg-violet-600 text-white text-[8px] font-bold px-1.5 py-px shrink-0" title="Quart généré par l'IA">
+                                <Sparkles className="w-2 h-2" /> IA
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-slate-500 mt-0.5">{fmtHours(hoursBetween(s.startTime, s.endTime))}</p>
                           {(s.resourceIds ?? []).length > 0 && (
-                            <span className="mt-1 flex flex-wrap justify-center gap-1">
+                            <span className="mt-1 flex flex-wrap gap-1">
                               {(s.resourceIds ?? []).map((rid) => {
                                 const r = (state.resources ?? []).find((x) => x.id === rid);
                                 if (!r) return null;
                                 return (
-                                  <span key={rid} data-testid={`shift-resource-chip-${s.id}-${rid}`} className="inline-flex items-center gap-0.5 bg-white/25 rounded px-1 py-px text-[9px] font-medium max-w-full truncate">
-                                    {r.type === 'lieu' ? <MapPin className="w-2.5 h-2.5 shrink-0" /> : <Wrench className="w-2.5 h-2.5 shrink-0" />}
+                                  <span key={rid} data-testid={`shift-resource-chip-${s.id}-${rid}`} className="inline-flex items-center gap-0.5 bg-white/80 border border-slate-200 text-slate-600 rounded px-1 py-px text-[9px] font-medium max-w-full truncate">
+                                    {r.type === 'lieu' ? <MapPin className="w-2.5 h-2.5 shrink-0 text-emerald-600" /> : <Wrench className="w-2.5 h-2.5 shrink-0 text-bronze-600" />}
                                     <span className="truncate">{r.name}</span>
                                   </span>
                                 );
                               })}
                             </span>
                           )}
-                          <button
-                            data-testid={`delete-shift-${s.id}`}
-                            onClick={() => { deleteShift(s.id); toast.success('Quart supprimé.'); }}
-                            className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 text-white flex md:hidden md:group-hover:flex items-center justify-center"
-                          >
-                            <X className="w-2.5 h-2.5" />
-                          </button>
+                          {isAdmin && (
+                            <button
+                              data-testid={`delete-shift-${s.id}`}
+                              onClick={() => { deleteShift(s.id); toast.success('Quart supprimé.'); }}
+                              className="absolute bottom-1 right-1 w-5 h-5 rounded-full text-slate-300 hover:text-red-600 hover:bg-red-100 flex md:hidden md:group-hover:flex items-center justify-center transition-colors"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          )}
                         </div>
-                      ))}
+                        );
+                      })}
                       {appts.map((a) => (
                         <div
                           key={a.id}
                           data-testid={`appointment-chip-${a.id}`}
-                          className="group relative bg-sky-100 border border-sky-300 text-sky-900 rounded-lg px-2 py-1 mb-1 text-[11px] font-semibold"
+                          className="group relative overflow-hidden rounded-lg border border-sky-200 bg-sky-50 pl-3.5 pr-2 py-2 text-sky-900 shadow-sm"
                           title={`${a.client_name}${a.reason ? ` — ${a.reason}` : ''}${a.notes ? ` · ${a.notes}` : ''}`}
                         >
-                          <span className="inline-flex items-center gap-1"><Stethoscope className="w-3 h-3" /> {a.start}–{a.end}</span>
-                          <span className="block text-[10px] font-normal truncate">{a.client_name}{a.reason ? ` · ${a.reason}` : ''}</span>
+                          <span className="absolute inset-y-0 left-0 w-1.5 bg-sky-400" />
+                          <span className="inline-flex items-center gap-1 text-xs font-bold"><Stethoscope className="w-3 h-3" /> {a.start}–{a.end}</span>
+                          <span className="block text-[10px] text-sky-700 truncate mt-0.5">{a.client_name}{a.reason ? ` · ${a.reason}` : ''}</span>
                           {(isAdmin || currentUser?.employeeId === a.employee_id) && (
                             <button
                               data-testid={`delete-appointment-${a.id}`}
                               onClick={() => void removeAppointment(a.id)}
-                              className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 text-white flex md:hidden md:group-hover:flex items-center justify-center"
+                              className="absolute bottom-1 right-1 w-5 h-5 rounded-full text-sky-300 hover:text-red-600 hover:bg-red-100 flex md:hidden md:group-hover:flex items-center justify-center transition-colors"
                             >
-                              <X className="w-2.5 h-2.5" />
+                              <X className="w-3 h-3" />
                             </button>
                           )}
                         </div>
                       ))}
+                      {isAdmin && (
+                        <button
+                          data-testid={`quick-add-${emp.id}-${d}`}
+                          onClick={() => quickAdd(emp.id, d)}
+                          title="Ajouter un quart"
+                          className="w-full rounded-lg border border-dashed border-slate-200 text-slate-300 hover:text-emerald-600 hover:border-emerald-300 hover:bg-emerald-50/60 py-1 flex items-center justify-center opacity-0 group-hover/cell:opacity-100 focus:opacity-100 transition-opacity"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      </div>
                     </td>
                   );
                 })}
+                <td data-testid={`row-total-${emp.id}`} className="px-4 py-4 border-b border-slate-200 align-top text-right bg-slate-50/60">
+                  <p className="text-sm font-bold text-slate-900">{rowHours > 0 ? fmtHours(rowHours) : '—'}</p>
+                  {isAdmin && rate > 0 && rowHours > 0 && (
+                    <p data-testid={`row-cost-${emp.id}`} className="text-xs font-semibold text-emerald-700 mt-0.5">{fmtCad(rowHours * rate)}</p>
+                  )}
+                  {isAdmin && rate === 0 && rowHours > 0 && (
+                    <p className="text-[10px] text-slate-400 mt-0.5">taux manquant</p>
+                  )}
+                </td>
               </tr>
-            ))}
+              );
+            })}
+            <tr data-testid="schedule-totals-row" className="bg-slate-50/80 border-t-2 border-slate-200">
+              <td className="px-5 py-3 border-r border-slate-200 text-[11px] uppercase tracking-[0.18em] text-slate-400 font-semibold">Totaux</td>
+              {days.map((d) => {
+                const filteredIds = new Set(state.employees.filter((e) => branchFilter === 'all' || e.branchId === branchFilter).map((e) => e.id));
+                const dh = state.shifts
+                  .filter((s) => s.date === d && filteredIds.has(s.employeeId))
+                  .reduce((sum, s) => sum + hoursBetween(s.startTime, s.endTime), 0);
+                return (
+                  <td key={d} data-testid={`day-total-${d}`} className="px-3 py-3 border-r border-slate-200 text-center text-xs font-bold text-slate-700">
+                    {dh > 0 ? fmtHours(dh) : <span className="text-slate-300">—</span>}
+                  </td>
+                );
+              })}
+              {(() => {
+                const filtered = state.employees.filter((e) => branchFilter === 'all' || e.branchId === branchFilter);
+                let gh = 0;
+                let gc = 0;
+                filtered.forEach((e) => {
+                  const h = state.shifts
+                    .filter((s) => s.employeeId === e.id && s.date >= days[0] && s.date <= days[6])
+                    .reduce((sum, s) => sum + hoursBetween(s.startTime, s.endTime), 0);
+                  gh += h;
+                  gc += h * (rates[e.id] ?? 0);
+                });
+                return (
+                  <td className="px-4 py-3 text-right bg-slate-100/60">
+                    <p data-testid="week-total-hours" className="text-sm font-bold text-slate-900">{fmtHours(gh)}</p>
+                    {isAdmin && gc > 0 && <p data-testid="week-total-cost" className="text-xs font-semibold text-emerald-700 mt-0.5">{fmtCad(gc)}</p>}
+                  </td>
+                );
+              })()}
+            </tr>
             {isAdmin && (() => {
               const weekSlots = replacements.flatMap((q) =>
                 q.slots
@@ -428,20 +548,22 @@ export default function SchedulingModule(): JSX.Element {
                     <p className="text-xs text-bronze-700/70">Retenus via le module Remplacements</p>
                   </td>
                   {days.map((d) => (
-                    <td key={d} className="p-2 border-r border-slate-200 last:border-r-0 align-top">
+                    <td key={d} className="p-2 border-r border-slate-200 align-top">
                       {weekSlots.filter((s) => s.date === d).map((s, i) => (
                         <div
                           key={`${s.date}-${i}`}
                           data-testid={`replacement-chip-${s.date}-${i}`}
-                          className="bg-bronze-100 border border-bronze-300 text-bronze-900 rounded-lg px-2 py-1.5 mb-1 text-xs font-semibold text-center"
+                          className="relative overflow-hidden rounded-lg border border-bronze-200 bg-bronze-50 pl-3.5 pr-2 py-2 mb-1.5 text-bronze-900 shadow-sm"
                           title={`${s.candidate} (${s.agency}) — ${s.role}`}
                         >
-                          {s.start}–{s.end}
-                          <span className="block text-[10px] font-normal truncate">{s.candidate} · {s.role}</span>
+                          <span className="absolute inset-y-0 left-0 w-1.5 bg-bronze-400" />
+                          <p className="text-xs font-bold">{s.start}–{s.end}</p>
+                          <p className="text-[10px] text-bronze-700 truncate mt-0.5">{s.candidate} · {s.role}</p>
                         </div>
                       ))}
                     </td>
                   ))}
+                  <td className="bg-slate-50/60" />
                 </tr>
               );
             })()}
