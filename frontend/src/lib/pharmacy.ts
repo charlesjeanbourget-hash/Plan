@@ -89,3 +89,5 @@ export const DAY_NAMES: Record<WeekDayKey, string> = {
 
 export const fmtTime = (isoStr: string): string =>
   new Date(isoStr).toLocaleTimeString('fr-CA', { hour: '2-digit', minute: '2-digit' });
+
+export const DEPARTMENTS = ['Général', 'Plancher', 'Laboratoire', 'Entrepôt', 'Livraison', 'Administration'];

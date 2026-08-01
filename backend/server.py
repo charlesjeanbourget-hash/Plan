@@ -2078,6 +2078,10 @@ SCHEDULE_SYSTEM = (
     "- Des remplaçants d'agence DÉJÀ CONFIRMÉS peuvent être fournis (date, plage horaire, rôle, taux horaire) : considère ces plages "
     "comme déjà couvertes pour ce rôle (ne planifie pas d'employé en double inutilement sur ces plages) et INCLUS leur coût "
     "(durée de la plage × taux horaire du remplaçant) dans ton calcul du budget salarial hebdomadaire.\n"
+    "- Des QUARTS EXISTANTS déjà au calendrier peuvent être fournis (quarts_existants_a_conserver) : ils seront CONSERVÉS tels quels. "
+    "NE les recrée PAS, ne planifie JAMAIS le même employé sur une plage qui chevauche un de ses quarts existants, considère ces plages "
+    "comme déjà couvertes, et INCLUS leur coût (durée × taux horaire de l'employé) dans le budget hebdomadaire. "
+    "Complète uniquement les manques de couverture.\n"
     "- Assure une couverture adéquate pendant les heures d'ouverture (par défaut lun-ven 8h-21h, sam-dim 9h-17h, "
     "sauf indication contraire dans les consignes), en priorité un pharmacien présent en tout temps si disponible.\n"
     "- Répartis équitablement les quarts et attribue à chacun un rôle cohérent avec ses rôles/capacités.\n"
@@ -2611,6 +2615,9 @@ class ScheduleGenIn(BaseModel):
     employees: list[RosterEmployee]
     absences: list[AbsenceIn] = []
     weekly_budget: float = -1
+    department: str = ""
+    existing_mode: str = "adjust"
+    existing_shifts: list = []
 
 
 def proposal_view(doc: dict) -> dict:
@@ -2640,7 +2647,9 @@ def proposal_view(doc: dict) -> dict:
 
 async def generate_schedule_content(proposal_id: str, pharmacy_id: str, week_start: str,
                                     instructions: str, roster: list, profiles: list, absences: list,
-                                    weekly_budget: float = 0):
+                                    weekly_budget: float = 0, existing_shifts: list | None = None,
+                                    existing_mode: str = "adjust"):
+    existing_shifts = existing_shifts or []
     try:
         start = date.fromisoformat(week_start)
         week_days = [(start + timedelta(days=i)).isoformat() for i in range(7)]
@@ -2686,6 +2695,8 @@ async def generate_schedule_content(proposal_id: str, pharmacy_id: str, week_sta
                 "du": a["start"], "au": a["end"], "type": a.get("type", ""),
             } for a in absences] or "Aucune absence approuvée cette semaine.",
             "remplacants_agence_confirmes": replacement_slots or "Aucun remplaçant d'agence confirmé cette semaine.",
+            "quarts_existants_a_conserver": existing_shifts if (existing_mode == "adjust" and existing_shifts)
+            else "Aucun — semaine à planifier au complet.",
             "taches_a_faire_cette_semaine": [{
                 "date": t["date"], "quart": t["shift"], "titre": t["title"],
                 "assignee_employee_id": t.get("assignee_employee_id") or "",
@@ -2734,6 +2745,12 @@ async def generate_schedule_content(proposal_id: str, pharmacy_id: str, week_sta
                 warnings.append({
                     "text": f"Rôle « {s['role']} » absent des rôles/capacités du profil — qualification à vérifier",
                     "kind": "profile"})
+            for ex in existing_shifts:
+                if ex["employee_id"] == s["employee_id"] and ex["date"] == s["date"] \
+                        and ex["start"] < s["end"] and s["start"] < ex["end"]:
+                    warnings.append({
+                        "text": f"Dédoublement possible : chevauche un quart existant {ex['start']}–{ex['end']} le {ex['date']}",
+                        "kind": "overlap"})
             s["warnings"] = warnings
         alerts = []
         for t in week_tasks:
@@ -2778,11 +2795,25 @@ async def generate_schedule_content(proposal_id: str, pharmacy_id: str, week_sta
                 agency_cost += max(0, _time_to_minutes(rs["a"]) - _time_to_minutes(rs["de"])) / 60 * float(rs["taux_horaire"])
             except (ValueError, AttributeError):
                 continue
-        estimated_cost = round(estimated_cost + agency_cost, 2)
+        existing_cost = 0.0
+        for ex in existing_shifts:
+            rate = (prof_by_id.get(ex["employee_id"]) or {}).get("hourly_rate")
+            if not rate:
+                continue
+            try:
+                existing_cost += max(0, _time_to_minutes(ex["end"]) - _time_to_minutes(ex["start"])) / 60 * float(rate)
+            except (ValueError, AttributeError):
+                continue
+        estimated_cost = round(estimated_cost + agency_cost + existing_cost, 2)
         if weekly_budget > 0 and estimated_cost > weekly_budget:
+            extras = []
+            if agency_cost > 0:
+                extras.append(f"{agency_cost:.2f} $ de remplaçants d’agence")
+            if existing_cost > 0:
+                extras.append(f"{existing_cost:.2f} $ de quarts existants conservés")
+            extra_txt = f" (dont {' et '.join(extras)})" if extras else ""
             alerts.append({"kind": "budget",
-                           "text": f"Budget dépassé : coût estimé {estimated_cost:.2f} $"
-                                   f"{f' (dont {agency_cost:.2f} $ de remplaçants d’agence)' if agency_cost > 0 else ''}"
+                           "text": f"Budget dépassé : coût estimé {estimated_cost:.2f} ${extra_txt}"
                                    f" > budget {weekly_budget:.2f} $ (écart +{estimated_cost - weekly_budget:.2f} $)"})
         for eid in sorted(missing_rate_ids):
             who = next((e["name"] for e in roster if e["id"] == eid), eid)
@@ -2797,7 +2828,8 @@ async def generate_schedule_content(proposal_id: str, pharmacy_id: str, week_sta
                 if expected <= 0:
                     continue
                 covered = any(s["date"] == d and s["start"] < be and s["end"] > bs for s in shifts) \
-                    or any(rs["date"] == d and rs["de"] < be and rs["a"] > bs for rs in replacement_slots)
+                    or any(rs["date"] == d and rs["de"] < be and rs["a"] > bs for rs in replacement_slots) \
+                    or any(ex["date"] == d and ex["start"] < be and ex["end"] > bs for ex in existing_shifts)
                 if not covered:
                     alerts.append({"kind": "traffic",
                                    "text": f"Aucune couverture le {d} ({TRAFFIC_DAY_LABELS[i]}) en {label} "
@@ -2846,11 +2878,22 @@ async def schedule_generate(payload: ScheduleGenIn, principal: dict = Depends(ge
             {"pharmacy_id": pid}, {"$set": {"pharmacy_id": pid, "weekly_budget": weekly_budget}}, upsert=True)
     else:
         weekly_budget = settings.get("weekly_budget", 0)
+    department = payload.department.strip()[:40]
+    existing_mode = payload.existing_mode if payload.existing_mode in ("adjust", "overwrite") else "adjust"
+    existing = []
+    if existing_mode == "adjust":
+        for s in payload.existing_shifts[:200]:
+            if not isinstance(s, dict):
+                continue
+            if s.get("date") and s.get("start") and s.get("end") and s.get("employee_id"):
+                existing.append({"employee_id": str(s["employee_id"]), "employee_name": str(s.get("employee_name", "")),
+                                 "date": str(s["date"]), "start": str(s["start"]), "end": str(s["end"])})
     now = datetime.now(timezone.utc)
     doc = {
         "id": str(uuid.uuid4()), "pharmacy_id": pid, "week_start": payload.week_start,
         "status": "generating", "error": None, "summary": "", "shifts": [],
         "instructions": payload.instructions, "absences": absences,
+        "department": department, "existing_mode": existing_mode,
         "alerts": [], "warnings_count": 0,
         "estimated_cost": None, "weekly_budget": weekly_budget,
         "employee_approvals": {}, "admin_status": "pending", "admin_decided_by": None,
@@ -2864,7 +2907,8 @@ async def schedule_generate(payload: ScheduleGenIn, principal: dict = Depends(ge
                     f"Génération IA demandée pour la semaine du {payload.week_start}"
                     f"{f' (budget {weekly_budget:.2f} $)' if weekly_budget > 0 else ''}", pid)
     asyncio.create_task(generate_schedule_content(doc["id"], pid, payload.week_start, payload.instructions,
-                                                  roster, profiles, absences, weekly_budget))
+                                                  roster, profiles, absences, weekly_budget,
+                                                  existing, existing_mode))
     return proposal_view(doc)
 
 

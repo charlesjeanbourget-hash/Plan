@@ -88,6 +88,7 @@ export interface Shift {
   resourceIds?: string[];
   aiGenerated?: boolean;
   proposalId?: string;
+  department?: string;
 }
 
 export type ResourceType = 'lieu' | 'equipement';
@@ -583,6 +584,8 @@ export interface ScheduleProposal {
   warnings_count?: number;
   estimated_cost?: number | null;
   weekly_budget?: number | null;
+  department?: string;
+  existing_mode?: string;
   employee_approvals: Record<string, ApprovalSlot>;
   admin_status: 'pending' | 'approved' | 'rejected';
   approval_deadline: string;

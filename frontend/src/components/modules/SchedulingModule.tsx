@@ -18,6 +18,7 @@ import { BudgetActualCard } from '@/components/BudgetActualCard';
 import { ReadReceiptsDialog } from '@/components/ReadReceiptsDialog';
 import { downloadSchedulePdf } from '@/lib/schedulePdf';
 import { hoursBetween } from '@/lib/schedule';
+import { DEPARTMENTS } from '@/lib/pharmacy';
 import { toast } from 'sonner';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -70,6 +71,8 @@ export default function SchedulingModule(): JSX.Element {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [employeeId, setEmployeeId] = useState(state.employees[0]?.id ?? '');
   const [date, setDate] = useState(iso(new Date()));
+  const [department, setDepartment] = useState('Général');
+  const [deptFilter, setDeptFilter] = useState('all');
   const [startTime, setStartTime] = useState('09:00');
   const [endTime, setEndTime] = useState('17:00');
   const [replacements, setReplacements] = useState<ReplacementRequestDoc[]>([]);
@@ -105,8 +108,11 @@ export default function SchedulingModule(): JSX.Element {
   const quickAdd = (empId: string, d: string): void => {
     setEmployeeId(empId);
     setDate(d);
+    if (deptFilter !== 'all') setDepartment(deptFilter);
     setDialogOpen(true);
   };
+
+  const visibleShifts = state.shifts.filter((s) => deptFilter === 'all' || (s.department || 'Général') === deptFilter);
 
   const [viewMode, setViewMode] = useState<'week' | 'month'>('week');
   const [monthAnchor, setMonthAnchor] = useState(() => {
@@ -194,8 +200,8 @@ export default function SchedulingModule(): JSX.Element {
   const handleAdd = (e: FormEvent<HTMLFormElement>): void => {
     e.preventDefault();
     if (!employeeId) return;
-    addShift({ employeeId, date, startTime, endTime, resourceIds: selectedResources });
-    toast.success('Quart de travail ajouté à l\'horaire.');
+    addShift({ employeeId, date, startTime, endTime, resourceIds: selectedResources, department });
+    toast.success(`Quart de travail ajouté au calendrier « ${department} ».`);
     setSelectedResources([]);
     setDialogOpen(false);
   };
@@ -213,7 +219,7 @@ export default function SchedulingModule(): JSX.Element {
     const emp = getEmployee(empId);
     const empName = emp ? `${emp.firstName} ${emp.lastName}` : 'l\'employé';
     if (copy) {
-      addShift({ employeeId: empId, date: d, startTime: shift.startTime, endTime: shift.endTime, resourceIds: [...(shift.resourceIds ?? [])] });
+      addShift({ employeeId: empId, date: d, startTime: shift.startTime, endTime: shift.endTime, resourceIds: [...(shift.resourceIds ?? [])], department: shift.department });
       toast.success(`Quart ${shift.startTime}–${shift.endTime} dupliqué pour ${empName} le ${d}.`);
       return;
     }
@@ -440,7 +446,16 @@ export default function SchedulingModule(): JSX.Element {
             <Hand className="w-3.5 h-3.5" /> Glissez-déposez ou cliquez un quart puis sa nouvelle case · <kbd className="px-1 py-0.5 rounded border border-slate-300 bg-slate-50 text-[10px] font-semibold text-slate-600">Alt</kbd>+glisser pour dupliquer
           </span>
         )}
-        <div className="ml-auto w-full sm:w-auto">
+        <div className="ml-auto flex w-full sm:w-auto flex-wrap gap-2">
+          <Select value={deptFilter} onValueChange={setDeptFilter}>
+            <SelectTrigger data-testid="calendar-dept-filter" className="w-full sm:w-52">
+              <SelectValue placeholder="Tous les calendriers" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Tous les calendriers</SelectItem>
+              {DEPARTMENTS.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+            </SelectContent>
+          </Select>
           <Select value={branchFilter} onValueChange={setBranchFilter}>
             <SelectTrigger data-testid="scheduling-branch-filter" className="w-full sm:w-56">
               <SelectValue placeholder="Toutes les succursales" />
@@ -491,7 +506,7 @@ export default function SchedulingModule(): JSX.Element {
           </thead>
           <tbody>
             {state.employees.filter((e) => branchFilter === 'all' || e.branchId === branchFilter).map((emp) => {
-              const rowHours = state.shifts
+              const rowHours = visibleShifts
                 .filter((s) => s.employeeId === emp.id && s.date >= days[0] && s.date <= days[6])
                 .reduce((sum, s) => sum + hoursBetween(s.startTime, s.endTime), 0);
               const rate = rates[emp.id] ?? 0;
@@ -509,7 +524,7 @@ export default function SchedulingModule(): JSX.Element {
                   </div>
                 </td>
                 {days.map((d) => {
-                  const shifts = state.shifts.filter((s) => s.employeeId === emp.id && s.date === d);
+                  const shifts = visibleShifts.filter((s) => s.employeeId === emp.id && s.date === d);
                   const appts = appointments.filter((a) => a.employee_id === emp.id && a.date === d);
                   const cellKey = `${emp.id}|${d}`;
                   return (
@@ -549,7 +564,12 @@ export default function SchedulingModule(): JSX.Element {
                               </span>
                             )}
                           </div>
-                          <p className="text-[10px] text-slate-500 mt-0.5">{fmtHours(hoursBetween(s.startTime, s.endTime))}</p>
+                          <p className="text-[10px] text-slate-500 mt-0.5">
+                            {fmtHours(hoursBetween(s.startTime, s.endTime))}
+                            {deptFilter === 'all' && s.department && s.department !== 'Général' && (
+                              <span data-testid={`shift-dept-${s.id}`} className="ml-1.5 inline-flex items-center rounded bg-slate-100 border border-slate-200 text-slate-500 px-1 py-px text-[9px] font-semibold">{s.department}</span>
+                            )}
+                          </p>
                           {(s.resourceIds ?? []).length > 0 && (
                             <span className="mt-1 flex flex-wrap gap-1">
                               {(s.resourceIds ?? []).map((rid) => {
@@ -657,7 +677,7 @@ export default function SchedulingModule(): JSX.Element {
               <td className="px-5 py-3 border-r border-slate-200 text-[11px] uppercase tracking-[0.18em] text-slate-400 font-semibold">Totaux</td>
               {days.map((d) => {
                 const filteredIds = new Set(state.employees.filter((e) => branchFilter === 'all' || e.branchId === branchFilter).map((e) => e.id));
-                const dh = state.shifts
+                const dh = visibleShifts
                   .filter((s) => s.date === d && filteredIds.has(s.employeeId))
                   .reduce((sum, s) => sum + hoursBetween(s.startTime, s.endTime), 0)
                   + weekAgencySlots.filter((s) => s.date === d).reduce((sum, s) => sum + hoursBetween(s.start, s.end), 0);
@@ -672,7 +692,7 @@ export default function SchedulingModule(): JSX.Element {
                 let gh = 0;
                 let gc = 0;
                 filtered.forEach((e) => {
-                  const h = state.shifts
+                  const h = visibleShifts
                     .filter((s) => s.employeeId === e.id && s.date >= days[0] && s.date <= days[6])
                     .reduce((sum, s) => sum + hoursBetween(s.startTime, s.endTime), 0);
                   gh += h;
@@ -710,7 +730,7 @@ export default function SchedulingModule(): JSX.Element {
             {monthGridDays(monthAnchor).map((d) => {
               const inMonth = Number(d.slice(5, 7)) === monthAnchor.getMonth() + 1;
               const filteredIds = new Set(state.employees.filter((e) => branchFilter === 'all' || e.branchId === branchFilter).map((e) => e.id));
-              const dayShifts = state.shifts
+              const dayShifts = visibleShifts
                 .filter((s) => s.date === d && filteredIds.has(s.employeeId))
                 .sort((a, b) => a.startTime.localeCompare(b.startTime));
               return (
@@ -797,6 +817,15 @@ export default function SchedulingModule(): JSX.Element {
             <div className="space-y-2">
               <Label>Date</Label>
               <Input data-testid="shift-date-input" type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
+            </div>
+            <div className="space-y-2">
+              <Label>Calendrier (département)</Label>
+              <Select value={department} onValueChange={setDepartment}>
+                <SelectTrigger data-testid="shift-dept-select"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {DEPARTMENTS.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
