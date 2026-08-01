@@ -37,6 +37,7 @@ export const ForcePasswordChangeDialog = (): JSX.Element => {
       <DialogContent
         data-testid="force-password-dialog"
         className="max-w-md [&>button]:hidden"
+        aria-describedby={undefined}
       >
         <DialogHeader>
           <DialogTitle className="font-heading inline-flex items-center gap-2">

@@ -225,6 +225,21 @@ admin@luminahr.ca/admin123 · julie@luminahr.ca/employe123 · super@luminahr.ca/
 ## Itération 28 (31 juillet 2026) — Duplication de quart par Alt + glisser-déposer — testée E2E (Playwright : Alt+drag 4→5 quarts avec toast « dupliqué », drag simple = déplacement)
 - SchedulingModule : handleDrop(empId, date, copy) — copy=e.altKey au drop. Alt maintenu → addShift (copie avec resourceIds clonés), sinon updateShift (déplacement). dropEffect 'copy'/'move' selon Alt, effectAllowed 'copyMove'. Indice mis à jour : « … maintenez Alt pour le dupliquer » (kbd stylisé).
 
+## Itération 29 (1 août 2026) — DURCISSEMENT SÉCURITÉ & Loi 25 (audit → 9 correctifs) — testée (testing_agent iteration_26.json : backend 12/12, frontend 100 % flux critiques, 0 bug bloquant)
+Suite à un audit de sécurité (verdict initial : NE PAS LANCER). Tous les correctifs implémentés et vérifiés :
+1. **Mots de passe faibles éliminés** : admin123/employe123 etc. remplacés par des mots de passe forts (voir test_credentials.md). Plus AUCUN mot de passe dans le code — seed via SEED_DEFAULT_PASSWORD (backend/.env) + is_temporary_password=true.
+2. **Changement de mot de passe FORCÉ** : get_current_user bloque tout endpoint sauf /auth/me et /auth/change-password (403 + header X-Password-Change-Required) tant que is_temporary_password. Frontend : `ForcePasswordChangeDialog.tsx` bloquant (pas de X, aria-describedby suppr.) rendu dans App.tsx si currentUser.isTemporaryPassword.
+3. **Politique mots de passe forts** : validate_password_strength (≥10 car, majuscule, minuscule, chiffre) + différent de l'actuel.
+4. **JWT 24h** (était 7 jours).
+5. **Verrou NIP anti-contournement** : punch_throttle_check et demo throttle utilisent le DERNIER élément de X-Forwarded-For (IP réelle injectée par l'ingress, non spoofable). Preview NIP retourne le nom abrégé « Julie G. ».
+6. **/api/chat authentifié** (Bearer requis, 401 sinon) + limite 30 msg/h/utilisateur (CHAT_RATE). ChatWidget.tsx envoie Authorization.
+7. **NIP de punch HACHÉS** : sha256+PUNCH_PEPPER (punch_code_hash), migration auto au démarrage (migrate_punch_codes), NIP Julie 7068 conservé. Réponses profils : punch_code_set (bool), jamais le code. NIP affiché UNE fois à la génération.
+8. **Certificats de licences CHIFFRÉS** : Fernet (LICENSE_ENCRYPTION_KEY), flag certificate_encrypted, déchiffrement au téléchargement (anciens fichiers non chiffrés toujours lisibles).
+9. **CORS restreint** : regex domaines emergentagent.com (ou CORS_ORIGINS si défini) au lieu de '*'.
++ **Page Politique de confidentialité Loi 25** (`PrivacyPolicy.tsx`, view 'privacy', footer-privacy-link) : 9 sections (responsable RPRP = Charles Jean-Bourget, renseignements recueillis, finalités, géoloc, conservation/destruction, sécurité, incidents/CAI, droits, cookies). Modèle à faire valider par un juriste.
+NOTE Loi 25 organisationnel (hors logiciel, à faire par le client) : registre des incidents, EFVP, consentement géoloc dans les contrats, désignation officielle du RPRP, calendrier de conservation.
+Reste FAIBLE non bloquant : /api/chat valide Pydantic avant auth (probe 422 vs 401, impact négligeable).
+
 ## Notes techniques
 - Ne jamais recréer `jsconfig.json` (conflit CRA avec tsconfig.json)
 - npm interdit — yarn uniquement
