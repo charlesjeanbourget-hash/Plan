@@ -2,14 +2,14 @@ import { useState, useEffect, useCallback, FormEvent } from 'react';
 import axios from 'axios';
 import { useHR } from '@/context/HRContext';
 import { useAuth } from '@/context/AuthContext';
-import { ReplacementRequestDoc, Appointment } from '@/types';
+import { ReplacementRequestDoc, Appointment, Shift } from '@/types';
 import { ModuleHeader } from '@/components/modules/shared';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ChevronLeft, ChevronRight, Plus, X, ArrowLeftRight, Check, Stethoscope, CopyPlus, LayoutTemplate, FileDown, Megaphone, Hourglass, BookOpenCheck, MapPin, Wrench, Hand, Sparkles } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, X, ArrowLeftRight, Check, Stethoscope, CopyPlus, LayoutTemplate, FileDown, Megaphone, Hourglass, BookOpenCheck, MapPin, Wrench, Hand, Sparkles, AlertTriangle } from 'lucide-react';
 import { ScheduleProposals } from '@/components/ScheduleProposals';
 import { AppointmentDialog } from '@/components/AppointmentDialog';
 import { DuplicateWeekDialog } from '@/components/DuplicateWeekDialog';
@@ -46,6 +46,20 @@ const fmtHours = (n: number): string => `${(Math.round(n * 10) / 10).toLocaleStr
 const fmtCad = (n: number): string => n.toLocaleString('fr-CA', { style: 'currency', currency: 'CAD', maximumFractionDigits: 0 });
 
 const dayDate = (d: string): string => new Date(`${d}T00:00:00`).toLocaleDateString('fr-CA', { day: '2-digit', month: 'short' });
+
+const monthLabel = (d: Date): string => d.toLocaleDateString('fr-CA', { month: 'long', year: 'numeric' });
+
+const monthGridDays = (anchor: Date): string[] => {
+  const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+  const start = new Date(first);
+  start.setDate(first.getDate() - ((first.getDay() + 6) % 7));
+  const last = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0);
+  const end = new Date(last);
+  end.setDate(last.getDate() + (6 - ((last.getDay() + 6) % 7)));
+  const out: string[] = [];
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) out.push(iso(d));
+  return out;
+};
 
 export default function SchedulingModule(): JSX.Element {
   const { state, addShift, deleteShift, updateShift, setShiftSwapStatus, getEmployee } = useHR();
@@ -92,6 +106,50 @@ export default function SchedulingModule(): JSX.Element {
     setEmployeeId(empId);
     setDate(d);
     setDialogOpen(true);
+  };
+
+  const [viewMode, setViewMode] = useState<'week' | 'month'>('week');
+  const [monthAnchor, setMonthAnchor] = useState(() => {
+    const t = new Date();
+    return new Date(t.getFullYear(), t.getMonth(), 1);
+  });
+  const [moveShiftId, setMoveShiftId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!moveShiftId) return undefined;
+    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') setMoveShiftId(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [moveShiftId]);
+
+  const conflictOf = (s: Shift): string | null => {
+    const overlap = state.shifts.some((x) => x.id !== s.id && x.employeeId === s.employeeId && x.date === s.date
+      && x.startTime < s.endTime && s.startTime < x.endTime);
+    if (overlap) return 'Conflit : chevauche un autre quart du même employé';
+    const leave = state.leaveRequests.find((l) => l.employeeId === s.employeeId && l.status === 'Approuvée'
+      && l.startDate <= s.date && s.date <= l.endDate);
+    if (leave) return `Conflit : absence approuvée (${leave.type}) du ${leave.startDate} au ${leave.endDate}`;
+    return null;
+  };
+
+  const moveTo = (empId: string | null, d: string): void => {
+    if (!moveShiftId) return;
+    const s = state.shifts.find((x) => x.id === moveShiftId);
+    setMoveShiftId(null);
+    if (!s) return;
+    if ((empId ?? s.employeeId) === s.employeeId && d === s.date) return;
+    updateShift(s.id, { ...(empId ? { employeeId: empId } : {}), date: d });
+    const emp = state.employees.find((e) => e.id === (empId ?? s.employeeId));
+    toast.success(`Quart ${s.startTime}–${s.endTime} déplacé${emp ? ` vers ${emp.firstName} ${emp.lastName}` : ''} le ${d}.`);
+  };
+
+  const selectForMove = (s: Shift, empId: string, d: string): void => {
+    if (!isAdmin) return;
+    if (moveShiftId && moveShiftId !== s.id) {
+      moveTo(empId, d);
+      return;
+    }
+    setMoveShiftId(moveShiftId === s.id ? null : s.id);
   };
 
   const weekStart = getWeekStart(weekOffset);
@@ -320,23 +378,60 @@ export default function SchedulingModule(): JSX.Element {
       )}
 
       <div className="flex flex-wrap items-center gap-3 mb-6">
-        <Button data-testid="week-prev-button" variant="outline" size="icon" className="rounded-full" onClick={() => setWeekOffset(weekOffset - 1)}>
-          <ChevronLeft className="w-4 h-4" />
-        </Button>
-        <p className="text-sm font-semibold text-slate-700" data-testid="week-range-label">
-          Semaine du {days[0]} au {days[6]}
-        </p>
-        <Button data-testid="week-next-button" variant="outline" size="icon" className="rounded-full" onClick={() => setWeekOffset(weekOffset + 1)}>
-          <ChevronRight className="w-4 h-4" />
-        </Button>
-        {weekOffset !== 0 && (
-          <button data-testid="week-today-button" onClick={() => setWeekOffset(0)} className="text-sm text-emerald-700 font-semibold hover:underline">
-            Cette semaine
+        <div className="inline-flex rounded-full border border-slate-200 bg-white p-0.5 shadow-sm" data-testid="view-mode-toggle">
+          <button
+            data-testid="view-week-button"
+            onClick={() => setViewMode('week')}
+            className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-colors ${viewMode === 'week' ? 'bg-emerald-600 text-white' : 'text-slate-500 hover:text-slate-800'}`}
+          >
+            Semaine
           </button>
+          <button
+            data-testid="view-month-button"
+            onClick={() => setViewMode('month')}
+            className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-colors ${viewMode === 'month' ? 'bg-emerald-600 text-white' : 'text-slate-500 hover:text-slate-800'}`}
+          >
+            Mois
+          </button>
+        </div>
+        {viewMode === 'week' ? (
+          <>
+            <Button data-testid="week-prev-button" variant="outline" size="icon" className="rounded-full" onClick={() => setWeekOffset(weekOffset - 1)}>
+              <ChevronLeft className="w-4 h-4" />
+            </Button>
+            <p className="text-sm font-semibold text-slate-700" data-testid="week-range-label">
+              Semaine du {days[0]} au {days[6]}
+            </p>
+            <Button data-testid="week-next-button" variant="outline" size="icon" className="rounded-full" onClick={() => setWeekOffset(weekOffset + 1)}>
+              <ChevronRight className="w-4 h-4" />
+            </Button>
+            {weekOffset !== 0 && (
+              <button data-testid="week-today-button" onClick={() => setWeekOffset(0)} className="text-sm text-emerald-700 font-semibold hover:underline">
+                Cette semaine
+              </button>
+            )}
+          </>
+        ) : (
+          <>
+            <Button data-testid="month-prev-button" variant="outline" size="icon" className="rounded-full" onClick={() => setMonthAnchor(new Date(monthAnchor.getFullYear(), monthAnchor.getMonth() - 1, 1))}>
+              <ChevronLeft className="w-4 h-4" />
+            </Button>
+            <p className="text-sm font-semibold text-slate-700 capitalize" data-testid="month-range-label">
+              {monthLabel(monthAnchor)}
+            </p>
+            <Button data-testid="month-next-button" variant="outline" size="icon" className="rounded-full" onClick={() => setMonthAnchor(new Date(monthAnchor.getFullYear(), monthAnchor.getMonth() + 1, 1))}>
+              <ChevronRight className="w-4 h-4" />
+            </Button>
+            {monthAnchor.getTime() !== new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime() && (
+              <button data-testid="month-today-button" onClick={() => { const t = new Date(); setMonthAnchor(new Date(t.getFullYear(), t.getMonth(), 1)); }} className="text-sm text-emerald-700 font-semibold hover:underline">
+                Ce mois-ci
+              </button>
+            )}
+          </>
         )}
         {isAdmin && (
           <span data-testid="dnd-hint" className="hidden lg:inline-flex items-center gap-1.5 text-xs text-slate-400">
-            <Hand className="w-3.5 h-3.5" /> Glissez-déposez un quart pour le déplacer · maintenez <kbd className="px-1 py-0.5 rounded border border-slate-300 bg-slate-50 text-[10px] font-semibold text-slate-600">Alt</kbd> pour le dupliquer
+            <Hand className="w-3.5 h-3.5" /> Glissez-déposez ou cliquez un quart puis sa nouvelle case · <kbd className="px-1 py-0.5 rounded border border-slate-300 bg-slate-50 text-[10px] font-semibold text-slate-600">Alt</kbd>+glisser pour dupliquer
           </span>
         )}
         <div className="ml-auto w-full sm:w-auto">
@@ -352,6 +447,16 @@ export default function SchedulingModule(): JSX.Element {
         </div>
       </div>
 
+      {moveShiftId && (
+        <div data-testid="move-mode-banner" className="mb-4 flex items-center gap-2 rounded-xl bg-bronze-50 border border-bronze-300 px-4 py-2.5 text-sm text-bronze-900">
+          <Hand className="w-4 h-4 shrink-0" />
+          <span>Mode déplacement : cliquez sur la case (ou le jour) où déplacer le quart sélectionné.</span>
+          <button data-testid="move-cancel-button" onClick={() => setMoveShiftId(null)} className="ml-auto text-xs font-semibold underline shrink-0">
+            Annuler (Échap)
+          </button>
+        </div>
+      )}
+
       <div className="hidden sm:flex flex-wrap items-center gap-4 mb-3 text-xs text-slate-500" data-testid="schedule-legend">
         <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> Matin</span>
         <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-sky-500" /> Après-midi</span>
@@ -360,8 +465,10 @@ export default function SchedulingModule(): JSX.Element {
           <span className="inline-flex items-center gap-0.5 rounded-full bg-violet-600 text-white text-[9px] font-bold px-1.5 py-px"><Sparkles className="w-2 h-2" /> IA</span>
           généré par l'IA
         </span>
+        <span className="inline-flex items-center gap-1.5"><AlertTriangle className="w-3 h-3 text-red-500" /> Conflit (double quart ou absence approuvée)</span>
       </div>
 
+      {viewMode === 'week' && (
       <div className="overflow-x-auto bg-white rounded-2xl border border-slate-200 shadow-sm">
         <table className="w-full text-sm border-collapse min-w-[1100px]">
           <thead>
@@ -406,11 +513,13 @@ export default function SchedulingModule(): JSX.Element {
                       onDragOver={(e) => { if (isAdmin && dragShiftId) { e.preventDefault(); e.dataTransfer.dropEffect = e.altKey ? 'copy' : 'move'; setDropTarget(cellKey); } }}
                       onDragLeave={() => setDropTarget((t) => (t === cellKey ? null : t))}
                       onDrop={(e) => { e.preventDefault(); handleDrop(emp.id, d, e.altKey); }}
-                      className={`group/cell p-2 border-b border-r border-slate-200 align-top transition-colors ${d === today ? 'bg-emerald-50/40' : ''} ${dropTarget === cellKey && dragShiftId ? 'bg-bronze-50 ring-2 ring-inset ring-bronze-400' : ''}`}
+                      onClick={() => { if (isAdmin && moveShiftId) moveTo(emp.id, d); }}
+                      className={`group/cell p-2 border-b border-r border-slate-200 align-top transition-colors ${d === today ? 'bg-emerald-50/40' : ''} ${dropTarget === cellKey && dragShiftId ? 'bg-bronze-50 ring-2 ring-inset ring-bronze-400' : ''} ${moveShiftId ? 'cursor-pointer hover:bg-bronze-50/60' : ''}`}
                     >
                       <div className="min-h-[76px] space-y-1.5">
                       {shifts.map((s) => {
                         const part = dayPart(s.startTime);
+                        const conflict = conflictOf(s);
                         return (
                         <div
                           key={s.id}
@@ -418,11 +527,16 @@ export default function SchedulingModule(): JSX.Element {
                           draggable={isAdmin}
                           onDragStart={(e) => { setDragShiftId(s.id); e.dataTransfer.effectAllowed = 'copyMove'; }}
                           onDragEnd={() => { setDragShiftId(null); setDropTarget(null); }}
-                          className={`group relative overflow-hidden rounded-lg border border-slate-200/80 ${part.bg} pl-3.5 pr-2 py-2 shadow-sm transition-shadow hover:shadow-md ${isAdmin ? 'cursor-grab active:cursor-grabbing' : ''} ${dragShiftId === s.id ? 'opacity-40' : ''}`}
+                          onClick={(e) => { e.stopPropagation(); selectForMove(s, emp.id, d); }}
+                          title={conflict ?? (isAdmin ? 'Cliquez pour sélectionner, puis cliquez sur la case de destination' : undefined)}
+                          className={`group relative overflow-hidden rounded-lg border ${conflict ? 'border-red-300' : 'border-slate-200/80'} ${part.bg} pl-3.5 pr-2 py-2 shadow-sm transition-shadow hover:shadow-md ${isAdmin ? 'cursor-grab active:cursor-grabbing' : ''} ${dragShiftId === s.id ? 'opacity-40' : ''} ${moveShiftId === s.id ? 'ring-2 ring-bronze-500 shadow-md' : conflict ? 'ring-2 ring-red-400' : ''}`}
                         >
-                          <span className={`absolute inset-y-0 left-0 w-1.5 ${part.bar}`} />
+                          <span className={`absolute inset-y-0 left-0 w-1.5 ${conflict ? 'bg-red-500' : part.bar}`} />
                           <div className="flex items-center justify-between gap-1.5">
-                            <p className="text-xs font-bold text-slate-900 whitespace-nowrap">{s.startTime}–{s.endTime}</p>
+                            <p className="text-xs font-bold text-slate-900 whitespace-nowrap flex items-center gap-1">
+                              {conflict && <AlertTriangle data-testid={`shift-conflict-${s.id}`} className="w-3 h-3 text-red-600 shrink-0" />}
+                              {s.startTime}–{s.endTime}
+                            </p>
                             {s.aiGenerated && (
                               <span data-testid={`ai-shift-badge-${s.id}`} className="inline-flex items-center gap-0.5 rounded-full bg-violet-600 text-white text-[8px] font-bold px-1.5 py-px shrink-0" title="Quart généré par l'IA">
                                 <Sparkles className="w-2 h-2" /> IA
@@ -447,7 +561,7 @@ export default function SchedulingModule(): JSX.Element {
                           {isAdmin && (
                             <button
                               data-testid={`delete-shift-${s.id}`}
-                              onClick={() => { deleteShift(s.id); toast.success('Quart supprimé.'); }}
+                              onClick={(e) => { e.stopPropagation(); deleteShift(s.id); toast.success('Quart supprimé.'); }}
                               className="absolute bottom-1 right-1 w-5 h-5 rounded-full text-slate-300 hover:text-red-600 hover:bg-red-100 flex md:hidden md:group-hover:flex items-center justify-center transition-colors"
                             >
                               <X className="w-3 h-3" />
@@ -480,7 +594,7 @@ export default function SchedulingModule(): JSX.Element {
                       {isAdmin && (
                         <button
                           data-testid={`quick-add-${emp.id}-${d}`}
-                          onClick={() => quickAdd(emp.id, d)}
+                          onClick={(e) => { e.stopPropagation(); if (moveShiftId) moveTo(emp.id, d); else quickAdd(emp.id, d); }}
                           title="Ajouter un quart"
                           className="w-full rounded-lg border border-dashed border-slate-200 text-slate-300 hover:text-emerald-600 hover:border-emerald-300 hover:bg-emerald-50/60 py-1 flex items-center justify-center opacity-0 group-hover/cell:opacity-100 focus:opacity-100 transition-opacity"
                         >
@@ -570,6 +684,82 @@ export default function SchedulingModule(): JSX.Element {
           </tbody>
         </table>
       </div>
+      )}
+
+      {viewMode === 'month' && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden" data-testid="month-grid">
+          <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50/80">
+            {FULL_DAYS.map((n) => (
+              <div key={n} className="px-2 py-2.5 text-center text-[11px] uppercase tracking-wider text-slate-400 font-semibold">
+                <span className="hidden md:inline">{n}</span>
+                <span className="md:hidden">{n.slice(0, 3)}</span>
+              </div>
+            ))}
+          </div>
+          <div className="grid grid-cols-7">
+            {monthGridDays(monthAnchor).map((d) => {
+              const inMonth = Number(d.slice(5, 7)) === monthAnchor.getMonth() + 1;
+              const filteredIds = new Set(state.employees.filter((e) => branchFilter === 'all' || e.branchId === branchFilter).map((e) => e.id));
+              const dayShifts = state.shifts
+                .filter((s) => s.date === d && filteredIds.has(s.employeeId))
+                .sort((a, b) => a.startTime.localeCompare(b.startTime));
+              return (
+                <div
+                  key={d}
+                  data-testid={`month-cell-${d}`}
+                  onClick={() => { if (isAdmin && moveShiftId) moveTo(null, d); }}
+                  className={`group/mcell min-h-[110px] border-b border-r border-slate-100 p-1.5 align-top ${inMonth ? '' : 'bg-slate-50/70'} ${d === today ? 'bg-emerald-50/50' : ''} ${moveShiftId ? 'cursor-pointer hover:bg-bronze-50/70' : ''}`}
+                >
+                  <div className="flex items-center justify-between px-0.5">
+                    <span className={`text-xs font-semibold ${d === today ? 'inline-flex w-6 h-6 items-center justify-center rounded-full bg-emerald-600 text-white' : inMonth ? 'text-slate-700' : 'text-slate-300'}`}>
+                      {Number(d.slice(8, 10))}
+                    </span>
+                    {isAdmin && !moveShiftId && (
+                      <button
+                        data-testid={`month-add-${d}`}
+                        onClick={(e) => { e.stopPropagation(); setDate(d); setDialogOpen(true); }}
+                        title="Ajouter un quart"
+                        className="text-slate-300 hover:text-emerald-600 opacity-0 group-hover/mcell:opacity-100 transition-opacity"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  <div className="mt-1 space-y-1">
+                    {dayShifts.slice(0, 4).map((s) => {
+                      const emp = state.employees.find((e) => e.id === s.employeeId);
+                      const conflict = conflictOf(s);
+                      const part = dayPart(s.startTime);
+                      return (
+                        <button
+                          key={s.id}
+                          data-testid={`month-shift-${s.id}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (!isAdmin) return;
+                            if (moveShiftId && moveShiftId !== s.id) { moveTo(null, d); return; }
+                            setMoveShiftId(moveShiftId === s.id ? null : s.id);
+                          }}
+                          title={`${emp ? `${emp.firstName} ${emp.lastName}` : '?'} · ${s.startTime}–${s.endTime}${conflict ? ` — ${conflict}` : ''}${isAdmin ? ' · Cliquez pour déplacer' : ''}`}
+                          className={`w-full flex items-center gap-1 rounded px-1 py-0.5 text-left text-[10px] font-semibold border ${conflict ? 'border-red-300 bg-red-50 text-red-800' : `border-slate-200/70 ${part.bg} text-slate-700`} ${moveShiftId === s.id ? 'ring-2 ring-bronze-500' : conflict ? 'ring-1 ring-red-400' : ''}`}
+                        >
+                          <span className={`w-1.5 h-1.5 rounded-full ${emp?.avatarColor ?? 'bg-slate-400'} shrink-0`} />
+                          <span className="truncate">{s.startTime} {emp?.firstName ?? '?'}</span>
+                          {s.aiGenerated && <Sparkles className="w-2.5 h-2.5 text-violet-600 shrink-0" />}
+                          {conflict && <AlertTriangle data-testid={`month-conflict-${s.id}`} className="w-2.5 h-2.5 text-red-600 shrink-0" />}
+                        </button>
+                      );
+                    })}
+                    {dayShifts.length > 4 && (
+                      <p className="text-[10px] text-slate-400 px-1">+{dayShifts.length - 4} autres</p>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <AppointmentDialog open={apptOpen} onOpenChange={setApptOpen} onCreated={() => void refreshAppointments()} />
       {isAdmin && <DuplicateWeekDialog open={dupOpen} onClose={() => setDupOpen(false)} days={days} />}
