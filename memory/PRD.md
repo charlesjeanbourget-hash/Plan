@@ -305,6 +305,14 @@ Question utilisateur : « l'IA prend-elle en considération les remplaçants d'a
 - Données démo conservées : remplaçant Marc Tremblay (PharmaStaff, sam 2026-08-01 10h-16h, 55 $/h) + périodes « Été (15/6→5/9, 30/35/10) » et « Fêtes (15/12→5/1, 45/35/10) ».
 - Testé : PUT/GET périodes ✓, 400 invalide ✓, préservation sans champ ✓, auto-application Été pour semaine d'août (Lun-Matin=30) ✓, enregistrement UI « Fêtes » ✓, totaux agence calendrier ✓.
 
+## Itération 39 (1 août 2026) — Catalogue exhaustif de tâches (Commerce + Laboratoire) associé aux compétences — testée (curl 3 cas + UI Playwright)
+1. **Catalogue** `/app/frontend/src/lib/taskCatalog.ts` : 71 tâches réelles de pharmacie — Commerce 28 (Ouverture & caisse, Service à la clientèle, Marchandisage, Réception & inventaire, Cosmétiques, Entretien & sécurité) + Laboratoire 43 (Ouverture labo, Préparation des ordonnances, Vérification & actes du pharmacien, Narcotiques, Magistrales, Services cliniques, Facturation & administratif, Livraisons, Fermeture labo). Chaque tâche porte {title, description, competences[]} alignées sur le vocabulaire PHARMACY_TASKS des profils.
+2. **Vocabulaire compétences étendu** (lib/pharmacy.ts PHARMACY_TASKS +6) : Service à la clientèle, Gestion de la loterie, Ensacheuse automatisée, Prise de tension artérielle et suivis cliniques, Numérisation et classement des ordonnances, Préparation des livraisons — apparaissent automatiquement comme chips dans l'éditeur de profil.
+3. **Dialogue Nouvelle tâche** (TasksModule) : sélecteurs task-domain-select (Manuelle/Commerce/Laboratoire) + task-catalog-select (groupé par section) → remplit titre+description+compétences ; chips violettes « Compétences associées » (task-competences) ; le select Assignée à affiche « ✓ qualifié(e) » ou « ⚠ hors compétences » selon les capacités du profil ; saisie manuelle du titre efface la sélection catalogue ; POST /tasks envoie competences[].
+4. **Backend** : ShiftTaskIn.competences (max 10, stockées sur le doc) ; qualification_warning = capacités non vides ET aucune compétence ne matche (sinon fallback mots du titre). Testé curl : tâche pharmacien→Julie ATP warning=True ✓, →Sophie warning=False ✓, tâche caisse→Julie False ✓.
+5. **Modèles (bulk)** : 2 nouveaux modèles « Commerce (complet) » (28 tâches, icône Store) et « Laboratoire (complet) » (43 tâches, FlaskConical) générés depuis le catalogue — ajout en un clic sur la semaine.
+6. **Profils enrichis** (Mongo employee_profiles) : Sophie e1 = 12 compétences pharmacien (validation, conseils, vaccination, narcotiques, magistrales…) ; Julie e2 = 12 compétences ATP/commerce (piluliers, comptoir, facturation, réception, caisse…). Karim e3 anonymisé = sans capacités (aucun badge).
+
 ## Notes techniques
 - Ne jamais recréer `jsconfig.json` (conflit CRA avec tsconfig.json)
 - npm interdit — yarn uniquement

@@ -13,7 +13,8 @@ import { Progress } from '@/components/ui/progress';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { TASK_CATALOG } from '@/lib/taskCatalog';
 import { Plus, ChevronLeft, ChevronRight, Trash2, CopyPlus, Sunrise, Sun, Moon, Repeat, LayoutTemplate, BarChart3, CalendarDays, AlertTriangle, LucideIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { consumeNavPayload } from '@/lib/nav';
@@ -84,6 +85,26 @@ export default function TasksModule(): JSX.Element {
   const [tDescription, setTDescription] = useState('');
   const [tAssignee, setTAssignee] = useState('team');
   const [tRecurring, setTRecurring] = useState(false);
+  const [tDomain, setTDomain] = useState('manuel');
+  const [tCatalog, setTCatalog] = useState('');
+  const [tCompetences, setTCompetences] = useState<string[]>([]);
+
+  const pickCatalogTask = (title: string): void => {
+    const domain = TASK_CATALOG.find((d) => d.key === tDomain);
+    const task = domain?.sections.flatMap((s) => s.tasks).find((t) => t.title === title);
+    if (!task) return;
+    setTCatalog(title);
+    setTTitle(task.title);
+    setTDescription(task.description);
+    setTCompetences(task.competences);
+  };
+
+  const matchesCompetences = (empId: string): boolean => {
+    const c = caps[empId] ?? [];
+    if (c.length === 0) return true;
+    if (tCompetences.length > 0) return tCompetences.some((k) => isQualified(k, c));
+    return isQualified(tTitle, c);
+  };
 
   const monday = mondayOf(weekOffset);
   const days = Array.from({ length: 7 }, (_, i) => {
@@ -171,6 +192,9 @@ export default function TasksModule(): JSX.Element {
     setTDescription('');
     setTAssignee('team');
     setTRecurring(false);
+    setTDomain('manuel');
+    setTCatalog('');
+    setTCompetences([]);
     setCreateOpen(true);
   };
 
@@ -186,6 +210,7 @@ export default function TasksModule(): JSX.Element {
         assignee_employee_id: emp ? emp.id : '',
         assignee_name: emp ? `${emp.firstName} ${emp.lastName}` : '',
         recurring: tRecurring,
+        competences: tCompetences,
       }, { headers });
       toast.success(tRecurring ? 'Tâche ajoutée — elle reviendra automatiquement chaque semaine.' : 'Tâche ajoutée au quart.');
       if (res.data.qualification_warning && emp) {
@@ -199,7 +224,7 @@ export default function TasksModule(): JSX.Element {
   };
 
   const createQualifWarning = tAssignee !== 'team' && tTitle.trim().length > 0
-    && (caps[tAssignee] ?? []).length > 0 && !isQualified(tTitle, caps[tAssignee] ?? []);
+    && (caps[tAssignee] ?? []).length > 0 && !matchesCompetences(tAssignee);
 
   const fmtDay = (dateIso: string, i: number): string =>
     `${DAY_LABELS[i]} ${dateIso.slice(8, 10)}/${dateIso.slice(5, 7)}`;
@@ -375,8 +400,41 @@ export default function TasksModule(): JSX.Element {
               </div>
             </div>
             <div className="space-y-2">
+              <Label>Catalogue de tâches (Commerce & Laboratoire)</Label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <Select value={tDomain} onValueChange={(v) => { setTDomain(v); setTCatalog(''); }}>
+                  <SelectTrigger data-testid="task-domain-select"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="manuel">Tâche manuelle (saisie libre)</SelectItem>
+                    {TASK_CATALOG.map((d) => <SelectItem key={d.key} value={d.key}>{d.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                {tDomain !== 'manuel' && (
+                  <Select value={tCatalog} onValueChange={pickCatalogTask}>
+                    <SelectTrigger data-testid="task-catalog-select"><SelectValue placeholder="Choisir une tâche…" /></SelectTrigger>
+                    <SelectContent className="max-h-72">
+                      {TASK_CATALOG.find((d) => d.key === tDomain)?.sections.map((sec) => (
+                        <SelectGroup key={sec.key}>
+                          <SelectLabel className="text-bronze-700">{sec.label}</SelectLabel>
+                          {sec.tasks.map((t) => <SelectItem key={t.title} value={t.title}>{t.title}</SelectItem>)}
+                        </SelectGroup>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+            </div>
+            <div className="space-y-2">
               <Label>Tâche</Label>
-              <Input data-testid="task-title-input" value={tTitle} onChange={(e) => setTTitle(e.target.value)} placeholder="Ex. Vérifier les frigos et noter les températures" required />
+              <Input data-testid="task-title-input" value={tTitle} onChange={(e) => { setTTitle(e.target.value); if (tCatalog && e.target.value !== tCatalog) { setTCatalog(''); setTCompetences([]); } }} placeholder="Ex. Vérifier les frigos et noter les températures" required />
+              {tCompetences.length > 0 && (
+                <div data-testid="task-competences" className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[11px] text-slate-400">Compétences associées :</span>
+                  {tCompetences.map((c) => (
+                    <span key={c} className="text-[10px] font-semibold bg-violet-50 text-violet-700 border border-violet-200 rounded-full px-2 py-0.5">{c}</span>
+                  ))}
+                </div>
+              )}
             </div>
             <div className="space-y-2">
               <Label>Précisions (facultatif)</Label>
@@ -388,9 +446,16 @@ export default function TasksModule(): JSX.Element {
                 <SelectTrigger data-testid="task-assignee-select"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="team">Toute l'équipe</SelectItem>
-                  {state.employees.map((emp) => (
-                    <SelectItem key={emp.id} value={emp.id}>{emp.firstName} {emp.lastName} — {emp.position}</SelectItem>
-                  ))}
+                  {state.employees.map((emp) => {
+                    const c = caps[emp.id] ?? [];
+                    const known = c.length > 0 && (tCompetences.length > 0 || tTitle.trim().length > 0);
+                    const ok = known && matchesCompetences(emp.id);
+                    return (
+                      <SelectItem key={emp.id} value={emp.id}>
+                        {emp.firstName} {emp.lastName} — {emp.position}{known ? (ok ? ' · ✓ qualifié(e)' : ' · ⚠ hors compétences') : ''}
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
               {createQualifWarning && (

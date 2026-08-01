@@ -7,8 +7,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Sunrise, Moon, ClipboardList, Plus, Repeat, LucideIcon } from 'lucide-react';
+import { Sunrise, Moon, ClipboardList, Plus, Repeat, LucideIcon, Store, FlaskConical } from 'lucide-react';
 import { toast } from 'sonner';
+import { catalogDomainItems } from '@/lib/taskCatalog';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -60,6 +61,14 @@ const TEMPLATES: Template[] = [
       { title: 'Placer la commande reçue et faire la rotation des tablettes', description: '' },
       { title: 'Signaler les ruptures de stock au pharmacien', description: '' },
     ],
+  },
+  {
+    key: 'commerce', label: 'Commerce (complet)', shift: 'Matin', icon: Store,
+    items: catalogDomainItems('commerce').map((t) => ({ title: t.title, description: t.description })),
+  },
+  {
+    key: 'labo', label: 'Laboratoire (complet)', shift: 'Matin', icon: FlaskConical,
+    items: catalogDomainItems('labo').map((t) => ({ title: t.title, description: t.description })),
   },
 ];
 

@@ -3245,6 +3245,7 @@ class ShiftTaskIn(BaseModel):
     assignee_employee_id: str = ""
     assignee_name: str = ""
     recurring: bool = False
+    competences: list[str] = []
 
 
 class TaskCopyWeekIn(BaseModel):
@@ -3269,10 +3270,15 @@ async def create_task(payload: ShiftTaskIn, principal: dict = Depends(get_princi
     if not payload.title.strip():
         raise HTTPException(status_code=400, detail="Le titre de la tâche est requis.")
     qualification_warning = False
+    competences = [str(c).strip() for c in (payload.competences or []) if str(c).strip()][:10]
     if payload.assignee_employee_id:
         prof = await get_or_create_profile(principal["pharmacy_id"] or "ph1",
                                            payload.assignee_employee_id, payload.assignee_name)
-        qualification_warning = not task_qualification_ok(payload.title, prof.get("capacities") or [])
+        caps = prof.get("capacities") or []
+        if competences:
+            qualification_warning = bool(caps) and not any(task_qualification_ok(c, caps) for c in competences)
+        else:
+            qualification_warning = not task_qualification_ok(payload.title, caps)
     task_id = str(uuid.uuid4())
     doc = {
         "id": task_id,
@@ -3285,6 +3291,7 @@ async def create_task(payload: ShiftTaskIn, principal: dict = Depends(get_princi
         "assignee_name": payload.assignee_name,
         "recurring": payload.recurring,
         "series_id": task_id if payload.recurring else "",
+        "competences": competences,
         "qualification_warning": qualification_warning,
         "done": False,
         "done_by": "",

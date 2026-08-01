@@ -54,6 +54,12 @@ export const PHARMACY_TASKS: string[] = [
   'Formation des nouveaux employés',
   'Suivi de la conformité (Loi 25, registres)',
   'Gestion des réseaux sociaux et promotions',
+  'Service à la clientèle',
+  'Gestion de la loterie',
+  'Ensacheuse automatisée',
+  'Prise de tension artérielle et suivis cliniques',
+  'Numérisation et classement des ordonnances',
+  'Préparation des livraisons',
 ];
 
 export const PHARMACY_RESTRICTIONS: string[] = [
