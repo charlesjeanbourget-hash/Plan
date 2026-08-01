@@ -4,7 +4,7 @@ import { useHR } from '@/context/HRContext';
 import { useAuth } from '@/context/AuthContext';
 import { ReplacementRequestDoc, Appointment, Shift } from '@/types';
 import { ModuleHeader } from '@/components/modules/shared';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -770,6 +770,7 @@ export default function SchedulingModule(): JSX.Element {
         <DialogContent data-testid="add-shift-dialog">
           <DialogHeader>
             <DialogTitle className="font-heading">Nouveau quart de travail</DialogTitle>
+            <DialogDescription>Choisissez l'employé, la date et les heures du quart.</DialogDescription>
           </DialogHeader>
           <form onSubmit={handleAdd} className="space-y-4">
             <div className="space-y-2">
