@@ -1,0 +1,38 @@
+{
+  "summary": "Iteration 34 — hourly_rate on ProfileIn + Edit dossier dialog + scheduling auto-heal. Backend pytest 6/6 PASS: admin can set 24.5 (persisted), 5000 → 400, -5 → 400, 0 accepted (setup for auto-heal), employee's rate change silently ignored (Julie e2 unchanged). Frontend Playwright: TEST 2 (edit-dossier for Karim e3) PASS — dialog prefills current values (rate=24, phone=514-555-0103), submit updates dossier UI to phone 514-555-9999, address '456 rue Test', emergency 'Marie Test', Taux horaire 27.25 $/h, and GET /api/profiles returns hourly_rate=27.25 for e3. TEST 3 (auto-heal + AI cost) PASS — after backend set e1.hourly_rate=0, opening Scheduling module auto-heals e1 to 62 (from local dossier), dept-totals-panel visible with real cost (Général 69 h — 2 866 $). TEST 4 (create employee 'Test Sync' rate 30) — profile IS created with hourly_rate=30 in Mongo (verified), BUT a DUPLICATE empty employee_profiles doc is inserted concurrently (race between EmployeeDossier.syncRateToProfile PUT and ProfileEditor's GET /profiles/{id}, both call get_or_create_profile with no uniqueness constraint on pharmacy_id+employee_id). TEST 5 (regression) PASS — Scheduling module + ProfileEditor still load. TEST 6 (cleanup) done in Mongo: Test Sync profiles removed, e2 (Julie) untouched at 25.9, e3 (Karim) = 27.25 as expected.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PUT /api/profiles/{id} + GET /api/profiles/{id}", "issue": "Race in get_or_create_profile: concurrent calls with a non-existent (pharmacy_id, employee_id) both find_one() → None then insert_one(), producing duplicate documents. Observed when EmployeeDossier fires syncRateToProfile (PUT) concurrently with ProfileEditor mount (GET) right after creating a new employee. Add a unique index on {pharmacy_id, employee_id} in db.employee_profiles and/or use upsert=True with $setOnInsert."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Nouvel employé synchronisation profil", "issue": "PUT profile completes but a second empty profile doc is created for the same employee_id (see backend minor). Impact: /api/profiles returns two entries for the new employee; downstream code that dedupes by employee_id can pick the empty one (hourly_rate missing).", "affected_selectors": ["employee-submit-button"]}
+    ],
+    "design_issues": [
+      {"screen": "Multiple dialogs", "issues": ["Console warnings 'Missing Description or aria-describedby={undefined} for {DialogContent}' on edit-employee-dialog and add-employee-dialog — add DialogDescription or aria-describedby={undefined}."]},
+      {"screen": "Dashboard BudgetHistoryChart", "issues": ["Persistent recharts 'width(-1) height(-1)' warnings on first render (already flagged iteration 33)."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration34.py",
+    "/app/test_reports/pytest/iter34.xml"
+  ],
+  "action_items": [
+    "Add unique index on employee_profiles {pharmacy_id, employee_id} OR change get_or_create_profile to use find_one_and_update(upsert=True) to eliminate duplicate profile creation on concurrent PUT/GET.",
+    "Cosmetic: add DialogDescription to edit-employee-dialog and add-employee-dialog to silence a11y console warnings."
+  ],
+  "critical_code_review_comments": [
+    "server.py get_or_create_profile is not atomic — under concurrent access, two callers can both create the same profile. Use upsert with $setOnInsert on {pharmacy_id, employee_id}, and add a unique compound index at startup."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration34.py"],
+  "success_rate": {"backend": "100%", "frontend": "90%"},
+  "seed_data_creation": "Backend test transiently set e1.hourly_rate=0 (then Scheduling auto-heal restored to 62). Karim e3 rate changed to 27.25 (per TEST 2/6 requirement — dossier value). Test Sync employee (id 95yhcj4omscg3kg3) removed from Mongo employee_profiles after tests.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "admin@luminahr.ca / Nlpx!tTE3Aw27 ; julie@luminahr.ca / O1ka!gfVV6e54",
+  "context_for_next_testing_agent": "The AI-generation bug (dossier rate absent in profile) is fixed end-to-end: (1) PUT /api/profiles accepts hourly_rate with 0-1000 range + role guard, (2) EmployeeDossier syncs on create/edit, (3) SchedulingModule auto-heals on load. Race condition creating duplicate employee_profiles is the only outstanding issue — main agent should add a unique index or refactor get_or_create_profile to upsert. Note: Julie e2 hourly_rate in Mongo is currently 25.9 (not 26.5 as credentials.md suggests) — leave as-is unless main agent updates elsewhere.",
+  "rca_of_the_issue": "Original bug: dossier stored hourlyRate in localStorage while AI generation + cost calc read employee_profiles.hourly_rate in Mongo — the two never synced. Fix verified: backend now accepts hourly_rate on PUT /api/profiles (admin/manager/superadmin only, 0-1000, silently ignored for employees); frontend syncs on employee create + edit + auto-heal on Scheduling module open. Verified via TEST 3: e1 profile set to 0 → opening Scheduling auto-healed to 62 → dept-totals shows real cost (2 866 $). Remaining race in get_or_create_profile creates duplicate rows in the specific create-then-view scenario (see backend minor)."
+}

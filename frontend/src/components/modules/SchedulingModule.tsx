@@ -108,6 +108,14 @@ export default function SchedulingModule(): JSX.Element {
           m[p.employee_id] = p.hourly_rate ?? 0;
           if (p.department) dd[p.employee_id] = p.department;
         });
+        state.employees.forEach((emp) => {
+          if ((m[emp.id] ?? 0) <= 0 && emp.hourlyRate > 0) {
+            m[emp.id] = emp.hourlyRate;
+            void axios.put(`${API}/profiles/${emp.id}`,
+              { hourly_rate: emp.hourlyRate, employee_name: `${emp.firstName} ${emp.lastName}` },
+              { headers: { Authorization: `Bearer ${token}` } }).catch(() => undefined);
+          }
+        });
         setRates(m);
         setDeptDefaults(dd);
       })

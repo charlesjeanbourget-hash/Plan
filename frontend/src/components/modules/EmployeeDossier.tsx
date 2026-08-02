@@ -8,13 +8,15 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, Mail, Phone, MapPin, Trash2, Hash, UserX } from 'lucide-react';
+import { Plus, Mail, Phone, MapPin, Trash2, Hash, UserX, Pencil } from 'lucide-react';
 import { ProfileEditor } from '@/components/ProfileEditor';
 import { SalaryHistory } from '@/components/SalaryHistory';
 import { PayrollNumbersDialog } from '@/components/PayrollNumbersDialog';
 import { useAuth } from '@/context/AuthContext';
 import axios from 'axios';
 import { toast } from 'sonner';
+
+const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 export default function EmployeeDossier(): JSX.Element {
   const { state, addEmployee, deleteEmployee, updateEmployee, anonymizeEmployee } = useHR();
@@ -32,8 +34,60 @@ export default function EmployeeDossier(): JSX.Element {
   const [hourlyRate, setHourlyRate] = useState('25');
   const [branchId, setBranchId] = useState(state.branches[0]?.id ?? '');
   const [payrollNumbersOpen, setPayrollNumbersOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editForm, setEditForm] = useState({
+    firstName: '', lastName: '', email: '', phone: '', address: '', emergencyContact: '',
+    position: 'ATP' as Position, branchId: '', hireDate: '', weeklyHours: '35', hourlyRate: '25',
+  });
 
   const selected: Employee | undefined = state.employees.find((e) => e.id === selectedId);
+
+  const syncRateToProfile = (employeeId: string, rate: number, name: string): void => {
+    void axios.put(`${API}/profiles/${employeeId}`,
+      { hourly_rate: rate, employee_name: name },
+      { headers: { Authorization: `Bearer ${token ?? ''}` } })
+      .catch(() => toast.error('Synchronisation du taux horaire avec le profil impossible — réessayez.'));
+  };
+
+  const openEdit = (): void => {
+    if (!selected) return;
+    setEditForm({
+      firstName: selected.firstName,
+      lastName: selected.lastName,
+      email: selected.email,
+      phone: selected.phone ?? '',
+      address: selected.address ?? '',
+      emergencyContact: selected.emergencyContact ?? '',
+      position: selected.position,
+      branchId: selected.branchId,
+      hireDate: selected.hireDate,
+      weeklyHours: String(selected.weeklyHours),
+      hourlyRate: String(selected.hourlyRate),
+    });
+    setEditOpen(true);
+  };
+
+  const handleEdit = (e: FormEvent<HTMLFormElement>): void => {
+    e.preventDefault();
+    if (!selected) return;
+    const rate = Math.max(0, Number(editForm.hourlyRate.replace(',', '.')) || 0);
+    updateEmployee(selected.id, {
+      firstName: editForm.firstName.trim(),
+      lastName: editForm.lastName.trim(),
+      email: editForm.email.trim(),
+      phone: editForm.phone.trim(),
+      address: editForm.address.trim(),
+      emergencyContact: editForm.emergencyContact.trim(),
+      position: editForm.position,
+      branchId: editForm.branchId,
+      hireDate: editForm.hireDate,
+      weeklyHours: Math.max(0, Number(editForm.weeklyHours) || 0),
+      hourlyRate: rate,
+    });
+    syncRateToProfile(selected.id, rate, `${editForm.firstName.trim()} ${editForm.lastName.trim()}`);
+    setEditOpen(false);
+    toast.success('Dossier mis à jour — taux horaire synchronisé pour la génération IA et les calculs de coûts.');
+  };
 
   const handleAdd = (e: FormEvent<HTMLFormElement>): void => {
     e.preventDefault();
@@ -48,6 +102,7 @@ export default function EmployeeDossier(): JSX.Element {
       emergencyContact: '',
       avatarColor: 'bg-violet-600',
     });
+    syncRateToProfile(emp.id, Number(hourlyRate) || 0, `${firstName} ${lastName}`);
     toast.success(`${firstName} ${lastName} ajouté(e) à l'équipe.`);
     setSelectedId(emp.id);
     setDialogOpen(false);
@@ -162,6 +217,14 @@ export default function EmployeeDossier(): JSX.Element {
                 ) : (
                   <>
                     <Button
+                      data-testid="edit-employee-button"
+                      variant="outline"
+                      className="rounded-full border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                      onClick={openEdit}
+                    >
+                      <Pencil className="w-4 h-4 mr-1" /> Modifier le dossier
+                    </Button>
+                    <Button
                       data-testid="toggle-employee-status-button"
                       variant="outline"
                       className="rounded-full"
@@ -255,6 +318,86 @@ export default function EmployeeDossier(): JSX.Element {
             </div>
             <Button data-testid="employee-submit-button" type="submit" className="w-full rounded-full bg-emerald-600 hover:bg-emerald-700">
               Ajouter l'employé
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent data-testid="edit-employee-dialog" className="max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-heading inline-flex items-center gap-2">
+              <Pencil className="w-4 h-4 text-emerald-600" /> Modifier le dossier
+            </DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleEdit} className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Prénom</Label>
+                <Input data-testid="edit-firstname-input" value={editForm.firstName} onChange={(e) => setEditForm((f) => ({ ...f, firstName: e.target.value }))} required />
+              </div>
+              <div className="space-y-2">
+                <Label>Nom</Label>
+                <Input data-testid="edit-lastname-input" value={editForm.lastName} onChange={(e) => setEditForm((f) => ({ ...f, lastName: e.target.value }))} required />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Courriel</Label>
+                <Input data-testid="edit-email-input" type="email" value={editForm.email} onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))} required />
+              </div>
+              <div className="space-y-2">
+                <Label>Téléphone</Label>
+                <Input data-testid="edit-phone-input" value={editForm.phone} onChange={(e) => setEditForm((f) => ({ ...f, phone: e.target.value }))} />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Adresse</Label>
+              <Input data-testid="edit-address-input" value={editForm.address} onChange={(e) => setEditForm((f) => ({ ...f, address: e.target.value }))} />
+            </div>
+            <div className="space-y-2">
+              <Label>Contact d'urgence</Label>
+              <Input data-testid="edit-emergency-input" value={editForm.emergencyContact} onChange={(e) => setEditForm((f) => ({ ...f, emergencyContact: e.target.value }))} />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Poste</Label>
+                <Select value={editForm.position} onValueChange={(v) => setEditForm((f) => ({ ...f, position: v as Position }))}>
+                  <SelectTrigger data-testid="edit-position-select"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {POSITIONS.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Succursale</Label>
+                <Select value={editForm.branchId} onValueChange={(v) => setEditForm((f) => ({ ...f, branchId: v }))}>
+                  <SelectTrigger data-testid="edit-branch-select"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {state.branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label>Embauche</Label>
+                <Input data-testid="edit-hiredate-input" type="date" value={editForm.hireDate} onChange={(e) => setEditForm((f) => ({ ...f, hireDate: e.target.value }))} required />
+              </div>
+              <div className="space-y-2">
+                <Label>Heures / sem.</Label>
+                <Input data-testid="edit-weeklyhours-input" type="number" min="0" max="80" value={editForm.weeklyHours} onChange={(e) => setEditForm((f) => ({ ...f, weeklyHours: e.target.value }))} required />
+              </div>
+              <div className="space-y-2">
+                <Label>Taux horaire ($)</Label>
+                <Input data-testid="edit-rate-input" type="number" step="0.05" min="0" max="1000" value={editForm.hourlyRate} onChange={(e) => setEditForm((f) => ({ ...f, hourlyRate: e.target.value }))} required />
+              </div>
+            </div>
+            <p className="text-[11px] text-slate-400">
+              Le taux horaire est synchronisé automatiquement avec le profil serveur — utilisé par la génération d'horaire IA, les coûts du calendrier et les rapports budget.
+            </p>
+            <Button data-testid="edit-employee-submit" type="submit" className="w-full rounded-full bg-emerald-600 hover:bg-emerald-700">
+              Enregistrer les modifications
             </Button>
           </form>
         </DialogContent>

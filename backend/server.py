@@ -1571,6 +1571,7 @@ class ProfileIn(BaseModel):
     notes: Optional[str] = None
     payroll_number: Optional[str] = None
     department: Optional[str] = None
+    hourly_rate: Optional[float] = None
 
 
 def sanitize_profile(doc: dict) -> dict:
@@ -1629,6 +1630,13 @@ async def update_profile(employee_id: str, payload: ProfileIn, user: dict = Depe
     pid = check_profile_access(user, employee_id)
     doc = await get_or_create_profile(pid, employee_id, payload.employee_name or "")
     patch = {k: v for k, v in payload.model_dump().items() if v is not None}
+    if "hourly_rate" in patch:
+        if user["role"] not in ("admin", "manager", "superadmin"):
+            patch.pop("hourly_rate")
+        elif not (0 <= patch["hourly_rate"] <= 1000):
+            raise HTTPException(status_code=400, detail="Taux horaire invalide (0 à 1000 $/h).")
+        else:
+            patch["hourly_rate"] = round(patch["hourly_rate"], 2)
     if "availability" in patch:
         avail = {}
         for d in WEEK_DAYS:
