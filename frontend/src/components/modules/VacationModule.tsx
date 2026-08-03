@@ -53,6 +53,7 @@ export default function VacationModule(): JSX.Element {
   const [requests, setRequests] = useState<ServerLeave[]>([]);
   const [absences, setAbsences] = useState<Absence[]>([]);
   const [balances, setBalances] = useState<Balance[]>([]);
+  const [balLoaded, setBalLoaded] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState<string | null>(null);
   const [allocTarget, setAllocTarget] = useState<string | null>(null);
@@ -81,6 +82,7 @@ export default function VacationModule(): JSX.Element {
       setRequests(reqRes.data);
       setAbsences(absRes.data.items);
       setBalances(balRes.data);
+      setBalLoaded(true);
     } catch {
       toast.error('Chargement des congés impossible.');
     }
@@ -223,9 +225,9 @@ export default function VacationModule(): JSX.Element {
               <div key={t} data-testid={`balance-card-${t}`} className="bg-white rounded-xl border border-slate-200 p-5">
                 <p className="text-[11px] uppercase tracking-[0.15em] text-slate-400 font-semibold">{t}</p>
                 <p className={`font-heading text-2xl font-bold mt-1 ${remaining < 0 ? 'text-red-600' : 'text-slate-900'}`}>
-                  {alloc > 0 || used > 0 ? `${remaining} j` : '—'}
+                  {!balLoaded ? '…' : alloc > 0 || used > 0 ? `${remaining} j` : '—'}
                 </p>
-                <p className="text-xs text-slate-500 mt-0.5">{alloc > 0 || used > 0 ? `restants sur ${alloc} j alloués · ${used} j utilisés` : 'Aucune allocation définie'}</p>
+                <p className="text-xs text-slate-500 mt-0.5">{!balLoaded ? 'Chargement…' : alloc > 0 || used > 0 ? `restants sur ${alloc} j alloués · ${used} j utilisés` : 'Aucune allocation définie'}</p>
               </div>
             );
           })}
