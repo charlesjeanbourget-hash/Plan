@@ -1,0 +1,30 @@
+{
+  "summary": "Testé bout-en-bout les 2 nouvelles fonctionnalités (module Congés refait + Import Excel employés). 23/23 tests pytest passent (test_iteration35.py). Flux Playwright complet OK : admin définit les allocations pour Julie (12/6/3), soumet une demande pour elle, approuve → toast de solde restant OK. Julie voit ses cartes de soldes (8/6/3 j restants), le calendrier, soumet une demande Mobile, annule une demande En attente. Import Excel : bouton import-employees-button ouvre le dialogue, xlsx (3 lignes dont 1 doublon julie@luminahr.ca) → summary = « 2 à importer · 1 doublon(s) ignoré(s) », 3 lignes de preview, confirmation OK. Confidentialité Loi 25 vérifiée backend (type='Absence' pour non-admin, aucune fuite de reason/history, requêtes d'autres employés jamais renvoyées à julie). Historique admin visible (history-leave-{id}) avec entrées soumission + approbation. Notifications admin « Nouvelle demande de congé » créées. Bulk-import idempotent. Aucun bug bloquant.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration35.py",
+    "/app/test_reports/pytest/iteration_35.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "VacationModule : la carte 'balance-card' affiche brièvement 'Aucune allocation définie' pendant le chargement asynchrone de /leave/balances (état initial vide). Envisager un squelette/spinner tant que les balances ne sont pas chargées pour éviter le flash trompeur (non bloquant, pur cosmétique)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration35.py"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "Allocations e2=Vacances:12/Maladie:6/Mobile:3, plusieurs demandes Julie (Vacances 2 j approuvée, Vacances 2 j approuvée, Mobile annulée, Mobile 1 j en attente), demande e3 Personnel 1 j, doc bulk-import id=t35-bulk-1 (idempotent). 2 employés importés via Excel (Alice Test, Bob Import — attention, persistés en localStorage du navigateur de test).",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": false,
+  "test_credentials": "Voir /app/memory/test_credentials.md (admin@luminahr.ca, julie@luminahr.ca)",
+  "context_for_next_testing_agent": "Les endpoints /api/leave/* et l'import Excel sont pleinement fonctionnels. Loi 25 verrouillée côté serveur (view stripping via _leave_own_view + type='Absence' dans /leave/absences pour non-admin). Attention timing : après navigation dans la page Vacances, attendre ~2 s avant de lire balance-card-{t} (refresh asynchrone). Astuce login Playwright : localStorage.setItem('luminahr_auth_v3', {token, user:{...camelCase employeeId, pharmacyId}}) puis page.reload(). Base leave_requests était vide (migrated=false) : nos tests ont peuplé quelques demandes qui sont maintenant persistées.",
+  "rca_of_the_issue": "N/A — aucun bug bloquant. Un unique point mineur cosmétique noté (flash 'Aucune allocation définie' avant chargement des balances)."
+}

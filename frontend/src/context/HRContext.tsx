@@ -151,16 +151,55 @@ export const HRProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [branchOf]);
 
+  const syncLeaves = useCallback(async (): Promise<void> => {
+    if (!getToken()) return;
+    try {
+      const res = await axios.get<{ items: { id: string; employee_id: string; start_date: string; end_date: string; type: string }[]; migrated: boolean }>(`${API}/leave/absences`, { headers: authHeaders() });
+      if (!res.data.migrated) {
+        const local = stateRef.current.leaveRequests;
+        if (local.length > 0) {
+          const emps = stateRef.current.employees;
+          await axios.post(`${API}/leave/bulk-import`, {
+            requests: local.map((l) => {
+              const emp = emps.find((e) => e.id === l.employeeId);
+              return {
+                id: l.id, employee_id: l.employeeId,
+                employee_name: emp ? `${emp.firstName} ${emp.lastName}` : '',
+                type: l.type, start_date: l.startDate, end_date: l.endDate,
+                reason: l.reason, status: l.status,
+              };
+            }),
+          }, { headers: authHeaders() }).catch(() => undefined);
+        }
+        return;
+      }
+      const approved: LeaveRequest[] = res.data.items.map((d) => ({
+        id: d.id, employeeId: d.employee_id, type: d.type as LeaveRequest['type'],
+        startDate: d.start_date, endDate: d.end_date, reason: '', status: 'Approuvée',
+      }));
+      setState((prev) => ({ ...prev, leaveRequests: approved }));
+    } catch {
+      /* hors ligne : on garde l'état local */
+    }
+  }, []);
+
   useEffect(() => {
     void syncShifts();
-    const intervalId = window.setInterval(() => void syncShifts(), 15000);
-    const onFocus = (): void => void syncShifts();
+    void syncLeaves();
+    const intervalId = window.setInterval(() => {
+      void syncShifts();
+      void syncLeaves();
+    }, 15000);
+    const onFocus = (): void => {
+      void syncShifts();
+      void syncLeaves();
+    };
     window.addEventListener('focus', onFocus);
     return () => {
       window.clearInterval(intervalId);
       window.removeEventListener('focus', onFocus);
     };
-  }, [syncShifts]);
+  }, [syncShifts, syncLeaves]);
 
   const patchList = useCallback(
     <K extends keyof HRState>(key: K, fn: (items: HRState[K]) => HRState[K]) => {

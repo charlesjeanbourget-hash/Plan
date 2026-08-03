@@ -14,6 +14,7 @@ export default function DashboardModule(): JSX.Element {
   const { state, getEmployee } = useHR();
   const { currentUser, token } = useAuth();
   const [expiringCount, setExpiringCount] = useState(0);
+  const [pendingLeaves, setPendingLeaves] = useState(0);
 
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'manager' || currentUser?.role === 'superadmin';
 
@@ -25,10 +26,17 @@ export default function DashboardModule(): JSX.Element {
       .catch(() => setExpiringCount(0));
   }, [isAdmin, token]);
 
+  useEffect(() => {
+    if (!token) return;
+    axios
+      .get<{ status: string }[]>(`${API}/leave/requests`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((res) => setPendingLeaves(res.data.filter((l) => l.status === 'En attente').length))
+      .catch(() => setPendingLeaves(0));
+  }, [token]);
+
   const today = new Date().toISOString().slice(0, 10);
   const activeEmployees = state.employees.filter((e) => e.status === 'Actif').length;
   const todayShifts = state.shifts.filter((s) => s.date === today);
-  const pendingLeaves = state.leaveRequests.filter((l) => l.status === 'En attente').length;
   const activeOffers = state.jobOffers.filter((o) => o.active).length;
   const upcomingShifts = [...state.shifts].filter((s) => s.date >= today).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 5);
 

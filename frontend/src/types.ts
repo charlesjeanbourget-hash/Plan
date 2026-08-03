@@ -163,7 +163,7 @@ export interface Candidate {
   source: 'Portail Carrières' | 'Agence' | 'Interne';
 }
 
-export type LeaveType = 'Vacances' | 'Maladie' | 'Personnel' | 'Formation';
+export type LeaveType = 'Vacances' | 'Maladie' | 'Personnel' | 'Formation' | 'Mobile' | 'Absence';
 export type RequestStatus = 'En attente' | 'Approuvée' | 'Refusée';
 
 export interface LeaveRequest {

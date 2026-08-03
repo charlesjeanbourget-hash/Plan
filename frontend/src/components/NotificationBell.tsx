@@ -107,16 +107,6 @@ export const NotificationBell = ({ onNavigate }: { onNavigate: (m: ModuleKey) =>
           tone: 'amber',
           icon: 'schedule',
         }));
-      state.leaveRequests
-        .filter((l) => l.employeeId === empId && l.status !== 'En attente')
-        .forEach((l) => list.push({
-          id: `leave-${l.id}-${l.status}`,
-          title: `Congé ${l.status === 'Approuvée' ? 'approuvé' : 'refusé'}`,
-          detail: `${l.type} du ${l.startDate} au ${l.endDate}`,
-          module: 'myspace',
-          tone: l.status === 'Approuvée' ? 'emerald' : 'red',
-          icon: 'leave',
-        }));
       state.shiftSwaps
         .filter((s) => s.requesterId === empId && s.status !== 'En attente')
         .forEach((s) => list.push({
@@ -200,19 +190,6 @@ export const NotificationBell = ({ onNavigate }: { onNavigate: (m: ModuleKey) =>
           icon: 'delivery',
         }));
     } else {
-      state.leaveRequests
-        .filter((l) => l.status === 'En attente')
-        .forEach((l) => {
-          const emp = getEmployee(l.employeeId);
-          list.push({
-            id: `leave-${l.id}`,
-            title: 'Demande de congé en attente',
-            detail: `${emp ? `${emp.firstName} ${emp.lastName}` : 'Employé'} — ${l.type} du ${l.startDate} au ${l.endDate}`,
-            module: 'vacations',
-            tone: 'amber',
-            icon: 'leave',
-          });
-        });
       state.shiftSwaps
         .filter((s) => s.status === 'En attente')
         .forEach((s) => {

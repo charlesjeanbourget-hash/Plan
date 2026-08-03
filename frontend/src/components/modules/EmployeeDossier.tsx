@@ -8,10 +8,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, Mail, Phone, MapPin, Trash2, Hash, UserX, Pencil } from 'lucide-react';
+import { Plus, Mail, Phone, MapPin, Trash2, Hash, UserX, Pencil, FileSpreadsheet } from 'lucide-react';
 import { ProfileEditor } from '@/components/ProfileEditor';
 import { SalaryHistory } from '@/components/SalaryHistory';
 import { PayrollNumbersDialog } from '@/components/PayrollNumbersDialog';
+import { EmployeeImportDialog } from '@/components/EmployeeImportDialog';
 import { useAuth } from '@/context/AuthContext';
 import axios from 'axios';
 import { toast } from 'sonner';
@@ -34,6 +35,7 @@ export default function EmployeeDossier(): JSX.Element {
   const [hourlyRate, setHourlyRate] = useState('25');
   const [branchId, setBranchId] = useState(state.branches[0]?.id ?? '');
   const [payrollNumbersOpen, setPayrollNumbersOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [editForm, setEditForm] = useState({
     firstName: '', lastName: '', email: '', phone: '', address: '', emergencyContact: '',
@@ -137,6 +139,9 @@ export default function EmployeeDossier(): JSX.Element {
         subtitle={`${state.employees.length} membres dans votre équipe.`}
         action={
           <div className="flex flex-wrap gap-2">
+            <Button data-testid="import-employees-button" variant="outline" onClick={() => setImportOpen(true)} className="rounded-full border-bronze-300 text-bronze-800 hover:bg-bronze-50">
+              <FileSpreadsheet className="w-4 h-4 mr-1" /> Importer (Excel)
+            </Button>
             <Button data-testid="payroll-numbers-button" variant="outline" onClick={() => setPayrollNumbersOpen(true)} className="rounded-full border-bronze-300 text-bronze-800 hover:bg-bronze-50">
               <Hash className="w-4 h-4 mr-1" /> Matricules paie
             </Button>
@@ -147,6 +152,7 @@ export default function EmployeeDossier(): JSX.Element {
         }
       />
       <PayrollNumbersDialog open={payrollNumbersOpen} onClose={() => setPayrollNumbersOpen(false)} />
+      <EmployeeImportDialog open={importOpen} onClose={() => setImportOpen(false)} />
       {state.employees.length === 0 ? (
         <EmptyState text="Aucun employé. Ajoutez votre premier membre d'équipe." />
       ) : (

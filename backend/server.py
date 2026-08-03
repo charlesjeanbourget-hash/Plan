@@ -3,6 +3,7 @@ from fastapi.responses import StreamingResponse, Response
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import ReturnDocument
 import os
 import io
 import re
@@ -1582,17 +1583,17 @@ def sanitize_profile(doc: dict) -> dict:
 
 
 async def get_or_create_profile(pharmacy_id: str, employee_id: str, employee_name: str = "") -> dict:
-    doc = await db.employee_profiles.find_one({"pharmacy_id": pharmacy_id, "employee_id": employee_id}, {"_id": 0})
-    if doc:
-        return sanitize_profile(doc)
-    doc = {
+    defaults = {
         "id": str(uuid.uuid4()), "pharmacy_id": pharmacy_id, "employee_id": employee_id,
         "employee_name": employee_name, "roles": [], "capacities": [], "restrictions": [],
         "min_hours_week": 0, "max_hours_week": 40, "availability": default_availability(),
         "punch_code_hash": None, "notes": "", "department": "",
         "updated_at": datetime.now(timezone.utc).isoformat(), "updated_by": "",
     }
-    await db.employee_profiles.insert_one({**doc})
+    doc = await db.employee_profiles.find_one_and_update(
+        {"pharmacy_id": pharmacy_id, "employee_id": employee_id},
+        {"$setOnInsert": defaults},
+        upsert=True, return_document=ReturnDocument.AFTER, projection={"_id": 0})
     return sanitize_profile(doc)
 
 
@@ -2327,12 +2328,13 @@ async def _mark_shifts_ready(pid: str) -> None:
         {"pharmacy_id": pid}, {"$set": {"pharmacy_id": pid, "shifts_server_ready": True}}, upsert=True)
 
 
-async def _notify_shift_change(pid: str, employee_id: str, title: str, detail: str, tone: str = "sky") -> None:
+async def _notify_shift_change(pid: str, employee_id: str, title: str, detail: str, tone: str = "sky",
+                               module: str = "myspace", icon: str = "schedule") -> None:
     if not employee_id:
         return
     await db.notifications.insert_one({
         "id": str(uuid.uuid4()), "pharmacy_id": pid, "target_employee_id": employee_id,
-        "title": title, "detail": detail, "module": "myspace", "icon": "schedule",
+        "title": title, "detail": detail, "module": module, "icon": icon,
         "tone": tone, "created_at": datetime.now(timezone.utc).isoformat()})
 
 
@@ -2425,6 +2427,283 @@ async def delete_calendar_shift(shift_id: str, principal: dict = Depends(get_pri
     return {"status": "supprimé"}
 
 
+# ==================== Congés (serveur, Loi 25) ====================
+
+LEAVE_TYPES_BE = ("Vacances", "Maladie", "Mobile", "Personnel", "Formation")
+LEAVE_ALLOC_TYPES = ("Vacances", "Maladie", "Mobile")
+
+
+class LeaveRequestIn(BaseModel):
+    employee_id: str = ""
+    employee_name: str = ""
+    type: str
+    start_date: str
+    end_date: str
+    reason: str = ""
+
+
+class LeaveDecideIn(BaseModel):
+    action: str
+    note: str = ""
+
+
+class LeaveAllocationsIn(BaseModel):
+    employee_name: str = ""
+    allocations: dict
+
+
+class LeaveBulkIn(BaseModel):
+    requests: list
+
+
+def _leave_days(start: str, end: str) -> float:
+    return float((date.fromisoformat(end) - date.fromisoformat(start)).days + 1)
+
+
+def _validate_leave_dates(start: str, end: str) -> None:
+    try:
+        s = date.fromisoformat(start)
+        e = date.fromisoformat(end)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Dates invalides (AAAA-MM-JJ).")
+    if e < s:
+        raise HTTPException(status_code=400, detail="La date de fin doit être après le début.")
+    if (e - s).days > 365:
+        raise HTTPException(status_code=400, detail="Durée maximale : 365 jours.")
+
+
+async def _mark_leaves_ready(pid: str) -> None:
+    await db.schedule_settings.update_one(
+        {"pharmacy_id": pid}, {"$set": {"pharmacy_id": pid, "leaves_server_ready": True}}, upsert=True)
+
+
+async def _notify_admins(pid: str, title: str, detail: str, module: str = "vacations", tone: str = "amber") -> None:
+    await db.notifications.insert_one({
+        "id": str(uuid.uuid4()), "pharmacy_id": pid, "target_roles": ["admin", "manager"],
+        "title": title, "detail": detail, "module": module, "icon": "leave",
+        "tone": tone, "created_at": datetime.now(timezone.utc).isoformat()})
+
+
+def _leave_admin_view(doc: dict) -> dict:
+    return {k: v for k, v in doc.items() if k != "pharmacy_id"}
+
+
+def _leave_own_view(doc: dict) -> dict:
+    return {k: v for k, v in doc.items() if k not in ("pharmacy_id", "history")}
+
+
+async def _leave_remaining(pid: str, employee_id: str, ltype: str):
+    bal = await db.leave_balances.find_one({"pharmacy_id": pid, "employee_id": employee_id}, {"_id": 0}) or {}
+    alloc = (bal.get("allocations") or {}).get(ltype)
+    if alloc is None:
+        return None
+    year = datetime.now(timezone.utc).astimezone(MONTREAL_TZ).year
+    docs = await db.leave_requests.find(
+        {"pharmacy_id": pid, "employee_id": employee_id, "type": ltype, "status": "Approuvée",
+         "start_date": {"$gte": f"{year}-01-01", "$lte": f"{year}-12-31"}},
+        {"_id": 0, "days": 1}).to_list(500)
+    used = sum(float(d.get("days") or 0) for d in docs)
+    return round(float(alloc) - used, 2)
+
+
+@api_router.post("/leave/requests")
+async def create_leave_request(payload: LeaveRequestIn, user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    is_admin = user["role"] in ("admin", "manager", "superadmin")
+    employee_id = payload.employee_id if (is_admin and payload.employee_id) else (user.get("employee_id") or "")
+    if not employee_id:
+        raise HTTPException(status_code=400, detail="Aucun employé associé à ce compte.")
+    if payload.type not in LEAVE_TYPES_BE:
+        raise HTTPException(status_code=400, detail="Type de congé invalide.")
+    _validate_leave_dates(payload.start_date, payload.end_date)
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "id": str(uuid.uuid4()), "pharmacy_id": pid, "employee_id": employee_id,
+        "employee_name": payload.employee_name.strip()[:80],
+        "type": payload.type, "start_date": payload.start_date, "end_date": payload.end_date,
+        "days": _leave_days(payload.start_date, payload.end_date),
+        "reason": payload.reason.strip()[:1000],
+        "status": "En attente", "created_at": now, "decided_at": None, "decided_by": "",
+        "history": [{"action": "soumission", "by": user["email"], "role": user["role"], "at": now}],
+    }
+    await db.leave_requests.insert_one({**doc})
+    await _mark_leaves_ready(pid)
+    await _notify_admins(pid, "Nouvelle demande de congé",
+                         f"{doc['employee_name'] or employee_id} — {doc['type']}, du {doc['start_date']} "
+                         f"au {doc['end_date']} ({doc['days']:g} j) — à approuver")
+    await log_audit(user["email"], user["role"], "CONGE_SOUMIS", "conge", doc["id"],
+                    f"Demande {doc['type']} du {doc['start_date']} au {doc['end_date']} "
+                    f"pour {doc['employee_name'] or employee_id}", pid)
+    return _leave_own_view(doc)
+
+
+@api_router.get("/leave/requests")
+async def list_leave_requests(user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    if user["role"] in ("admin", "manager", "superadmin"):
+        docs = await db.leave_requests.find({"pharmacy_id": pid}, {"_id": 0}).sort("created_at", -1).to_list(2000)
+        return [_leave_admin_view(d) for d in docs]
+    eid = user.get("employee_id") or "__none__"
+    docs = await db.leave_requests.find({"pharmacy_id": pid, "employee_id": eid}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return [_leave_own_view(d) for d in docs]
+
+
+@api_router.post("/leave/requests/{req_id}/decide")
+async def decide_leave_request(req_id: str, payload: LeaveDecideIn, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    if payload.action not in ("approve", "reject"):
+        raise HTTPException(status_code=400, detail="Action invalide (approve ou reject).")
+    doc = await db.leave_requests.find_one({"id": req_id, "pharmacy_id": pid}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Demande introuvable.")
+    if doc["status"] != "En attente":
+        raise HTTPException(status_code=400, detail="Cette demande a déjà été traitée.")
+    now = datetime.now(timezone.utc).isoformat()
+    status = "Approuvée" if payload.action == "approve" else "Refusée"
+    note = payload.note.strip()[:300]
+    entry = {"action": "approbation" if payload.action == "approve" else "refus",
+             "by": principal["email"], "role": principal["role"], "at": now, "note": note}
+    await db.leave_requests.update_one(
+        {"id": req_id, "pharmacy_id": pid},
+        {"$set": {"status": status, "decided_at": now, "decided_by": principal["email"]},
+         "$push": {"history": entry}})
+    await _notify_shift_change(
+        pid, doc["employee_id"], f"Demande de congé {status.lower()}",
+        f"Votre demande du {doc['start_date']} au {doc['end_date']} a été {status.lower()}."
+        + (f" Note : {note}" if note else ""),
+        "emerald" if status == "Approuvée" else "red", module="vacations", icon="leave")
+    remaining = await _leave_remaining(pid, doc["employee_id"], doc["type"]) if status == "Approuvée" else None
+    await log_audit(principal["email"], principal["role"],
+                    "CONGE_APPROUVE" if status == "Approuvée" else "CONGE_REFUSE", "conge", req_id,
+                    f"Demande {doc['type']} du {doc['start_date']} au {doc['end_date']} de "
+                    f"{doc.get('employee_name') or doc['employee_id']} : {status}", pid)
+    return {"status": status, "remaining": remaining}
+
+
+@api_router.delete("/leave/requests/{req_id}")
+async def cancel_leave_request(req_id: str, user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    doc = await db.leave_requests.find_one({"id": req_id, "pharmacy_id": pid}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Demande introuvable.")
+    is_admin = user["role"] in ("admin", "manager", "superadmin")
+    if not is_admin and doc["employee_id"] != (user.get("employee_id") or ""):
+        raise HTTPException(status_code=403, detail="Accès refusé.")
+    if doc["status"] != "En attente":
+        raise HTTPException(status_code=400, detail="Seules les demandes en attente peuvent être annulées.")
+    now = datetime.now(timezone.utc).isoformat()
+    await db.leave_requests.update_one(
+        {"id": req_id, "pharmacy_id": pid},
+        {"$set": {"status": "Annulée"},
+         "$push": {"history": {"action": "annulation", "by": user["email"], "role": user["role"], "at": now}}})
+    await log_audit(user["email"], user["role"], "CONGE_ANNULE", "conge", req_id,
+                    f"Demande du {doc['start_date']} au {doc['end_date']} annulée", pid)
+    return {"status": "Annulée"}
+
+
+@api_router.get("/leave/absences")
+async def list_leave_absences(user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    is_admin = user["role"] in ("admin", "manager", "superadmin")
+    settings = await db.schedule_settings.find_one({"pharmacy_id": pid}, {"_id": 0, "leaves_server_ready": 1}) or {}
+    docs = await db.leave_requests.find({"pharmacy_id": pid, "status": "Approuvée"}, {"_id": 0}).to_list(3000)
+    items = [{"id": d["id"], "employee_id": d["employee_id"], "employee_name": d.get("employee_name", ""),
+              "start_date": d["start_date"], "end_date": d["end_date"],
+              "type": d["type"] if is_admin else "Absence"} for d in docs]
+    return {"items": items, "migrated": bool(settings.get("leaves_server_ready"))}
+
+
+@api_router.get("/leave/balances")
+async def list_leave_balances(user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    is_admin = user["role"] in ("admin", "manager", "superadmin")
+    eid = user.get("employee_id") or "__none__"
+    year = datetime.now(timezone.utc).astimezone(MONTREAL_TZ).year
+    q: dict = {"pharmacy_id": pid, "status": "Approuvée",
+               "start_date": {"$gte": f"{year}-01-01", "$lte": f"{year}-12-31"}}
+    bq: dict = {"pharmacy_id": pid}
+    if not is_admin:
+        q["employee_id"] = eid
+        bq["employee_id"] = eid
+    approved = await db.leave_requests.find(q, {"_id": 0}).to_list(3000)
+    bals = await db.leave_balances.find(bq, {"_id": 0}).to_list(1000)
+    used_map: dict = {}
+    for d in approved:
+        used_map.setdefault(d["employee_id"], {})
+        used_map[d["employee_id"]][d["type"]] = used_map[d["employee_id"]].get(d["type"], 0) + float(d.get("days") or 0)
+    bal_by = {b["employee_id"]: b for b in bals}
+    out = []
+    for emp_id in sorted(set(bal_by) | set(used_map)):
+        alloc = (bal_by.get(emp_id) or {}).get("allocations") or {}
+        used = used_map.get(emp_id, {})
+        out.append({"employee_id": emp_id,
+                    "employee_name": (bal_by.get(emp_id) or {}).get("employee_name", ""),
+                    "allocations": {t: float(alloc.get(t, 0)) for t in LEAVE_ALLOC_TYPES},
+                    "used": {t: round(used.get(t, 0), 2) for t in LEAVE_ALLOC_TYPES},
+                    "remaining": {t: round(float(alloc.get(t, 0)) - used.get(t, 0), 2) for t in LEAVE_ALLOC_TYPES},
+                    "year": year})
+    return out
+
+
+@api_router.put("/leave/allocations/{employee_id}")
+async def set_leave_allocations(employee_id: str, payload: LeaveAllocationsIn, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    alloc = {}
+    for t, v in (payload.allocations or {}).items():
+        if t not in LEAVE_ALLOC_TYPES:
+            continue
+        try:
+            n = float(v)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Allocation invalide.")
+        if not (0 <= n <= 365):
+            raise HTTPException(status_code=400, detail="Allocation invalide (0 à 365 jours).")
+        alloc[t] = round(n, 1)
+    await db.leave_balances.update_one(
+        {"pharmacy_id": pid, "employee_id": employee_id},
+        {"$set": {"pharmacy_id": pid, "employee_id": employee_id,
+                  "employee_name": payload.employee_name.strip()[:80], "allocations": alloc,
+                  "updated_at": datetime.now(timezone.utc).isoformat()}}, upsert=True)
+    await log_audit(principal["email"], principal["role"], "ALLOCATION_CONGES", "conge", employee_id,
+                    f"Allocations de congés {alloc} pour {payload.employee_name or employee_id}", pid)
+    return {"employee_id": employee_id, "allocations": alloc}
+
+
+@api_router.post("/leave/bulk-import")
+async def bulk_import_leaves(payload: LeaveBulkIn, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    if len(payload.requests) > 1000:
+        raise HTTPException(status_code=400, detail="Maximum 1000 demandes par import.")
+    now = datetime.now(timezone.utc).isoformat()
+    count = 0
+    for r in payload.requests:
+        if not isinstance(r, dict):
+            continue
+        start = str(r.get("start_date") or "")
+        end = str(r.get("end_date") or "")
+        try:
+            _validate_leave_dates(start, end)
+        except HTTPException:
+            continue
+        rid = str(r.get("id") or uuid.uuid4())
+        doc = {
+            "id": rid, "pharmacy_id": pid, "employee_id": str(r.get("employee_id") or ""),
+            "employee_name": str(r.get("employee_name") or "")[:80],
+            "type": r.get("type") if r.get("type") in LEAVE_TYPES_BE else "Mobile",
+            "start_date": start, "end_date": end, "days": _leave_days(start, end),
+            "reason": str(r.get("reason") or "")[:1000],
+            "status": r.get("status") if r.get("status") in ("En attente", "Approuvée", "Refusée") else "En attente",
+            "created_at": now, "decided_at": None, "decided_by": "",
+            "history": [{"action": "migration", "by": principal["email"], "role": principal["role"], "at": now}],
+        }
+        await db.leave_requests.update_one({"id": rid, "pharmacy_id": pid}, {"$setOnInsert": doc}, upsert=True)
+        count += 1
+    await _mark_leaves_ready(pid)
+    await log_audit(principal["email"], principal["role"], "IMPORT_CONGES", "conge", pid,
+                    f"Migration du registre des congés : {count} demande(s) importées", pid)
+    return {"imported": count}
+
+
 def _time_to_minutes(t: str) -> int:
     h, m = t.split(":")
     return int(h) * 60 + int(m)
@@ -2491,7 +2770,7 @@ async def delete_schedule_template(template_id: str, principal: dict = Depends(g
 @api_router.get("/notifications")
 async def list_notifications(user: dict = Depends(get_current_user)):
     pid = user.get("pharmacy_id") or "ph1"
-    ors = [{"target_email": user["email"]}]
+    ors = [{"target_email": user["email"]}, {"target_roles": user["role"]}]
     if user.get("employee_id"):
         ors.append({"target_employee_id": user["employee_id"]})
     return await db.notifications.find({"pharmacy_id": pid, "$or": ors}, {"_id": 0}).sort("created_at", -1).to_list(50)
@@ -5279,6 +5558,20 @@ async def monthly_reports_job():
 
 @app.on_event("startup")
 async def startup_tasks():
+    try:
+        dup_groups = db.employee_profiles.aggregate([
+            {"$group": {"_id": {"p": "$pharmacy_id", "e": "$employee_id"},
+                        "ids": {"$push": "$_id"}, "count": {"$sum": 1}}},
+            {"$match": {"count": {"$gt": 1}}}])
+        async for g in dup_groups:
+            docs = await db.employee_profiles.find({"_id": {"$in": g["ids"]}}).to_list(50)
+            docs.sort(key=lambda d: (1 if d.get("hourly_rate") else 0,
+                                     1 if d.get("roles") else 0, d.get("updated_at") or ""), reverse=True)
+            await db.employee_profiles.delete_many({"_id": {"$in": [d["_id"] for d in docs[1:]]}})
+            logger.info(f"Profils dédupliqués : {g['_id']} ({g['count'] - 1} doublon(s) retirés)")
+        await db.employee_profiles.create_index([("pharmacy_id", 1), ("employee_id", 1)], unique=True)
+    except Exception as exc:
+        logger.error(f"Déduplication/index des profils échoué : {exc}")
     try:
         await asyncio.to_thread(init_storage)
         logger.info("Object storage initialisé")

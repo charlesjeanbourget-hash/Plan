@@ -1,4 +1,5 @@
-import { useState, FormEvent } from 'react';
+import { useState, useEffect, useCallback, FormEvent } from 'react';
+import axios from 'axios';
 import { useHR } from '@/context/HRContext';
 import { useAuth } from '@/context/AuthContext';
 import { LeaveType } from '@/types';
@@ -18,9 +19,10 @@ import { ProfileEditor } from '@/components/ProfileEditor';
 import { toast } from 'sonner';
 
 const LEAVE_TYPES: LeaveType[] = ['Vacances', 'Maladie', 'Personnel', 'Formation'];
+const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 export default function MySpaceModule(): JSX.Element {
-  const { state, getEmployee, addLeaveRequest, addShiftSwap, updateShiftSwap, setShiftSwapStatus } = useHR();
+  const { state, getEmployee, addShiftSwap, updateShiftSwap, setShiftSwapStatus } = useHR();
   const { currentUser, token } = useAuth();
   const me = state.employees.find((e) => e.id === currentUser?.employeeId);
   const pharmacy = state.pharmacies.find((p) => p.id === currentUser?.pharmacyId);
@@ -61,6 +63,20 @@ export default function MySpaceModule(): JSX.Element {
   const [swapShiftId, setSwapShiftId] = useState('');
   const [swapTargetId, setSwapTargetId] = useState('');
   const [swapReason, setSwapReason] = useState('');
+  const [myLeaves, setMyLeaves] = useState<{ id: string; type: string; startDate: string; endDate: string; status: string }[]>([]);
+
+  const loadLeaves = useCallback(async (): Promise<void> => {
+    if (!token) return;
+    try {
+      const res = await axios.get<{ id: string; type: string; start_date: string; end_date: string; status: string }[]>(
+        `${API}/leave/requests`, { headers: { Authorization: `Bearer ${token}` } });
+      setMyLeaves(res.data.map((l) => ({ id: l.id, type: l.type, startDate: l.start_date, endDate: l.end_date, status: l.status })));
+    } catch {
+      /* hors ligne */
+    }
+  }, [token]);
+
+  useEffect(() => { void loadLeaves(); }, [loadLeaves]);
 
   if (!me) {
     return (
@@ -75,16 +91,25 @@ export default function MySpaceModule(): JSX.Element {
   const myPays = state.payrollEntries
     .filter((p) => p.employeeId === me.id)
     .sort((a, b) => b.periodStart.localeCompare(a.periodStart));
-  const myLeaves = state.leaveRequests.filter((l) => l.employeeId === me.id);
   const mySwaps = state.shiftSwaps.filter((s) => s.requesterId === me.id);
   const colleagues = state.employees.filter((e) => e.id !== me.id && e.status === 'Actif');
 
-  const submitLeave = (e: FormEvent<HTMLFormElement>): void => {
+  const submitLeave = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
-    addLeaveRequest({ employeeId: me.id, type: leaveType, startDate, endDate, reason, status: 'En attente' });
-    toast.success('Demande de congé soumise à votre gestionnaire.');
-    setLeaveOpen(false);
-    setReason('');
+    try {
+      await axios.post(`${API}/leave/requests`, {
+        employee_id: me.id,
+        employee_name: `${me.firstName} ${me.lastName}`,
+        type: leaveType, start_date: startDate, end_date: endDate, reason,
+      }, { headers: { Authorization: `Bearer ${token ?? ''}` } });
+      toast.success('Demande de congé soumise à votre gestionnaire.');
+      setLeaveOpen(false);
+      setReason('');
+      void loadLeaves();
+    } catch (err) {
+      const detail = axios.isAxiosError(err) && err.response ? (err.response.data as { detail?: unknown }).detail : null;
+      toast.error(typeof detail === 'string' ? detail : 'Soumission impossible.');
+    }
   };
 
   const submitSwap = (e: FormEvent<HTMLFormElement>): void => {
@@ -247,7 +272,7 @@ export default function MySpaceModule(): JSX.Element {
           <DialogHeader>
             <DialogTitle className="font-heading">Nouvelle demande de congé</DialogTitle>
           </DialogHeader>
-          <form onSubmit={submitLeave} className="space-y-4">
+          <form onSubmit={(e) => void submitLeave(e)} className="space-y-4">
             <div className="space-y-2">
               <Label>Type de congé</Label>
               <Select value={leaveType} onValueChange={(v) => setLeaveType(v as LeaveType)}>
@@ -266,8 +291,8 @@ export default function MySpaceModule(): JSX.Element {
               </div>
             </div>
             <div className="space-y-2">
-              <Label>Raison</Label>
-              <Input data-testid="myspace-leave-reason-input" value={reason} onChange={(e) => setReason(e.target.value)} required />
+              <Label>Motif (facultatif — visible uniquement par l'administration)</Label>
+              <Input data-testid="myspace-leave-reason-input" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Vos collègues ne verront jamais le motif." />
             </div>
             <Button data-testid="myspace-leave-submit-button" type="submit" className="w-full rounded-full bg-emerald-600 hover:bg-emerald-700">
               Soumettre
