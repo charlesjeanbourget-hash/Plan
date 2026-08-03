@@ -4592,7 +4592,7 @@ async def schedule_generate(payload: ScheduleGenIn, principal: dict = Depends(ge
         "status": "generating", "error": None, "summary": "", "shifts": [],
         "instructions": payload.instructions, "absences": absences,
         "department": department, "existing_mode": existing_mode,
-        "roster_branches": {e.id: e.branch_id for e in payload.roster},
+        "roster_branches": {e.id: e.branch_id for e in payload.employees},
         "priorities": settings.get("priorities") or {},
         "alerts": [], "warnings_count": 0,
         "estimated_cost": None, "weekly_budget": weekly_budget,
