@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ChevronLeft, ChevronRight, Plus, X, ArrowLeftRight, Check, Stethoscope, CopyPlus, LayoutTemplate, FileDown, Megaphone, Hourglass, BookOpenCheck, MapPin, Wrench, Hand, Sparkles, AlertTriangle, Layers } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, X, ArrowLeftRight, Check, Stethoscope, CopyPlus, LayoutTemplate, FileDown, Megaphone, Hourglass, BookOpenCheck, MapPin, Wrench, Hand, Sparkles, AlertTriangle, Layers, TreePalm } from 'lucide-react';
 import { ScheduleProposals } from '@/components/ScheduleProposals';
 import { AppointmentDialog } from '@/components/AppointmentDialog';
 import { DuplicateWeekDialog } from '@/components/DuplicateWeekDialog';
@@ -511,6 +511,7 @@ export default function SchedulingModule(): JSX.Element {
           généré par l'IA
         </span>
         <span className="inline-flex items-center gap-1.5"><AlertTriangle className="w-3 h-3 text-red-500" /> Conflit (double quart ou absence approuvée)</span>
+        <span className="inline-flex items-center gap-1.5"><TreePalm className="w-3 h-3 text-amber-600" /> Congé approuvé (ne pas planifier)</span>
       </div>
 
       {viewMode === 'week' && (
@@ -550,6 +551,7 @@ export default function SchedulingModule(): JSX.Element {
                 {days.map((d) => {
                   const shifts = visibleShifts.filter((s) => s.employeeId === emp.id && s.date === d);
                   const appts = appointments.filter((a) => a.employee_id === emp.id && a.date === d);
+                  const leaveDay = state.leaveRequests.find((l) => l.employeeId === emp.id && l.status === 'Approuvée' && l.startDate <= d && d <= l.endDate);
                   const cellKey = `${emp.id}|${d}`;
                   return (
                     <td
@@ -562,6 +564,16 @@ export default function SchedulingModule(): JSX.Element {
                       className={`group/cell p-2 border-b border-r border-slate-200 align-top transition-colors ${d === today ? 'bg-emerald-50/40' : ''} ${dropTarget === cellKey && dragShiftId ? 'bg-bronze-50 ring-2 ring-inset ring-bronze-400' : ''} ${moveShiftId ? 'cursor-pointer hover:bg-bronze-50/60' : ''}`}
                     >
                       <div className="min-h-[76px] space-y-1.5">
+                      {leaveDay && (
+                        <div
+                          data-testid={`leave-watermark-${emp.id}-${d}`}
+                          className="rounded-lg border border-dashed border-amber-300 px-2 py-1.5 text-[10px] font-semibold text-amber-700 flex items-center gap-1"
+                          style={{ backgroundImage: 'repeating-linear-gradient(45deg, rgba(217,119,6,0.10) 0 6px, transparent 6px 12px)' }}
+                          title={`Absence approuvée du ${leaveDay.startDate} au ${leaveDay.endDate} — évitez de planifier un quart ce jour-là`}
+                        >
+                          <TreePalm className="w-3 h-3 shrink-0" /> {leaveDay.type === 'Absence' ? 'Absent(e)' : leaveDay.type}
+                        </div>
+                      )}
                       {shifts.map((s) => {
                         const part = dayPart(s.startTime);
                         const conflict = conflictOf(s);

@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, Check, X, ChevronLeft, ChevronRight, TreePalm, Lock, History, Wallet, Trash2 } from 'lucide-react';
+import { Plus, Check, X, ChevronLeft, ChevronRight, TreePalm, Lock, History, Wallet, Trash2, RefreshCcw } from 'lucide-react';
 import { toast } from 'sonner';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -35,6 +35,7 @@ interface Balance {
   employee_id: string;
   employee_name: string;
   allocations: Record<string, number>;
+  carryover: Record<string, number>;
   used: Record<string, number>;
   remaining: Record<string, number>;
   year: number;
@@ -59,6 +60,9 @@ export default function VacationModule(): JSX.Element {
   const [allocTarget, setAllocTarget] = useState<string | null>(null);
   const [allocForm, setAllocForm] = useState<Record<string, string>>({ Vacances: '0', Maladie: '0', Mobile: '0' });
   const [applyAll, setApplyAll] = useState(false);
+  const [policyOpen, setPolicyOpen] = useState(false);
+  const [policy, setPolicy] = useState<{ carryover_enabled: boolean; carryover_max_days: number; types: string[] }>({ carryover_enabled: false, carryover_max_days: 0, types: ['Vacances'] });
+  const [carryRunning, setCarryRunning] = useState(false);
   const [employeeId, setEmployeeId] = useState(currentUser?.employeeId ?? state.employees[0]?.id ?? '');
   const [type, setType] = useState('Vacances');
   const [startDate, setStartDate] = useState('');
@@ -201,6 +205,47 @@ export default function VacationModule(): JSX.Element {
     }
   };
 
+  const openPolicy = async (): Promise<void> => {
+    setPolicyOpen(true);
+    try {
+      const res = await axios.get<{ carryover_enabled: boolean; carryover_max_days: number; types: string[] }>(`${API}/leave/policy`, { headers });
+      setPolicy(res.data);
+    } catch {
+      /* défauts conservés */
+    }
+  };
+
+  const savePolicy = async (): Promise<void> => {
+    try {
+      await axios.put(`${API}/leave/policy`, policy, { headers });
+      toast.success('Politique de report enregistrée.');
+      setPolicyOpen(false);
+    } catch (err) {
+      const detail = axios.isAxiosError(err) && err.response ? (err.response.data as { detail?: unknown }).detail : null;
+      toast.error(typeof detail === 'string' ? detail : 'Enregistrement impossible.');
+    }
+  };
+
+  const runCarryover = async (): Promise<void> => {
+    setCarryRunning(true);
+    try {
+      await axios.put(`${API}/leave/policy`, policy, { headers });
+      const res = await axios.post<{ processed: number; details: { carried: Record<string, number> }[]; skipped?: string }>(`${API}/leave/carryover/run`, {}, { headers });
+      if (res.data.skipped) {
+        toast.error('Report désactivé — activez d\'abord la politique.');
+      } else {
+        const total = res.data.details.reduce((n, d) => n + Object.values(d.carried).reduce((a, b) => a + b, 0), 0);
+        toast.success(`Report effectué : ${res.data.processed} employé(s) traités · ${Math.round(total * 10) / 10} j reportés au total.`);
+        setPolicyOpen(false);
+      }
+      void refresh();
+    } catch (err) {
+      const detail = axios.isAxiosError(err) && err.response ? (err.response.data as { detail?: unknown }).detail : null;
+      toast.error(typeof detail === 'string' ? detail : 'Report impossible.');
+    }
+    setCarryRunning(false);
+  };
+
   const visibleRequests = requests.filter((r) => r.status !== 'Annulée' || !isAdmin);
 
   return (
@@ -209,9 +254,16 @@ export default function VacationModule(): JSX.Element {
         title="Vacances & Congés"
         subtitle={isAdmin ? 'Approuvez les demandes, allouez les soldes — motifs confidentiels (Loi 25).' : 'Sélectionnez vos dates au calendrier et suivez vos soldes.'}
         action={
-          <Button data-testid="add-leave-button" onClick={() => { setStartDate(selStart); setEndDate(selEnd || selStart); setDialogOpen(true); }} className="rounded-full bg-emerald-600 hover:bg-emerald-700">
-            <Plus className="w-4 h-4 mr-1" /> Nouvelle demande
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {isAdmin && (
+              <Button data-testid="carryover-button" variant="outline" onClick={() => void openPolicy()} className="rounded-full border-bronze-300 text-bronze-800 hover:bg-bronze-50">
+                <RefreshCcw className="w-4 h-4 mr-1" /> Report de soldes
+              </Button>
+            )}
+            <Button data-testid="add-leave-button" onClick={() => { setStartDate(selStart); setEndDate(selEnd || selStart); setDialogOpen(true); }} className="rounded-full bg-emerald-600 hover:bg-emerald-700">
+              <Plus className="w-4 h-4 mr-1" /> Nouvelle demande
+            </Button>
+          </div>
         }
       />
 
@@ -228,6 +280,9 @@ export default function VacationModule(): JSX.Element {
                   {!balLoaded ? '…' : alloc > 0 || used > 0 ? `${remaining} j` : '—'}
                 </p>
                 <p className="text-xs text-slate-500 mt-0.5">{!balLoaded ? 'Chargement…' : alloc > 0 || used > 0 ? `restants sur ${alloc} j alloués · ${used} j utilisés` : 'Aucune allocation définie'}</p>
+                {(myBalance?.carryover?.[t] ?? 0) > 0 && (
+                  <p data-testid={`balance-carry-${t}`} className="text-[11px] text-bronze-700 font-semibold mt-0.5">dont +{myBalance?.carryover?.[t]} j reportés de {new Date().getFullYear() - 1}</p>
+                )}
               </div>
             );
           })}
@@ -323,6 +378,9 @@ export default function VacationModule(): JSX.Element {
                         return (
                           <td key={t} className={`py-2.5 pr-4 font-semibold ${rem < 0 ? 'text-red-600' : 'text-slate-600'}`}>
                             {alloc > 0 || (b?.used[t] ?? 0) > 0 ? `${rem} / ${alloc} j` : '—'}
+                            {(b?.carryover?.[t] ?? 0) > 0 && (
+                              <span className="block text-[10px] text-bronze-600 font-medium">dont +{b?.carryover?.[t]} reportés</span>
+                            )}
                           </td>
                         );
                       })}
@@ -476,6 +534,46 @@ export default function VacationModule(): JSX.Element {
           <Button data-testid="alloc-save-button" onClick={() => void saveAlloc()} className="w-full rounded-full bg-emerald-600 hover:bg-emerald-700">
             Enregistrer les allocations
           </Button>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={policyOpen} onOpenChange={setPolicyOpen}>
+        <DialogContent data-testid="carryover-dialog">
+          <DialogHeader>
+            <DialogTitle className="font-heading inline-flex items-center gap-2">
+              <RefreshCcw className="w-4 h-4 text-bronze-600" /> Report de soldes à la nouvelle année
+            </DialogTitle>
+            <DialogDescription>
+              Les jours non utilisés de l'année précédente s'ajoutent automatiquement aux soldes chaque 1ᵉʳ janvier, selon votre politique de pharmacie.
+            </DialogDescription>
+          </DialogHeader>
+          <label data-testid="carryover-enabled-checkbox" className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+            <input type="checkbox" checked={policy.carryover_enabled} onChange={() => setPolicy((p) => ({ ...p, carryover_enabled: !p.carryover_enabled }))} className="accent-emerald-600 w-4 h-4" />
+            Activer le report automatique (1ᵉʳ janvier)
+          </label>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Plafond de jours reportés par type (0 = sans plafond)</Label>
+            <Input data-testid="carryover-max-input" type="number" min="0" max="365" step="0.5" value={String(policy.carryover_max_days)} onChange={(e) => setPolicy((p) => ({ ...p, carryover_max_days: Math.max(0, Number(e.target.value) || 0) }))} />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Types de congés reportables</Label>
+            <div className="flex flex-wrap gap-3">
+              {LEAVE_TYPES.map((t) => (
+                <label key={t} data-testid={`carryover-type-${t}`} className="flex items-center gap-1.5 text-sm text-slate-700 cursor-pointer">
+                  <input type="checkbox" checked={policy.types.includes(t)} onChange={() => setPolicy((p) => ({ ...p, types: p.types.includes(t) ? p.types.filter((x) => x !== t) : [...p.types, t] }))} className="accent-emerald-600 w-4 h-4" />
+                  {t}
+                </label>
+              ))}
+            </div>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <Button data-testid="carryover-save-button" onClick={() => void savePolicy()} className="flex-1 rounded-full bg-emerald-600 hover:bg-emerald-700">
+              Enregistrer la politique
+            </Button>
+            <Button data-testid="carryover-run-button" variant="outline" disabled={carryRunning || !policy.carryover_enabled} onClick={() => void runCarryover()} className="flex-1 rounded-full border-bronze-300 text-bronze-800 hover:bg-bronze-50">
+              {carryRunning ? 'Report en cours…' : 'Exécuter le report maintenant'}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

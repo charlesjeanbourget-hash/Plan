@@ -2498,12 +2498,14 @@ async def _leave_remaining(pid: str, employee_id: str, ltype: str):
     if alloc is None:
         return None
     year = datetime.now(timezone.utc).astimezone(MONTREAL_TZ).year
+    carry_doc = bal.get("carryover") or {}
+    extra = float((carry_doc.get("days") or {}).get(ltype, 0) or 0) if carry_doc.get("year") == year else 0.0
     docs = await db.leave_requests.find(
         {"pharmacy_id": pid, "employee_id": employee_id, "type": ltype, "status": "Approuvée",
          "start_date": {"$gte": f"{year}-01-01", "$lte": f"{year}-12-31"}},
         {"_id": 0, "days": 1}).to_list(500)
     used = sum(float(d.get("days") or 0) for d in docs)
-    return round(float(alloc) - used, 2)
+    return round(float(alloc) + extra - used, 2)
 
 
 @api_router.post("/leave/requests")
@@ -2634,13 +2636,18 @@ async def list_leave_balances(user: dict = Depends(get_current_user)):
     bal_by = {b["employee_id"]: b for b in bals}
     out = []
     for emp_id in sorted(set(bal_by) | set(used_map)):
-        alloc = (bal_by.get(emp_id) or {}).get("allocations") or {}
+        b = bal_by.get(emp_id) or {}
+        alloc = b.get("allocations") or {}
+        carry_doc = b.get("carryover") or {}
+        carry = (carry_doc.get("days") or {}) if carry_doc.get("year") == year else {}
         used = used_map.get(emp_id, {})
+        alloc_eff = {t: float(alloc.get(t, 0)) + float(carry.get(t, 0) or 0) for t in LEAVE_ALLOC_TYPES}
         out.append({"employee_id": emp_id,
-                    "employee_name": (bal_by.get(emp_id) or {}).get("employee_name", ""),
-                    "allocations": {t: float(alloc.get(t, 0)) for t in LEAVE_ALLOC_TYPES},
+                    "employee_name": b.get("employee_name", ""),
+                    "allocations": alloc_eff,
+                    "carryover": {t: float(carry.get(t, 0) or 0) for t in LEAVE_ALLOC_TYPES},
                     "used": {t: round(used.get(t, 0), 2) for t in LEAVE_ALLOC_TYPES},
-                    "remaining": {t: round(float(alloc.get(t, 0)) - used.get(t, 0), 2) for t in LEAVE_ALLOC_TYPES},
+                    "remaining": {t: round(alloc_eff[t] - used.get(t, 0), 2) for t in LEAVE_ALLOC_TYPES},
                     "year": year})
     return out
 
@@ -2702,6 +2709,103 @@ async def bulk_import_leaves(payload: LeaveBulkIn, principal: dict = Depends(get
     await log_audit(principal["email"], principal["role"], "IMPORT_CONGES", "conge", pid,
                     f"Migration du registre des congés : {count} demande(s) importées", pid)
     return {"imported": count}
+
+
+class LeavePolicyIn(BaseModel):
+    carryover_enabled: bool = False
+    carryover_max_days: float = 0
+    types: list = ["Vacances"]
+
+
+@api_router.get("/leave/policy")
+async def get_leave_policy(user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    doc = await db.leave_policies.find_one({"pharmacy_id": pid}, {"_id": 0}) or {}
+    return {"carryover_enabled": bool(doc.get("carryover_enabled")),
+            "carryover_max_days": float(doc.get("carryover_max_days") or 0),
+            "types": doc.get("types") or ["Vacances"]}
+
+
+@api_router.put("/leave/policy")
+async def set_leave_policy(payload: LeavePolicyIn, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    if not (0 <= payload.carryover_max_days <= 365):
+        raise HTTPException(status_code=400, detail="Plafond invalide (0 à 365 jours).")
+    types = [t for t in payload.types if t in LEAVE_ALLOC_TYPES]
+    if payload.carryover_enabled and not types:
+        raise HTTPException(status_code=400, detail="Choisissez au moins un type de congé à reporter.")
+    await db.leave_policies.update_one(
+        {"pharmacy_id": pid},
+        {"$set": {"pharmacy_id": pid, "carryover_enabled": payload.carryover_enabled,
+                  "carryover_max_days": round(float(payload.carryover_max_days), 1), "types": types,
+                  "updated_at": datetime.now(timezone.utc).isoformat()}}, upsert=True)
+    await log_audit(principal["email"], principal["role"], "POLITIQUE_REPORT_CONGES", "conge", pid,
+                    f"Report de soldes {'activé' if payload.carryover_enabled else 'désactivé'} — "
+                    f"plafond {payload.carryover_max_days:g} j, types {types}", pid)
+    return {"ok": True}
+
+
+async def _used_leave_days(pid: str, employee_id: str, ltype: str, year: int) -> float:
+    docs = await db.leave_requests.find(
+        {"pharmacy_id": pid, "employee_id": employee_id, "type": ltype, "status": "Approuvée",
+         "start_date": {"$gte": f"{year}-01-01", "$lte": f"{year}-12-31"}},
+        {"_id": 0, "days": 1}).to_list(500)
+    return sum(float(d.get("days") or 0) for d in docs)
+
+
+async def run_leave_carryover(pid: str, year: int, actor: str = "cron", role: str = "system") -> dict:
+    policy = await db.leave_policies.find_one({"pharmacy_id": pid}, {"_id": 0}) or {}
+    if not policy.get("carryover_enabled"):
+        return {"processed": 0, "details": [], "skipped": "politique désactivée"}
+    types = [t for t in (policy.get("types") or []) if t in LEAVE_ALLOC_TYPES]
+    max_days = float(policy.get("carryover_max_days") or 0)
+    bals = await db.leave_balances.find({"pharmacy_id": pid}, {"_id": 0}).to_list(1000)
+    details = []
+    for bal in bals:
+        prev_carry = bal.get("carryover") or {}
+        if prev_carry.get("year") == year:
+            continue
+        alloc = bal.get("allocations") or {}
+        prev_extra = (prev_carry.get("days") or {}) if prev_carry.get("year") == year - 1 else {}
+        carried = {}
+        for t in types:
+            alloc_prev = float(alloc.get(t, 0)) + float(prev_extra.get(t, 0) or 0)
+            used_prev = await _used_leave_days(pid, bal["employee_id"], t, year - 1)
+            carry = max(0.0, alloc_prev - used_prev)
+            if max_days > 0:
+                carry = min(carry, max_days)
+            carried[t] = round(carry, 1)
+        await db.leave_balances.update_one(
+            {"pharmacy_id": pid, "employee_id": bal["employee_id"]},
+            {"$set": {"carryover": {"year": year, "days": carried,
+                                    "applied_at": datetime.now(timezone.utc).isoformat(), "by": actor}}})
+        if sum(carried.values()) > 0:
+            await _notify_shift_change(
+                pid, bal["employee_id"], "Report de soldes de congés",
+                f"Jours non utilisés de {year - 1} reportés : "
+                + ", ".join(f"{t} +{n:g} j" for t, n in carried.items() if n > 0) + ".",
+                "emerald", module="vacations", icon="leave")
+        details.append({"employee_id": bal["employee_id"],
+                        "employee_name": bal.get("employee_name", ""), "carried": carried})
+    await log_audit(actor, role, "REPORT_SOLDES_CONGES", "conge", pid,
+                    f"Report des soldes {year - 1}→{year} : {len(details)} employé(s) traités", pid)
+    return {"processed": len(details), "details": details}
+
+
+@api_router.post("/leave/carryover/run")
+async def run_carryover_endpoint(year: int = Query(0), principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    target = year or datetime.now(timezone.utc).astimezone(MONTREAL_TZ).year
+    if not (2020 <= target <= 2100):
+        raise HTTPException(status_code=400, detail="Année invalide.")
+    return await run_leave_carryover(pid, target, principal["email"], principal["role"])
+
+
+async def leave_carryover_job():
+    year = datetime.now(timezone.utc).astimezone(MONTREAL_TZ).year
+    async for policy in db.leave_policies.find({"carryover_enabled": True}, {"_id": 0, "pharmacy_id": 1}):
+        res = await run_leave_carryover(policy["pharmacy_id"], year)
+        logger.info(f"Report de soldes {policy['pharmacy_id']} : {res.get('processed', 0)} employé(s)")
 
 
 def _time_to_minutes(t: str) -> int:
@@ -5589,6 +5693,7 @@ async def startup_tasks():
     scheduler.add_job(weekly_task_report_job, CronTrigger(day_of_week="mon", hour=7, minute=0))
     scheduler.add_job(monthly_budget_report_job, CronTrigger(day=1, hour=7, minute=30))
     scheduler.add_job(shift_reminder_job, CronTrigger(hour=18, minute=0))
+    scheduler.add_job(leave_carryover_job, CronTrigger(month=1, day=1, hour=0, minute=45))
     scheduler.start()
 
 
