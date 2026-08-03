@@ -1,7 +1,8 @@
-import { useState, FormEvent } from 'react';
+import { useState, useEffect, FormEvent } from 'react';
+import axios from 'axios';
 import { useHR } from '@/context/HRContext';
 import { useAuth } from '@/context/AuthContext';
-import { PharmacyPlan } from '@/types';
+import { PharmacyPlan, OverviewAccount } from '@/types';
 import { ModuleHeader, StatCard } from '@/components/modules/shared';
 import { SuperadminUsers } from '@/components/modules/SuperadminUsers';
 import { SuperadminOverview } from '@/components/modules/SuperadminOverview';
@@ -25,9 +26,14 @@ const PLAN_STYLES: Record<PharmacyPlan, string> = {
   'Entreprise': 'bg-violet-100 text-violet-800',
 };
 
+const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+
+interface LiveStats { pharmacies: number; accounts: number; employees: number; managers: number; suspended: number }
+
 export default function SuperadminModule(): JSX.Element {
   const { state, addPharmacy, updatePharmacy, resetData, addBranch, deleteBranch } = useHR();
-  const { currentUser } = useAuth();
+  const { currentUser, token } = useAuth();
+  const [live, setLive] = useState<LiveStats | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [name, setName] = useState('');
   const [city, setCity] = useState('');
@@ -38,8 +44,22 @@ export default function SuperadminModule(): JSX.Element {
   const [branchAddress, setBranchAddress] = useState('');
   const [branchPharmacyId, setBranchPharmacyId] = useState(state.pharmacies[0]?.id ?? '');
 
-  const activeCount = state.pharmacies.filter((p) => p.active).length;
-  const totalEmployees = state.pharmacies.reduce((s, p) => s + p.employeeCount, 0);
+  useEffect(() => {
+    if (currentUser?.role !== 'superadmin' || !token) return;
+    axios.get<{ pharmacies: { pharmacy_id: string }[]; accounts?: OverviewAccount[] }>(`${API}/superadmin/overview`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => {
+        const accounts = r.data.accounts ?? [];
+        const clients = accounts.filter((a) => a.role !== 'superadmin');
+        setLive({
+          pharmacies: r.data.pharmacies.length,
+          accounts: clients.length,
+          employees: clients.filter((a) => a.role === 'employee').length,
+          managers: clients.filter((a) => a.role === 'admin' || a.role === 'manager').length,
+          suspended: clients.filter((a) => a.suspended).length,
+        });
+      })
+      .catch(() => undefined);
+  }, [currentUser?.role, token]);
 
   if (currentUser?.role !== 'superadmin') {
     return (
@@ -97,10 +117,15 @@ export default function SuperadminModule(): JSX.Element {
           </div>
         }
       />
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-10">
-        <StatCard label="Pharmacies" value={String(state.pharmacies.length)} icon={Building2} hint={`${activeCount} actives`} />
-        <StatCard label="Employés gérés" value={String(totalEmployees)} icon={Users} hint="Tous comptes confondus" />
-        <StatCard label="Comptes actifs" value={`${Math.round((activeCount / Math.max(state.pharmacies.length, 1)) * 100)} %`} icon={ShieldCheck} />
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-10" data-testid="superadmin-live-stats">
+        <StatCard label="Pharmacies clientes" value={live ? String(live.pharmacies) : '…'} icon={Building2} hint="Données réelles de la plateforme" />
+        <StatCard label="Comptes clients" value={live ? String(live.accounts) : '…'} icon={Users} hint={live ? `${live.employees} employé(s) · ${live.managers} gestionnaire(s)` : 'Chargement…'} />
+        <StatCard
+          label="Comptes actifs"
+          value={live ? `${Math.round(((live.accounts - live.suspended) / Math.max(live.accounts, 1)) * 100)} %` : '…'}
+          icon={ShieldCheck}
+          hint={live ? (live.suspended > 0 ? `${live.suspended} compte(s) suspendu(s)` : 'Aucun compte suspendu') : 'Chargement…'}
+        />
       </div>
 
       <SuperadminOverview />

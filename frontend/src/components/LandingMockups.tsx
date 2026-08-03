@@ -3,6 +3,7 @@ import {
   Pin, Paperclip, CheckCheck, Flame, Award, MapPin, Camera, Mail, Link2,
   GraduationCap, Star, ShieldCheck, ScrollText, ClipboardCheck, Send,
   ChevronDown, FileText, Check, Navigation, TrendingUp,
+  TreePalm, PartyPopper, Sparkles, Building2, HeartHandshake, Hand,
 } from 'lucide-react';
 
 interface BoxProps { children: ReactNode; className?: string }
@@ -516,6 +517,162 @@ export function MockRecruitment(): JSX.Element {
             ))}
             <p className="text-[8px] font-bold text-bronze-700 mt-1">Démarré automatiquement à l'embauche</p>
           </div>
+        </FloatCard>
+      </div>
+    </MockRoot>
+  );
+}
+
+export function MockLeaves(): JSX.Element {
+  return (
+    <MockRoot>
+      <div className="px-2 sm:px-8 pt-6 pb-14">
+        <Window title="Vacances — soldes et demandes">
+          <div className="p-4">
+            <div className="flex gap-2 mb-3">
+              {[['Vacances', '12 j'], ['Maladie', '6 j'], ['Mobile', '3 j']].map(([l, v]) => (
+                <div key={l} className="flex-1 rounded-lg bg-emerald-50 border border-emerald-100 px-2 py-1.5 text-center">
+                  <p className="text-[8px] uppercase font-bold text-emerald-700 tracking-wider">{l}</p>
+                  <p className="text-xs font-extrabold text-slate-800">{v}</p>
+                </div>
+              ))}
+            </div>
+            <div className="rounded-lg border border-slate-100 px-3 py-2 mb-1.5 flex items-center justify-between">
+              <div>
+                <p className="text-[10px] font-bold text-slate-700">Julie G. — Vacances</p>
+                <p className="text-[9px] text-slate-400">2 au 6 septembre · 5 jours</p>
+              </div>
+              <span className="text-[8px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Approuvée</span>
+            </div>
+            <div className="rounded-lg border border-slate-100 px-3 py-2 mb-2 flex items-center justify-between">
+              <div>
+                <p className="text-[10px] font-bold text-slate-700">Karim B. — Congé mobile</p>
+                <p className="text-[9px] text-slate-400">15 août · 1 jour</p>
+              </div>
+              <span className="text-[8px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">En attente</span>
+            </div>
+            <div
+              className="rounded-lg border border-dashed border-amber-300 px-3 py-1.5 text-[9px] font-semibold text-amber-700 flex items-center gap-1.5"
+              style={{ backgroundImage: 'repeating-linear-gradient(45deg, rgba(217,119,6,0.10) 0 6px, transparent 6px 12px)' }}
+            >
+              <TreePalm className="w-3 h-3" /> Affiché en filigrane sur l'horaire — planification bloquée
+            </div>
+          </div>
+        </Window>
+        <FloatCard className="right-0 sm:-right-2 -bottom-4 px-3.5 py-2.5">
+          <p className="text-[9px] font-bold text-slate-700 flex items-center gap-1.5">
+            <CheckCheck className="w-3 h-3 text-emerald-600" /> Report automatique : +5 j reportés au 1ᵉʳ janvier
+          </p>
+        </FloatCard>
+      </div>
+    </MockRoot>
+  );
+}
+
+export function MockBenefits(): JSX.Element {
+  const items = [
+    { t: 'Assurance dentaire familiale', s: 'Couverture 80 % — tous les postes', c: 'from-emerald-400 to-emerald-600' },
+    { t: 'Rabais employé 20 %', s: 'Produits de la pharmacie', c: 'from-bronze-400 to-bronze-600' },
+    { t: 'REER collectif', s: 'Cotisation égalée jusqu\'à 3 %', c: 'from-sky-400 to-sky-600' },
+  ];
+  return (
+    <MockRoot>
+      <div className="px-2 sm:px-8 pt-6 pb-14">
+        <Window title="Avantages sociaux — 8 publiés">
+          <div className="p-4 space-y-2">
+            {items.map((b) => (
+              <div key={b.t} className="rounded-lg border border-slate-100 px-3 py-2 flex items-center gap-3">
+                <span className={`w-8 h-8 rounded-lg bg-gradient-to-br ${b.c} flex items-center justify-center shrink-0`}>
+                  <HeartHandshake className="w-3.5 h-3.5 text-white" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] font-bold text-slate-700 truncate">{b.t}</p>
+                  <p className="text-[9px] text-slate-400 truncate">{b.s}</p>
+                </div>
+                <span className="text-[8px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 shrink-0">Publié</span>
+              </div>
+            ))}
+          </div>
+        </Window>
+        <FloatCard className="left-0 sm:-left-2 -bottom-4 px-3.5 py-2.5">
+          <p className="text-[9px] font-bold text-slate-700 flex items-center gap-1.5">
+            <Sparkles className="w-3 h-3 text-violet-600" /> PDF d'assureur importé → 8 avantages illustrés par l'IA
+          </p>
+        </FloatCard>
+      </div>
+    </MockRoot>
+  );
+}
+
+export function MockTeam(): JSX.Element {
+  return (
+    <MockRoot>
+      <div className="px-2 sm:px-8 pt-6 pb-14">
+        <Window title="Équipe — sondages, kudos et quarts ouverts">
+          <div className="p-4">
+            <p className="text-[10px] font-bold text-slate-700 mb-1.5">Party des fêtes : quelle date ? <span className="text-[8px] font-semibold text-slate-400">· 8 votes</span></p>
+            {[['Samedi 12 décembre', 62], ['Samedi 19 décembre', 38]].map(([label, pct]) => (
+              <div key={String(label)} className="mb-1.5">
+                <div className="flex justify-between text-[9px] font-semibold text-slate-500 mb-0.5">
+                  <span>{label}</span><span>{pct} %</span>
+                </div>
+                <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                  <span className="block h-full bg-emerald-500" style={{ width: `${pct}%` }} />
+                </div>
+              </div>
+            ))}
+            <div className="mt-3 rounded-lg bg-bronze-50 border border-bronze-100 px-3 py-2 flex items-center gap-2">
+              <PartyPopper className="w-3.5 h-3.5 text-bronze-600 shrink-0" />
+              <p className="text-[9px] text-slate-600 min-w-0"><b>Kudos à Julie</b> — « Merci pour le coup de main au labo ! »</p>
+              <span className="ml-auto text-[9px] font-bold text-bronze-700 shrink-0 flex items-center gap-1"><Hand className="w-3 h-3" /> 8</span>
+            </div>
+          </div>
+        </Window>
+        <FloatCard className="right-0 sm:-right-2 -bottom-4 px-3.5 py-2.5">
+          <p className="text-[9px] font-bold text-slate-700 flex items-center gap-1.5">
+            <Flame className="w-3 h-3 text-red-500" /> Quart ouvert sam. 9 h–17 h — réclamé en 41 secondes
+          </p>
+        </FloatCard>
+      </div>
+    </MockRoot>
+  );
+}
+
+export function MockBudgets(): JSX.Element {
+  const rows = [
+    { d: 'Laboratoire', cost: '2 340 $', max: '2 500 $', pct: 94, over: false },
+    { d: 'Plancher', cost: '1 940 $', max: '1 800 $', pct: 100, over: true },
+    { d: 'Livraison', cost: '620 $', max: '900 $', pct: 69, over: false },
+  ];
+  return (
+    <MockRoot>
+      <div className="px-2 sm:px-8 pt-6 pb-14">
+        <Window title="Budgets — semaine du 3 août">
+          <div className="p-4">
+            <div className="flex gap-2 mb-3">
+              {['Centre-Ville', 'Plateau'].map((b) => (
+                <span key={b} className="inline-flex items-center gap-1 text-[9px] font-bold text-slate-600 bg-slate-100 rounded-full px-2.5 py-1">
+                  <Building2 className="w-2.5 h-2.5 text-emerald-600" /> {b}
+                </span>
+              ))}
+            </div>
+            {rows.map((r) => (
+              <div key={r.d} className="mb-2">
+                <div className="flex justify-between text-[9px] font-semibold mb-0.5">
+                  <span className="text-slate-600">{r.d}</span>
+                  <span className={r.over ? 'text-red-600 font-bold' : 'text-slate-500'}>{r.cost} / {r.max}</span>
+                </div>
+                <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                  <span className={`block h-full ${r.over ? 'bg-red-500' : 'bg-emerald-500'}`} style={{ width: `${r.pct}%` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </Window>
+        <FloatCard className="left-0 sm:-left-2 -bottom-4 px-3.5 py-2.5">
+          <p className="text-[9px] font-bold text-slate-700 flex items-center gap-1.5">
+            <Mail className="w-3 h-3 text-emerald-600" /> Rapport budget mensuel envoyé le 1ᵉʳ à 7 h 30
+          </p>
         </FloatCard>
       </div>
     </MockRoot>

@@ -48,7 +48,7 @@ export const SuperadminOverview = (): JSX.Element => {
 
   const pharmacyName = (id: string): string => state.pharmacies.find((p) => p.id === id)?.name ?? (id || '—');
 
-  const totalAccounts = pharmacies.reduce((s, p) => s + p.accounts.total, 0);
+  const totalEmployees = pharmacies.reduce((s, p) => s + p.accounts.employees, 0);
   const totalLicenses = pharmacies.reduce((s, p) => s + p.licenses.total, 0);
   const totalAlerts = pharmacies.reduce((s, p) => s + p.licenses.expiring_30 + p.licenses.expired, 0);
   const totalPublished = pharmacies.reduce((s, p) => s + p.trainings.published, 0);
@@ -70,7 +70,7 @@ export const SuperadminOverview = (): JSX.Element => {
   return (
     <>
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-4" data-testid="overview-stats">
-        <StatCard label="Comptes clients" value={String(totalAccounts)} icon={Globe2} hint="Admins, gestionnaires et employés" />
+        <StatCard label="Employés gérés" value={String(totalEmployees)} icon={UsersRound} hint="Comptes employés réels" />
         <StatCard label="Licences suivies" value={String(totalLicenses)} icon={BadgeCheck} hint="Toutes pharmacies" />
         <StatCard label="Alertes licences" value={String(totalAlerts)} icon={AlertTriangle} hint="≤ 30 jours ou expirées" />
         <StatCard label="Formations publiées" value={String(totalPublished)} icon={GraduationCap} hint="Générées par IA" />

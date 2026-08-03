@@ -242,13 +242,17 @@ export default function LandingPage({ onNavigate }: Props): JSX.Element {
             <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 text-sm text-slate-600">
               {[
                 { id: 'horaires', label: 'Horaires' },
+                { id: 'vacances', label: 'Vacances & congés' },
                 { id: 'punch', label: 'Punch & paie' },
+                { id: 'budgets', label: 'Budgets & succursales' },
                 { id: 'taches', label: 'Tâches par quart' },
                 { id: 'communication', label: 'Communication' },
+                { id: 'equipe', label: 'Équipe & kudos' },
                 { id: 'livraisons', label: 'Livraisons' },
                 { id: 'remplacements', label: 'Remplacements' },
                 { id: 'formations', label: 'Formations IA' },
                 { id: 'evaluations', label: 'Évaluations' },
+                { id: 'avantages', label: 'Avantages sociaux' },
                 { id: 'licences', label: 'Licences Loi 25' },
                 { id: 'recrutement', label: 'Recrutement' },
               ].map((l) => (

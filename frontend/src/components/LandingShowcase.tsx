@@ -4,15 +4,27 @@ import {
   ListChecks, Repeat, BarChart3, Award, MessagesSquare, Pin, Paperclip, Route, MapPin, Camera,
   Car, Mail, Link2, ArrowLeftRight, CalendarCheck, FileUp, HelpCircle, GraduationCap, Star,
   TrendingUp, BadgeCheck, History, ShieldCheck, CalendarClock, ScrollText, Eraser, Globe,
-  KanbanSquare, UserPlus, ClipboardCheck, TreePalm,
+  KanbanSquare, UserPlus, ClipboardCheck, TreePalm, FileDown, Layers, Vote, PartyPopper, Hand,
+  Cake, HeartHandshake, ImagePlus, Filter, Building2, LineChart, Glasses, Download, UserRound,
+  Stethoscope, KeyRound,
 } from 'lucide-react';
 import {
   MockSchedule, MockPunch, MockTasks, MockChat, MockDelivery, MockReplacement,
   MockTraining, MockEvaluation, MockLicenses, MockRecruitment,
+  MockLeaves, MockBenefits, MockTeam, MockBudgets,
 } from '@/components/LandingMockups';
 
 interface Bullet { icon: ComponentType<{ className?: string }>; title: string; text: string }
 interface Section { id: string; eyebrow: string; title: string; highlight: string; bullets: Bullet[]; mock: ReactNode }
+
+const ALSO_INCLUDED: { id: string; icon: ComponentType<{ className?: string; style?: React.CSSProperties }>; title: string; text: string }[] = [
+  { id: 'simplifie', icon: Glasses, title: 'Mode simplifié', text: 'Textes agrandis, contrastes renforcés et menu allégé — pensé pour le personnel moins à l\'aise avec les petits caractères.' },
+  { id: 'pwa', icon: Download, title: 'Application installable', text: 'Ajoutez Arrière Plan à l\'écran d\'accueil de n\'importe quel téléphone ou tablette — comme une vraie app, sans magasin d\'applications.' },
+  { id: 'monespace', icon: UserRound, title: 'Mon espace employé', text: 'Chaque employé retrouve ses quarts, ses relevés de paie PDF, ses congés et ses demandes d\'échange au même endroit.' },
+  { id: 'infirmiere', icon: Stethoscope, title: 'Rendez-vous infirmière', text: 'Les rendez-vous clients se planifient à l\'intérieur des quarts de votre infirmière, visibles sur l\'horaire.' },
+  { id: 'rappels', icon: BellRing, title: 'Rappels de quart la veille', text: 'Chaque soir à 18 h, ceux qui travaillent le lendemain reçoivent automatiquement le détail de leurs quarts.' },
+  { id: 'securite', icon: KeyRound, title: 'Comptes sécurisés', text: 'Verrouillage anti-intrusion, mots de passe robustes, récupération par code courriel et alertes de connexion inhabituelle.' },
+];
 
 const SECTIONS: Section[] = [
   {
@@ -29,6 +41,19 @@ const SECTIONS: Section[] = [
     ],
   },
   {
+    id: 'vacances',
+    eyebrow: 'Congés & vacances',
+    title: 'Les demandes de congé,',
+    highlight: 'approuvées sans maux de tête.',
+    mock: <MockLeaves />,
+    bullets: [
+      { icon: TreePalm, title: 'Soldes en temps réel', text: 'Vacances, maladie, congés mobiles : chaque employé voit ses jours restants, vous aussi.' },
+      { icon: CheckCheck, title: 'Circuit d\'approbation simple', text: 'Demande, note du gestionnaire, décision en un clic — tout est tracé, conforme Loi 25.' },
+      { icon: AlertTriangle, title: 'Filigranes sur l\'horaire', text: 'Un congé approuvé apparaît en filigrane dans la grille et bloque la planification ce jour-là.' },
+      { icon: FileDown, title: 'Report et relevé annuel PDF', text: 'Les jours inutilisés se reportent selon votre politique, et le relevé annuel se télécharge en PDF.' },
+    ],
+  },
+  {
     id: 'punch',
     eyebrow: 'Temps de travail & présences',
     title: 'Simplifiez le suivi des heures',
@@ -39,6 +64,19 @@ const SECTIONS: Section[] = [
       { icon: FileSpreadsheet, title: 'Oubliez les feuilles de temps papier', text: 'Les heures punchées remplissent la paie automatiquement, temps supplémentaire calculé.' },
       { icon: AlertTriangle, title: 'Irrégularités détectées', text: 'Un punch oublié depuis 12 heures ? Vous êtes alerté et le corrigez en un clic.' },
       { icon: Wallet, title: 'Relevés de paie PDF québécois', text: 'Impôts, RRQ, AE, RQAP et cumulatifs annuels — des relevés complets à votre image.' },
+    ],
+  },
+  {
+    id: 'budgets',
+    eyebrow: 'Budgets & succursales',
+    title: 'Vos coûts de main-d\'œuvre,',
+    highlight: 'maîtrisés au dollar près.',
+    mock: <MockBudgets />,
+    bullets: [
+      { icon: Layers, title: 'Budgets par département', text: 'Laboratoire, plancher, livraison : chaque département a son budget, dépassement signalé en rouge.' },
+      { icon: Building2, title: 'Multi-succursales', text: 'Un employé peut travailler dans plusieurs succursales — chaque quart est imputé au bon budget.' },
+      { icon: LineChart, title: 'Évolution sur 6 mois', text: 'Un graphique compare les coûts planifiés par département, mois après mois.' },
+      { icon: Mail, title: 'Rapport mensuel automatique', text: 'Le 1ᵉʳ du mois, un rapport budgets vs coûts réels arrive dans votre boîte courriel.' },
     ],
   },
   {
@@ -65,6 +103,19 @@ const SECTIONS: Section[] = [
       { icon: Pin, title: 'Messages épinglés', text: 'Les annonces importantes restent en haut de la conversation, impossibles à manquer.' },
       { icon: Paperclip, title: 'Photos & documents', text: 'Partagez protocoles, notes de service et photos directement en pièce jointe.' },
       { icon: Sparkles, title: 'Assistant IA intégré', text: 'Un assistant qui répond aux questions de votre équipe, disponible en tout temps.' },
+    ],
+  },
+  {
+    id: 'equipe',
+    eyebrow: 'Engagement d\'équipe',
+    title: 'Une équipe mobilisée,',
+    highlight: 'ça se cultive chaque jour.',
+    mock: <MockTeam />,
+    bullets: [
+      { icon: Vote, title: 'Sondages éclair', text: 'Posez une question à l\'équipe — chacun vote une fois, les résultats s\'affichent en direct.' },
+      { icon: Hand, title: 'Kudos entre collègues', text: 'Un merci public qui récolte des applaudissements — la reconnaissance devient contagieuse.' },
+      { icon: PartyPopper, title: 'Quarts ouverts à réclamer', text: 'Publiez un quart à combler : premier arrivé, premier servi, directement du téléphone.' },
+      { icon: Cake, title: 'Anniversaires soulignés', text: 'Chaque matin d\'anniversaire, un message festif se publie tout seul dans le chat d\'équipe.' },
     ],
   },
   {
@@ -117,6 +168,19 @@ const SECTIONS: Section[] = [
       { icon: TrendingUp, title: 'Suggestion liée au BAIIA', text: 'L\'augmentation proposée respecte la santé financière réelle de votre officine.' },
       { icon: BadgeCheck, title: 'Acceptation en ligne', text: 'L\'employé accepte ou commente la proposition — tout est tracé et documenté.' },
       { icon: History, title: 'Historique salarial', text: 'Chaque changement de taux archivé au dossier avec le score de performance associé.' },
+    ],
+  },
+  {
+    id: 'avantages',
+    eyebrow: 'Avantages sociaux',
+    title: 'Vos avantages sociaux,',
+    highlight: 'enfin mis en valeur.',
+    mock: <MockBenefits />,
+    bullets: [
+      { icon: FileUp, title: 'Du PDF d\'assureur à la fiche claire', text: 'Déposez le contrat de votre assureur : l\'IA en extrait des avantages lisibles pour l\'équipe.' },
+      { icon: ImagePlus, title: 'Illustrations générées par l\'IA', text: 'Chaque avantage reçoit une image attrayante — une vitrine dont votre équipe se souvient.' },
+      { icon: Filter, title: 'Ciblés par poste', text: 'Chaque employé ne voit que les avantages auxquels son poste donne droit.' },
+      { icon: HeartHandshake, title: 'Brouillon puis publication', text: 'Préparez en coulisses, publiez quand tout est prêt — modifiable en tout temps.' },
     ],
   },
   {
@@ -196,6 +260,27 @@ export function LandingShowcase(): JSX.Element {
           </div>
         </section>
       ))}
+      <section id="sec-aussi" data-testid="also-included-section" className="bg-slate-50/80 border-y border-slate-100">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-16 sm:py-20">
+          <div className="text-center max-w-3xl mx-auto mb-10">
+            <p className="text-xs sm:text-sm uppercase tracking-[0.18em] text-bronze-700 font-bold mb-3">Et ce n'est pas tout</p>
+            <h3 className="font-heading text-2xl sm:text-3xl font-extrabold text-slate-900 leading-tight">
+              Aussi inclus, <span className="text-emerald-600">sans supplément.</span>
+            </h3>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            {ALSO_INCLUDED.map((a) => (
+              <div key={a.title} data-testid={`also-card-${a.id}`} className="rounded-2xl bg-white border border-slate-200 p-6 hover:border-emerald-300 hover:-translate-y-1 transition-all">
+                <span className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center mb-4">
+                  <a.icon className="w-4.5 h-4.5 text-emerald-700" style={{ width: 18, height: 18 }} />
+                </span>
+                <p className="font-heading font-bold text-slate-900 text-sm sm:text-base mb-1.5">{a.title}</p>
+                <p className="text-xs sm:text-sm text-slate-500 leading-relaxed">{a.text}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
