@@ -1,16 +1,18 @@
-import { useState, FormEvent } from 'react';
+import { useState, useEffect, FormEvent } from 'react';
 import { ModuleKey } from '@/types';
 import { useAuth } from '@/context/AuthContext';
 import { BrandLogo } from '@/components/BrandLogo';
+import { InstallAppButton } from '@/components/InstallAppButton';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
 import {
   LayoutDashboard, Users, CalendarClock, Briefcase, Wallet, RefreshCw, TreePalm,
   TrendingUp, ClipboardCheck, FileText, HeartHandshake, HelpCircle, ShieldCheck,
-  LogOut, Menu, X, LucideIcon, BadgeCheck, UserRound, KeyRound, Eye, EyeOff, GraduationCap, ListChecks, Truck, MessagesSquare, Boxes, PartyPopper,
+  LogOut, Menu, X, LucideIcon, BadgeCheck, UserRound, KeyRound, Eye, EyeOff, GraduationCap, ListChecks, Truck, MessagesSquare, Boxes, PartyPopper, Glasses,
 } from 'lucide-react';
 
 interface Props {
@@ -51,6 +53,10 @@ const NAV_ITEMS: NavItem[] = [
 
 const EMPLOYEE_MODULES: ModuleKey[] = ['dashboard', 'myspace', 'messages', 'team', 'scheduling', 'tasks', 'deliveries', 'vacations', 'training', 'benefits', 'faq'];
 
+const SIMPLE_MODULES: ModuleKey[] = ['dashboard', 'myspace', 'messages', 'scheduling', 'tasks', 'vacations', 'employees', 'payroll', 'faq'];
+
+const SIMPLE_MODE_KEY = 'ap_simple_mode_v1';
+
 export default function Sidebar({ active, onSelect, onLogout }: Props): JSX.Element {
   const { currentUser, changePassword } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -60,6 +66,13 @@ export default function Sidebar({ active, onSelect, onLogout }: Props): JSX.Elem
   const [currentPwd, setCurrentPwd] = useState('');
   const [newPwd, setNewPwd] = useState('');
   const [pwdError, setPwdError] = useState('');
+  const [simpleMode, setSimpleMode] = useState(() => localStorage.getItem(SIMPLE_MODE_KEY) === '1');
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('simple-mode', simpleMode);
+    localStorage.setItem(SIMPLE_MODE_KEY, simpleMode ? '1' : '0');
+    return () => document.documentElement.classList.remove('simple-mode');
+  }, [simpleMode]);
 
   const submitPassword = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
@@ -76,6 +89,7 @@ export default function Sidebar({ active, onSelect, onLogout }: Props): JSX.Elem
   };
 
   const items = NAV_ITEMS.filter((item) => {
+    if (simpleMode && !SIMPLE_MODULES.includes(item.key)) return false;
     if (currentUser?.role === 'employee') return EMPLOYEE_MODULES.includes(item.key);
     if (item.key === 'myspace') return false;
     if (item.key === 'superadmin') return currentUser?.role === 'superadmin';
@@ -112,6 +126,25 @@ export default function Sidebar({ active, onSelect, onLogout }: Props): JSX.Elem
         <p className="text-xs text-bronze-700 font-semibold mb-3 capitalize">
           {currentUser?.role === 'admin' ? 'Admin (propriétaire)' : currentUser?.role === 'manager' ? 'Gestionnaire' : currentUser?.role === 'superadmin' ? 'Superadmin' : 'Employé(e)'}
         </p>
+        <div className="mb-2">
+          <InstallAppButton />
+        </div>
+        <div
+          data-testid="simple-mode-row"
+          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-500"
+          title="Grossit les textes, renforce les contrastes et simplifie le menu — idéal pour un usage sans lunettes."
+        >
+          <Glasses className="w-4 h-4 shrink-0" /> Mode simplifié
+          <Switch
+            data-testid="simple-mode-toggle"
+            className="ml-auto"
+            checked={simpleMode}
+            onCheckedChange={(v: boolean) => {
+              setSimpleMode(v);
+              toast.success(v ? 'Mode simplifié activé : textes agrandis et menu allégé.' : 'Mode simplifié désactivé.');
+            }}
+          />
+        </div>
         <button
           data-testid="sidebar-password-button"
           onClick={() => setPwdOpen(true)}

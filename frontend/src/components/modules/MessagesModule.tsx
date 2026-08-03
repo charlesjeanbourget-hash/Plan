@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { MessagesSquare, Plus, Send, Trash2, Users, ShieldCheck, UserRound, Pin, PinOff, Paperclip, FileText, Download, X } from 'lucide-react';
+import { MessagesSquare, Plus, Send, Trash2, Users, ShieldCheck, UserRound, Pin, PinOff, Paperclip, FileText, Download, X, Cake, PartyPopper } from 'lucide-react';
 import { toast } from 'sonner';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -139,8 +139,16 @@ export default function MessagesModule(): JSX.Element {
   const [newType, setNewType] = useState<'equipe' | 'gestionnaires' | 'direct'>('equipe');
   const [newTarget, setNewTarget] = useState('');
   const [chatUsers, setChatUsers] = useState<ChatUser[]>([]);
+  const [birthdays, setBirthdays] = useState<{ employee_id: string; employee_name: string }[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!token) return;
+    axios.get<{ employee_id: string; employee_name: string }[]>(`${API}/birthdays/today`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => setBirthdays(r.data))
+      .catch(() => setBirthdays([]));
+  }, [token]);
 
   const refreshConversations = useCallback(async (): Promise<void> => {
     try {
@@ -357,6 +365,22 @@ export default function MessagesModule(): JSX.Element {
                   </Button>
                 )}
               </div>
+              {active.type === 'equipe' && birthdays.length > 0 && (
+                <div data-testid="birthday-banner" className="relative overflow-hidden flex items-center gap-3 px-5 py-3 border-b border-emerald-200 bg-gradient-to-r from-emerald-50 via-bronze-50 to-emerald-50">
+                  <span className="w-9 h-9 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0 animate-float-slow">
+                    <Cake className="w-4.5 h-4.5" style={{ width: 18, height: 18 }} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-bold text-emerald-900">
+                      {birthdays.length === 1
+                        ? `C'est l'anniversaire de ${birthdays[0].employee_name} aujourd'hui !`
+                        : `Anniversaires du jour : ${birthdays.map((b) => b.employee_name).join(', ')} !`}
+                    </p>
+                    <p className="text-xs text-emerald-700">Prenez un instant pour lui souhaiter une belle journée dans le clavardage.</p>
+                  </div>
+                  <PartyPopper className="w-5 h-5 text-bronze-600 shrink-0" />
+                </div>
+              )}
               {active.pinned_message && (
                 <div data-testid="pinned-banner" className="flex items-start gap-2.5 px-5 py-2.5 bg-bronze-50 border-b border-bronze-200">
                   <Pin className="w-3.5 h-3.5 text-bronze-700 mt-0.5 shrink-0" />

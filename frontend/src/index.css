@@ -87,3 +87,22 @@
 .animate-float-slow {
   animation: floatSoft 6.5s ease-in-out 1.2s infinite;
 }
+
+/* Mode simplifié : textes agrandis + contrastes renforcés pour le personnel moins à l'aise avec les petits caractères */
+html.simple-mode {
+  font-size: 125%;
+}
+
+html.simple-mode .text-slate-400 {
+  color: #475569 !important;
+}
+
+html.simple-mode .text-slate-500 {
+  color: #334155 !important;
+}
+
+html.simple-mode .text-\[10px\],
+html.simple-mode .text-\[11px\] {
+  font-size: 0.78rem !important;
+  letter-spacing: 0.02em !important;
+}

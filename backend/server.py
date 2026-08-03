@@ -1078,8 +1078,86 @@ async def superadmin_overview(su: dict = Depends(require_superadmin)):
     for s in settings:
         if s.get("enabled"):
             bucket(s.get("pharmacy_id"))["report_enabled"] = True
+
+    month_ago = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    today_iso = date.today().isoformat()
+
+    async def _by_pharmacy(coll, match: Optional[dict] = None) -> dict:
+        pipeline = ([{"$match": match}] if match else []) + [{"$group": {"_id": "$pharmacy_id", "n": {"$sum": 1}}}]
+        return {(d["_id"] or "—"): d["n"] async for d in coll.aggregate(pipeline)}
+
+    shifts_by = await _by_pharmacy(db.shifts)
+    shifts_upcoming_by = await _by_pharmacy(db.shifts, {"date": {"$gte": today_iso}})
+    punches_by = await _by_pharmacy(db.punches, {"punch_in": {"$gte": month_ago}})
+    leave_pending_by = await _by_pharmacy(db.leave_requests, {"status": "En attente"})
+    leave_approved_by = await _by_pharmacy(db.leave_requests, {"status": "Approuvée"})
+    msgs_by = await _by_pharmacy(db.chat_messages, {"pharmacy_id": {"$exists": True}, "created_at": {"$gte": month_ago}})
+    open_shifts_by = await _by_pharmacy(db.open_shifts, {"status": "open"})
+    evals_by = await _by_pharmacy(db.evaluations)
+    deliveries_by = await _by_pharmacy(db.deliveries)
+    tasks_by = await _by_pharmacy(db.shift_tasks)
+    benefits_by = await _by_pharmacy(db.benefits, {"status": "published"})
+    audit_by = await _by_pharmacy(db.audit_logs, {"created_at": {"$gte": month_ago}})
+
+    punch_hours_by: dict = {}
+    async for p in db.punches.find({"punch_in": {"$gte": month_ago}, "punch_out": {"$ne": None}},
+                                   {"_id": 0, "pharmacy_id": 1, "punch_in": 1, "punch_out": 1, "breaks": 1}):
+        try:
+            h = (datetime.fromisoformat(p["punch_out"]) - datetime.fromisoformat(p["punch_in"])).total_seconds() / 3600
+            for br in (p.get("breaks") or []):
+                if br.get("start") and br.get("end"):
+                    h -= (datetime.fromisoformat(br["end"]) - datetime.fromisoformat(br["start"])).total_seconds() / 3600
+            key = p.get("pharmacy_id") or "—"
+            punch_hours_by[key] = punch_hours_by.get(key, 0) + max(0, h)
+        except (ValueError, TypeError):
+            continue
+
+    last_activity_by: dict = {}
+    async for d in db.audit_logs.aggregate([{"$group": {"_id": "$pharmacy_id", "last": {"$max": "$created_at"}}}]):
+        last_activity_by[d["_id"] or "—"] = d["last"]
+
+    for key, b in pharmacies.items():
+        b["activity"] = {
+            "shifts_total": shifts_by.get(key, 0),
+            "shifts_upcoming": shifts_upcoming_by.get(key, 0),
+            "punches_30d": punches_by.get(key, 0),
+            "punch_hours_30d": round(punch_hours_by.get(key, 0), 1),
+            "leave_pending": leave_pending_by.get(key, 0),
+            "leave_approved": leave_approved_by.get(key, 0),
+            "messages_30d": msgs_by.get(key, 0),
+            "open_shifts": open_shifts_by.get(key, 0),
+            "evaluations": evals_by.get(key, 0),
+            "deliveries": deliveries_by.get(key, 0),
+            "tasks": tasks_by.get(key, 0),
+            "benefits_published": benefits_by.get(key, 0),
+            "audit_events_30d": audit_by.get(key, 0),
+            "last_activity": last_activity_by.get(key, ""),
+        }
+
+    last_login_by: dict = {}
+    async for d in db.login_events.aggregate([
+            {"$match": {"event": "CONNEXION"}},
+            {"$group": {"_id": "$email", "last": {"$max": "$created_at"}}}]):
+        last_login_by[d["_id"]] = d["last"]
+    logins_30d_by: dict = {}
+    async for d in db.login_events.aggregate([
+            {"$match": {"event": "CONNEXION", "created_at": {"$gte": month_ago}}},
+            {"$group": {"_id": "$email", "n": {"$sum": 1}}}]):
+        logins_30d_by[d["_id"]] = d["n"]
+
+    accounts = [{
+        "email": u["email"], "name": u.get("name", ""), "role": u["role"],
+        "pharmacy_id": u.get("pharmacy_id") or "", "suspended": bool(u.get("suspended")),
+        "is_temporary_password": bool(u.get("is_temporary_password")),
+        "last_login": last_login_by.get(u["email"], ""),
+        "logins_30d": logins_30d_by.get(u["email"], 0),
+        "created_at": u.get("created_at", ""),
+    } for u in users]
+    accounts.sort(key=lambda a: a["last_login"], reverse=True)
+
     return {"superadmins": superadmins,
             "pharmacies": sorted(pharmacies.values(), key=lambda p: p["pharmacy_id"]),
+            "accounts": accounts,
             "generated_at": datetime.now(timezone.utc).isoformat()}
 
 
@@ -1633,6 +1711,14 @@ async def update_profile(employee_id: str, payload: ProfileIn, user: dict = Depe
     pid = check_profile_access(user, employee_id)
     doc = await get_or_create_profile(pid, employee_id, payload.employee_name or "")
     patch = {k: v for k, v in payload.model_dump().items() if v is not None}
+    if "birth_date" in patch:
+        bd = patch["birth_date"].strip()
+        if bd:
+            try:
+                date.fromisoformat(bd)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Date de naissance invalide (format AAAA-MM-JJ).")
+        patch["birth_date"] = bd
     if "hourly_rate" in patch:
         if user["role"] not in ("admin", "manager", "superadmin"):
             patch.pop("hourly_rate")
@@ -1672,6 +1758,16 @@ async def generate_punch_code(employee_id: str, principal: dict = Depends(get_pr
     await log_audit(principal["email"], principal["role"], "GENERATION_NIP", "profil", employee_id,
                     f"Nouveau NIP de punch généré pour {doc.get('employee_name') or employee_id}", pid)
     return {"punch_code": code}
+
+
+@api_router.get("/birthdays/today")
+async def birthdays_today(user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    today_md = datetime.now(MONTREAL_TZ).strftime("%m-%d")
+    docs = await db.employee_profiles.find(
+        {"pharmacy_id": pid, "birth_date": {"$regex": f"-{today_md}$"}},
+        {"_id": 0, "employee_id": 1, "employee_name": 1}).to_list(200)
+    return [{"employee_id": d.get("employee_id", ""), "employee_name": d.get("employee_name") or ""} for d in docs]
 
 
 # ==================== Punch des heures ====================

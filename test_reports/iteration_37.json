@@ -1,0 +1,31 @@
+{
+  "summary": "Passe complète iteration 45/37 — Backend 21/21 tests pytest verts (open-shifts create/list/claim/409-conflict/delete ; polls create/vote/2e-vote-refusé-400/close/delete ; kudos create/applaud/delete ; punch NIP 7068 flow complet in→break_start→break_end→out avec breaks[] persistés dans /api/punches ; punch/settings GET/PUT + validation 400 rounding invalide ; birth_date validation 400 sur '1993-13-45' et 200 sur '1993-05-10' + restauration 1993-08-02 pour démo ; /api/birthdays/today retourne bien Julie ; superadmin/overview 403 admin, 200 superadmin avec bloc activity{14 clés} + accounts[email/name/role/suspended/is_temporary_password/last_login/logins_30d] ; shifts avec branch_id='br2' persisté). Frontend (Playwright, admin@luminahr.ca et superadmin) : (1) ComparisonSection : 10 lignes comparison-row-0..9, score AP 10/10, Agendrix 2/10, CTA défile ✓. (2) simple-mode-toggle : ajoute la classe 'simple-mode' sur <html>, persiste après reload, se retire à la désactivation ✓. (3) birthday-banner visible dans conversation « Toute l'équipe » avec le texte « C'est l'anniversaire de Julie Gagnon aujourd'hui ! » ✓. (4) birth-date-input type=date visible dans ProfileEditor avec valeur 1993-08-02 (aujourd'hui MTL) ✓. (5) SuperadminOverview : overview-stats + overview-activity-stats présents (8 StatCards au total), overview-row-ph1 avec activity, accounts-detail-panel listant tous les comptes ✓. (6) PWA : /manifest.json 200 (name 'Arrière Plan'), /sw.js 200, service worker enregistré (1 registration active) ; install-app-button absent en headless (attendu, confirmé). (7) Multi-succursales : edit-employee-button ouvre le dialogue, edit-extra-branch-br2 chip présent et cliquable ✓. (8) OpenShiftsPanel exhibe open-shifts-panel, open-shift-publish-button, open-shift-dialog, claim-shift-{id}, etc. TeamModule expose team-module, poll-add-button, kudos-add-button, poll-card-{id}, kudos-card-{id}. Aucun bug bloquant.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "EmployeeDossier — dossier employé", "issue": "Le testid data-testid='employee-branches-label' spécifié dans la review request n'existe PAS dans le code (grep confirmé). Le dossier affiche uniquement 'Succursale : <succursale principale>' via un <p> sans testid, ligne 213 de EmployeeDossier.tsx. Impossible de vérifier automatiquement que le libellé combine « Pharmacie Centre-Ville, Succursale Plateau ». Ajouter data-testid='employee-branches-label' au <p> ligne 213 (et concaténer la liste des succursales additionnelles).", "selector": "[data-testid=\"employee-branches-label\"]", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration37.py",
+    "/app/test_reports/pytest/iteration_37.xml"
+  ],
+  "action_items": [
+    "Ajouter data-testid='employee-branches-label' au paragraphe « Succursale : … » dans EmployeeDossier.tsx (ligne ~213) et l'enrichir pour afficher toutes les succursales de l'employé (principale + additionnelles). Sans ça la spec Frontend 5 ne peut être vérifiée par un test automatisé."
+  ],
+  "critical_code_review_comments": [
+    "server.py — /api/superadmin/overview construit ~10 agrégations séquentielles ; sur une base croissante il faudrait les paralléliser avec asyncio.gather pour éviter la latence linéaire. Actuellement rapide (<1s) mais point de vigilance.",
+    "punch/break appelle punch_throttle_check qui limite à 5 échecs/IP/15 min ; les succès ne sont pas comptés, correct. Cependant la limite est partagée entre /api/punch et /api/punch/break — vérifier que la borne partagée en pharmacie ne consomme pas rapidement le quota d'IP en cas d'erreur NIP répétée.",
+    "OpenShiftsPanel : lorsqu'un quart est réclamé, le doc est retiré du GET list_open_shifts pour les non-admins mais reste 'claimed'. Envisager un endpoint history séparé pour audit visuel côté admin."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration37.py"],
+  "success_rate": {"backend": "100% (21/21)", "frontend": "~95% (9/10 flux validés — employee-branches-label absent)"},
+  "seed_data_creation": "Créés/supprimés pendant les tests : 1 quart ouvert TEST_iter37 réclamé par Julie (le shift dérivé reste en base — daté 2099-12-31, sans impact démo), 1 quart ouvert TEST_iter37_del (supprimé), 1 sondage TEST_iter37 (supprimé), 1 kudos TEST_iter37 (supprimé), 1 shift branch_id=br2 (supprimé). Julie e2 : birth_date remise à 1993-08-02 (aujourd'hui America/Montreal) — la bannière anniversaire reste active pour la démo.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "admin@luminahr.ca / Nlpx!tTE3Aw27 ; julie@luminahr.ca / O1ka!gfVV6e54 ; jeffmenard78@hotmail.com / JeffSecure2026!x ; NIP Julie 7068. La réponse login contient access_token.",
+  "context_for_next_testing_agent": "Backend iteration 45 complètement stable. Multi-branch : la validation UI complète (sauvegarde du chip br2 + vérification du libellé combiné) est bloquée par l'absence du testid employee-branches-label — fix cosmétique côté EmployeeDossier.tsx. Pour tester les flux UI Team/OpenShifts, tous les testids sont en place (poll-add-button, kudos-add-button, open-shift-publish-button, claim-shift-{id}, etc.). Nettoyage : reste 1 shift 2099-12-31 pour Julie e2 (issu du claim automatique — n'affecte pas la démo mais peut être supprimé si voulu). Julie birth_date verrouillé à 1993-08-02 (aujourd'hui MTL) pour la démo — à ré-actualiser lors du prochain cycle de démo si la date change.",
+  "rca_of_the_issue": "N/A — aucun bug bloquant. Seule remarque : le testid employee-branches-label spécifié dans la review request n'a jamais été implémenté (le code de EmployeeDossier.tsx ligne 213 affiche encore une seule succursale sans testid)."
+}

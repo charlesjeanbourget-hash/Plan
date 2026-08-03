@@ -69,6 +69,7 @@ export interface Employee {
   phone: string;
   position: Position;
   branchId: string;
+  branchIds?: string[];
   status: EmployeeStatus;
   hireDate: string;
   hourlyRate: number;
@@ -90,6 +91,7 @@ export interface Shift {
   aiGenerated?: boolean;
   proposalId?: string;
   department?: string;
+  branchId?: string;
 }
 
 export type ResourceType = 'lieu' | 'equipement';
@@ -428,12 +430,42 @@ export interface TrainingAssignment {
   overdue?: boolean;
 }
 
+export interface OverviewActivity {
+  shifts_total: number;
+  shifts_upcoming: number;
+  punches_30d: number;
+  punch_hours_30d: number;
+  leave_pending: number;
+  leave_approved: number;
+  messages_30d: number;
+  open_shifts: number;
+  evaluations: number;
+  deliveries: number;
+  tasks: number;
+  benefits_published: number;
+  audit_events_30d: number;
+  last_activity: string;
+}
+
+export interface OverviewAccount {
+  email: string;
+  name: string;
+  role: string;
+  pharmacy_id: string;
+  suspended: boolean;
+  is_temporary_password: boolean;
+  last_login: string;
+  logins_30d: number;
+  created_at: string;
+}
+
 export interface OverviewPharmacy {
   pharmacy_id: string;
   accounts: { total: number; admins: number; employees: number; suspended: number };
   licenses: { total: number; expiring_60: number; expiring_30: number; expired: number };
   trainings: { total: number; published: number };
   report_enabled: boolean;
+  activity?: OverviewActivity;
 }
 
 export interface EmailSettings {
@@ -465,6 +497,7 @@ export interface EmployeeProfile {
   punch_code_set?: boolean;
   payroll_number?: string | null;
   department?: string;
+  birth_date?: string;
   notes: string;
   updated_at: string;
   updated_by: string;

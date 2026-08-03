@@ -2,6 +2,7 @@ import { View } from '@/types';
 import { BrandLogo } from '@/components/BrandLogo';
 import { LandingShowcase } from '@/components/LandingShowcase';
 import { PayrollSection } from '@/components/PayrollSection';
+import { ComparisonSection } from '@/components/ComparisonSection';
 import { TestimonialsSection } from '@/components/TestimonialsSection';
 import { DemoSection } from '@/components/DemoSection';
 import { FaqSection } from '@/components/FaqSection';
@@ -117,6 +118,8 @@ export default function LandingPage({ onNavigate }: Props): JSX.Element {
       <LandingShowcase />
 
       <PayrollSection />
+
+      <ComparisonSection />
 
       <TestimonialsSection />
 

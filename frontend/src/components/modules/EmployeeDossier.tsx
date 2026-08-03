@@ -39,7 +39,7 @@ export default function EmployeeDossier(): JSX.Element {
   const [editOpen, setEditOpen] = useState(false);
   const [editForm, setEditForm] = useState({
     firstName: '', lastName: '', email: '', phone: '', address: '', emergencyContact: '',
-    position: 'ATP' as Position, branchId: '', hireDate: '', weeklyHours: '35', hourlyRate: '25',
+    position: 'ATP' as Position, branchId: '', branchIds: [] as string[], hireDate: '', weeklyHours: '35', hourlyRate: '25',
   });
 
   const selected: Employee | undefined = state.employees.find((e) => e.id === selectedId);
@@ -62,6 +62,7 @@ export default function EmployeeDossier(): JSX.Element {
       emergencyContact: selected.emergencyContact ?? '',
       position: selected.position,
       branchId: selected.branchId,
+      branchIds: (selected.branchIds ?? []).filter((b) => b !== selected.branchId),
       hireDate: selected.hireDate,
       weeklyHours: String(selected.weeklyHours),
       hourlyRate: String(selected.hourlyRate),
@@ -82,6 +83,7 @@ export default function EmployeeDossier(): JSX.Element {
       emergencyContact: editForm.emergencyContact.trim(),
       position: editForm.position,
       branchId: editForm.branchId,
+      branchIds: [editForm.branchId, ...editForm.branchIds.filter((b) => b !== editForm.branchId)],
       hireDate: editForm.hireDate,
       weeklyHours: Math.max(0, Number(editForm.weeklyHours) || 0),
       hourlyRate: rate,
@@ -376,8 +378,8 @@ export default function EmployeeDossier(): JSX.Element {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>Succursale</Label>
-                <Select value={editForm.branchId} onValueChange={(v) => setEditForm((f) => ({ ...f, branchId: v }))}>
+                <Label>Succursale principale</Label>
+                <Select value={editForm.branchId} onValueChange={(v) => setEditForm((f) => ({ ...f, branchId: v, branchIds: f.branchIds.filter((b) => b !== v) }))}>
                   <SelectTrigger data-testid="edit-branch-select"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {state.branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
@@ -385,6 +387,28 @@ export default function EmployeeDossier(): JSX.Element {
                 </Select>
               </div>
             </div>
+            {state.branches.length > 1 && (
+              <div className="space-y-2">
+                <Label>Succursales additionnelles (peut aussi travailler à…)</Label>
+                <div className="flex flex-wrap gap-1.5">
+                  {state.branches.filter((b) => b.id !== editForm.branchId).map((b) => {
+                    const on = editForm.branchIds.includes(b.id);
+                    return (
+                      <button
+                        key={b.id}
+                        type="button"
+                        data-testid={`edit-extra-branch-${b.id}`}
+                        onClick={() => setEditForm((f) => ({ ...f, branchIds: on ? f.branchIds.filter((x) => x !== b.id) : [...f.branchIds, b.id] }))}
+                        className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${on ? 'bg-emerald-600 border-emerald-600 text-white' : 'bg-white border-slate-200 text-slate-600 hover:border-emerald-300'}`}
+                      >
+                        {b.name}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-[11px] text-slate-400">L'employé apparaîtra dans les horaires de chaque succursale cochée. Les budgets restent calculés séparément par succursale, selon la succursale de chaque quart.</p>
+              </div>
+            )}
             <div className="grid grid-cols-3 gap-4">
               <div className="space-y-2">
                 <Label>Embauche</Label>

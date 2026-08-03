@@ -47,7 +47,7 @@ export const InstallAppButton = (): JSX.Element | null => {
       <button
         data-testid="install-app-button"
         onClick={() => void install()}
-        className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium text-emerald-100 bg-emerald-800/40 hover:bg-emerald-800/70 transition-colors"
+        className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 transition-colors"
       >
         <Download className="w-4 h-4 shrink-0" />
         Installer l'application

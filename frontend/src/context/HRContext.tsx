@@ -33,6 +33,7 @@ interface ServerShift {
   resource_ids?: string[];
   ai_generated?: boolean;
   proposal_id?: string;
+  branch_id?: string;
   notes?: string;
 }
 
@@ -47,6 +48,7 @@ const shiftFromServer = (d: ServerShift): Shift => ({
   aiGenerated: d.ai_generated || undefined,
   proposalId: d.proposal_id || undefined,
   notes: d.notes || undefined,
+  branchId: d.branch_id || undefined,
 });
 
 const shiftToServer = (s: Shift, branchId: string): Record<string, unknown> => ({
@@ -59,7 +61,7 @@ const shiftToServer = (s: Shift, branchId: string): Record<string, unknown> => (
   resource_ids: s.resourceIds ?? [],
   ai_generated: s.aiGenerated ?? false,
   proposal_id: s.proposalId ?? '',
-  branch_id: branchId,
+  branch_id: s.branchId || branchId,
   notes: s.notes ?? '',
 });
 
@@ -246,8 +248,9 @@ export const HRProvider = ({ children }: { children: ReactNode }) => {
         const body: Record<string, unknown> = {};
         if (patch.employeeId !== undefined) {
           body.employee_id = patch.employeeId;
-          body.branch_id = branchOf(patch.employeeId);
+          body.branch_id = patch.branchId ?? branchOf(patch.employeeId);
         }
+        if (patch.branchId !== undefined) body.branch_id = patch.branchId;
         if (patch.date !== undefined) body.date = patch.date;
         if (patch.startTime !== undefined) body.start = patch.startTime;
         if (patch.endTime !== undefined) body.end = patch.endTime;

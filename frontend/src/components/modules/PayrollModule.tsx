@@ -26,7 +26,7 @@ export default function PayrollModule(): JSX.Element {
   const visibleEntries = state.payrollEntries.filter((p) => {
     if (periodFilter && p.period !== periodFilter) return false;
     if (branchFilter === 'all') return true;
-    return getEmployee(p.employeeId)?.branchId === branchFilter;
+    return getEmployee(p.employeeId)?.branchId === branchFilter || (getEmployee(p.employeeId)?.branchIds ?? []).includes(branchFilter);
   });
 
   const totalGross = visibleEntries.reduce((s, p) => s + p.grossPay, 0);

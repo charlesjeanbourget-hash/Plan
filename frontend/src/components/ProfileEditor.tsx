@@ -81,6 +81,7 @@ export const ProfileEditor = ({ employeeId, employeeName, canManageCode }: Props
         notes: profile.notes,
         payroll_number: profile.payroll_number ?? '',
         department: profile.department ?? '',
+        birth_date: profile.birth_date ?? '',
       }, { headers });
       toast.success('Profil enregistré — il sera pris en compte par l\'IA pour les horaires.');
     } catch {
@@ -164,6 +165,15 @@ export const ProfileEditor = ({ employeeId, employeeName, canManageCode }: Props
                 </SelectContent>
               </Select>
               <p className="text-[11px] text-slate-400">Les nouveaux quarts de cet employé se classeront automatiquement dans ce département (modifiable au cas par cas).</p>
+            </div>
+            <div className="space-y-2 col-span-2">
+              <Label>Date de naissance <span className="text-slate-400 font-normal">(anniversaires soulignés dans le clavardage d'équipe)</span></Label>
+              <Input
+                data-testid="birth-date-input"
+                type="date"
+                value={profile.birth_date ?? ''}
+                onChange={(e) => patch({ birth_date: e.target.value })}
+              />
             </div>
             <div className="space-y-2 col-span-2">
               <Label>Matricule paie (numéro d'employé dans votre logiciel de paie)</Label>

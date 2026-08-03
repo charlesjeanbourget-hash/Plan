@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, FormEvent } from 'react';
 import axios from 'axios';
 import { useHR } from '@/context/HRContext';
 import { useAuth } from '@/context/AuthContext';
-import { ReplacementRequestDoc, Appointment, Shift } from '@/types';
+import { ReplacementRequestDoc, Appointment, Shift, Employee } from '@/types';
 import { ModuleHeader } from '@/components/modules/shared';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -70,10 +70,12 @@ export default function SchedulingModule(): JSX.Element {
   const isAdmin = currentUser?.role !== 'employee';
   const [weekOffset, setWeekOffset] = useState(0);
   const [branchFilter, setBranchFilter] = useState('all');
+  const inBranch = (e: Employee): boolean => branchFilter === 'all' || e.branchId === branchFilter || (e.branchIds ?? []).includes(branchFilter);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [employeeId, setEmployeeId] = useState(state.employees[0]?.id ?? '');
   const [date, setDate] = useState(iso(new Date()));
   const [department, setDepartment] = useState('Général');
+  const [shiftBranch, setShiftBranch] = useState('');
   const [deptFilter, setDeptFilter] = useState('all');
   const [startTime, setStartTime] = useState('09:00');
   const [endTime, setEndTime] = useState('17:00');
@@ -297,6 +299,15 @@ export default function SchedulingModule(): JSX.Element {
   };
 
   useEffect(() => { setLeaveOverride(false); }, [employeeId, date, dialogOpen]);
+  const dialogEmpBranches = (() => {
+    const e = state.employees.find((x) => x.id === employeeId);
+    if (!e) return [] as string[];
+    return ((e.branchIds ?? []).length > 0 ? (e.branchIds ?? []) : [e.branchId]).filter(Boolean);
+  })();
+  useEffect(() => {
+    setShiftBranch(branchFilter !== 'all' && dialogEmpBranches.includes(branchFilter) ? branchFilter : dialogEmpBranches[0] ?? '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employeeId, dialogOpen]);
   const dialogLeaveConflict = employeeId && date ? approvedLeaveFor(employeeId, date) : undefined;
 
   const toggleResource = (id: string): void => {
@@ -640,7 +651,7 @@ export default function SchedulingModule(): JSX.Element {
             </tr>
           </thead>
           <tbody>
-            {state.employees.filter((e) => branchFilter === 'all' || e.branchId === branchFilter).map((emp) => {
+            {state.employees.filter(inBranch).map((emp) => {
               const rowHours = visibleShifts
                 .filter((s) => s.employeeId === emp.id && s.date >= days[0] && s.date <= days[6])
                 .reduce((sum, s) => sum + hoursBetween(s.startTime, s.endTime), 0);
@@ -822,7 +833,7 @@ export default function SchedulingModule(): JSX.Element {
             <tr data-testid="schedule-totals-row" className="bg-slate-50/80 border-t-2 border-slate-200">
               <td className="px-5 py-3 border-r border-slate-200 text-[11px] uppercase tracking-[0.18em] text-slate-400 font-semibold">Totaux</td>
               {days.map((d) => {
-                const filteredIds = new Set(state.employees.filter((e) => branchFilter === 'all' || e.branchId === branchFilter).map((e) => e.id));
+                const filteredIds = new Set(state.employees.filter(inBranch).map((e) => e.id));
                 const dh = visibleShifts
                   .filter((s) => s.date === d && filteredIds.has(s.employeeId))
                   .reduce((sum, s) => sum + hoursBetween(s.startTime, s.endTime), 0)
@@ -863,7 +874,7 @@ export default function SchedulingModule(): JSX.Element {
       )}
 
       {viewMode === 'week' && isAdmin && (() => {
-        const filteredIds = new Set(state.employees.filter((e) => branchFilter === 'all' || e.branchId === branchFilter).map((e) => e.id));
+        const filteredIds = new Set(state.employees.filter(inBranch).map((e) => e.id));
         const weekShifts = state.shifts.filter((s) => s.date >= days[0] && s.date <= days[6] && filteredIds.has(s.employeeId));
         const byDept = new Map<string, { hours: number; cost: number }>();
         weekShifts.forEach((s) => {
@@ -916,7 +927,7 @@ export default function SchedulingModule(): JSX.Element {
           <div className="grid grid-cols-7">
             {monthGridDays(monthAnchor).map((d) => {
               const inMonth = Number(d.slice(5, 7)) === monthAnchor.getMonth() + 1;
-              const filteredIds = new Set(state.employees.filter((e) => branchFilter === 'all' || e.branchId === branchFilter).map((e) => e.id));
+              const filteredIds = new Set(state.employees.filter(inBranch).map((e) => e.id));
               const dayShifts = visibleShifts
                 .filter((s) => s.date === d && filteredIds.has(s.employeeId))
                 .sort((a, b) => a.startTime.localeCompare(b.startTime));
@@ -1015,6 +1026,20 @@ export default function SchedulingModule(): JSX.Element {
                 </SelectContent>
               </Select>
             </div>
+            {dialogEmpBranches.length > 1 && (
+              <div className="space-y-2">
+                <Label>Succursale du quart</Label>
+                <Select value={shiftBranch} onValueChange={setShiftBranch}>
+                  <SelectTrigger data-testid="shift-branch-select"><SelectValue placeholder="Choisir la succursale" /></SelectTrigger>
+                  <SelectContent>
+                    {dialogEmpBranches.map((bid) => (
+                      <SelectItem key={bid} value={bid}>{state.branches.find((b) => b.id === bid)?.name ?? bid}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-slate-400">Cet employé travaille dans plusieurs succursales — le coût du quart sera imputé au budget de la succursale choisie.</p>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Début</Label>
