@@ -169,7 +169,7 @@ export default function EmployeeDossier(): JSX.Element {
                 {state.branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
               </SelectContent>
             </Select>
-            {state.employees.filter((e) => branchFilter === 'all' || e.branchId === branchFilter).map((emp) => (
+            {state.employees.filter((e) => branchFilter === 'all' || e.branchId === branchFilter || (e.branchIds ?? []).includes(branchFilter)).map((emp) => (
               <button
                 key={emp.id}
                 data-testid={`employee-list-item-${emp.id}`}
@@ -210,7 +210,12 @@ export default function EmployeeDossier(): JSX.Element {
                   <p className="flex items-center gap-2 text-slate-600"><MapPin className="w-4 h-4 text-slate-400" /> {selected.address || '—'}</p>
                 </div>
                 <div className="space-y-2">
-                  <p className="text-slate-500">Succursale : <span className="font-semibold text-slate-800">{state.branches.find((b) => b.id === selected.branchId)?.name ?? '—'}</span></p>
+                  <p className="text-slate-500">Succursale{(selected.branchIds ?? []).length > 1 ? 's' : ''} : <span className="font-semibold text-slate-800" data-testid="employee-branches-label">{
+                    ((selected.branchIds ?? []).length > 0 ? (selected.branchIds ?? []) : [selected.branchId])
+                      .map((bid) => state.branches.find((b) => b.id === bid)?.name)
+                      .filter(Boolean)
+                      .join(', ') || '—'
+                  }</span></p>
                   <p className="text-slate-500">Embauche : <span className="font-semibold text-slate-800">{selected.hireDate}</span></p>
                   <p className="text-slate-500">Taux horaire : <span className="font-semibold text-slate-800">{selected.hourlyRate.toFixed(2)} $ / h</span></p>
                   <p className="text-slate-500">Heures / semaine : <span className="font-semibold text-slate-800">{selected.weeklyHours} h</span></p>
