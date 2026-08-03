@@ -7,6 +7,7 @@ export type ModuleKey =
   | 'tasks'
   | 'myspace'
   | 'messages'
+  | 'team'
   | 'employees'
   | 'licenses'
   | 'scheduling'
@@ -608,6 +609,8 @@ export interface PunchPreview {
   employee_name: string;
   next_action: 'in' | 'out';
   since: string | null;
+  on_break?: boolean;
+  break_since?: string | null;
 }
 
 export interface EvalSuggestion {

@@ -1700,13 +1700,19 @@ async def do_punch(pharmacy_id: str, employee_id: str, employee_name: str, sourc
     open_p = await db.punches.find_one(
         {"pharmacy_id": pharmacy_id, "employee_id": employee_id, "punch_out": None}, {"_id": 0})
     if open_p:
+        breaks = open_p.get("breaks") or []
+        if breaks and not breaks[-1].get("end"):
+            breaks[-1]["end"] = now.isoformat()
         await db.punches.update_one({"id": open_p["id"]},
-                                    {"$set": {"punch_out": now.isoformat(), "punch_out_location": location}})
-        duration = round((now - datetime.fromisoformat(open_p["punch_in"])).total_seconds() / 3600, 2)
+                                    {"$set": {"punch_out": now.isoformat(), "punch_out_location": location,
+                                              "breaks": breaks}})
+        settings = await get_punch_settings(pharmacy_id)
+        duration = round(punch_hours({**open_p, "punch_out": now.isoformat(), "breaks": breaks}, settings), 2)
+        break_mins = punch_break_minutes({"breaks": breaks})
         await log_audit(actor, "system" if source == "punch" else "admin", "PUNCH_SORTIE", "punch", open_p["id"],
-                        f"{employee_name} — sortie ({duration} h)", pharmacy_id)
+                        f"{employee_name} — sortie ({duration} h{f', pauses {break_mins:g} min' if break_mins else ''})", pharmacy_id)
         return {"action": "out", "employee_name": employee_name, "time": now.isoformat(),
-                "punch_in": open_p["punch_in"], "duration_hours": duration}
+                "punch_in": open_p["punch_in"], "duration_hours": duration, "break_minutes": break_mins}
     doc = {
         "id": str(uuid.uuid4()), "pharmacy_id": pharmacy_id, "employee_id": employee_id,
         "employee_name": employee_name, "date": now.astimezone(MONTREAL_TZ).date().isoformat(),
@@ -1758,8 +1764,11 @@ async def punch_preview(payload: PunchCodeIn, request: Request):
     full_name = (prof.get("employee_name", "") or "").strip()
     parts = full_name.split()
     display = f"{parts[0]} {parts[-1][0]}." if len(parts) > 1 else full_name
+    breaks = (open_p.get("breaks") or []) if open_p else []
+    on_break = bool(breaks and not breaks[-1].get("end"))
     return {"employee_name": display, "next_action": "out" if open_p else "in",
-            "since": open_p["punch_in"] if open_p else None}
+            "since": open_p["punch_in"] if open_p else None,
+            "on_break": on_break, "break_since": breaks[-1]["start"] if on_break else None}
 
 
 @api_router.post("/punch")
@@ -1789,10 +1798,10 @@ async def punch_me_status(user: dict = Depends(get_current_user)):
     today = datetime.now(timezone.utc).astimezone(MONTREAL_TZ).date().isoformat()
     entries = await db.punches.find(
         {"pharmacy_id": pid, "employee_id": user["employee_id"], "date": today}, {"_id": 0}).sort("punch_in", 1).to_list(50)
-    hours = sum(
-        (datetime.fromisoformat(p["punch_out"]) - datetime.fromisoformat(p["punch_in"])).total_seconds() / 3600
-        for p in entries if p.get("punch_out"))
-    return {"open": open_p, "today_hours": round(hours, 2), "today_entries": entries}
+    settings = await get_punch_settings(pid)
+    hours = sum(punch_hours(p, settings) for p in entries)
+    return {"open": open_p, "today_hours": round(hours, 2), "today_entries": entries,
+            "on_break": bool(open_p and (open_p.get("breaks") or []) and not (open_p["breaks"][-1].get("end")))}
 
 
 class ManualPunchIn(BaseModel):
@@ -1880,18 +1889,21 @@ async def delete_punch(punch_id: str, principal: dict = Depends(get_principal)):
     return {"status": "supprimée"}
 
 
-def aggregate_punch_hours(docs: list) -> list:
+def aggregate_punch_hours(docs: list, settings: Optional[dict] = None) -> list:
+    settings = settings or {}
     rows: dict = {}
     weekly: dict = {}
     for p in docs:
         r = rows.setdefault(p["employee_id"], {
             "employee_id": p["employee_id"], "employee_name": p["employee_name"],
             "punched_hours": 0.0, "manual_hours": 0.0, "total_hours": 0.0,
-            "regular_hours": 0.0, "overtime_hours": 0.0, "entries": 0, "open_entries": 0})
+            "regular_hours": 0.0, "overtime_hours": 0.0, "break_minutes": 0.0,
+            "entries": 0, "open_entries": 0})
         if not p.get("punch_out"):
             r["open_entries"] += 1
             continue
-        h = (datetime.fromisoformat(p["punch_out"]) - datetime.fromisoformat(p["punch_in"])).total_seconds() / 3600
+        h = punch_hours(p, settings)
+        r["break_minutes"] += punch_break_minutes(p)
         r["entries"] += 1
         r["punched_hours" if p["source"] == "punch" else "manual_hours"] += h
         r["total_hours"] += h
@@ -1903,6 +1915,7 @@ def aggregate_punch_hours(docs: list) -> list:
             rows[eid]["overtime_hours"] += h - 40
     for r in rows.values():
         r["regular_hours"] = r["total_hours"] - r["overtime_hours"]
+        r["break_minutes"] = round(r["break_minutes"], 1)
         for k in ("punched_hours", "manual_hours", "total_hours", "regular_hours", "overtime_hours"):
             r[k] = round(r[k], 2)
     return sorted(rows.values(), key=lambda r: r["employee_name"])
@@ -1913,7 +1926,7 @@ async def punches_summary(start: str = Query(...), end: str = Query(...), princi
     pid = principal["pharmacy_id"] or "ph1"
     docs = await db.punches.find(
         {"pharmacy_id": pid, "date": {"$gte": start, "$lte": end}}, {"_id": 0}).to_list(5000)
-    return aggregate_punch_hours(docs)
+    return aggregate_punch_hours(docs, await get_punch_settings(pid))
 
 
 @api_router.get("/punches/export")
@@ -1921,17 +1934,19 @@ async def export_punches(start: str = Query(...), end: str = Query(...), princip
     pid = principal["pharmacy_id"] or "ph1"
     docs = await db.punches.find(
         {"pharmacy_id": pid, "date": {"$gte": start, "$lte": end}}, {"_id": 0}).to_list(5000)
-    lines = ["Employé;Date;Entrée;Sortie;Heures;Source;Saisie par;Note"]
+    p_settings = await get_punch_settings(pid)
+    lines = ["Employé;Date;Entrée;Sortie;Pauses (min);Heures;Source;Saisie par;Note"]
     for p in sorted(docs, key=lambda x: (x["employee_name"], x["date"], x["punch_in"])):
         t_in = datetime.fromisoformat(p["punch_in"]).astimezone(MONTREAL_TZ).strftime("%H:%M")
+        b_mins = punch_break_minutes(p)
         if p.get("punch_out"):
             t_out = datetime.fromisoformat(p["punch_out"]).astimezone(MONTREAL_TZ).strftime("%H:%M")
-            h = round((datetime.fromisoformat(p["punch_out"]) - datetime.fromisoformat(p["punch_in"])).total_seconds() / 3600, 2)
+            h = round(punch_hours(p, p_settings), 2)
         else:
             t_out, h = "en cours", ""
         src = "Punch" if p["source"] == "punch" else "Saisie manuelle"
         note = (p.get("note") or "").replace(";", ",")
-        lines.append(f"{p['employee_name']};{p['date']};{t_in};{t_out};{str(h).replace('.', ',')};{src};{p.get('created_by', '')};{note}")
+        lines.append(f"{p['employee_name']};{p['date']};{t_in};{t_out};{str(b_mins).replace('.', ',')};{str(h).replace('.', ',')};{src};{p.get('created_by', '')};{note}")
     csv_content = "\ufeff" + "\n".join(lines)
     await log_audit(principal["email"], principal["role"], "EXPORT_HEURES_CSV", "punch", f"{start}_{end}",
                     f"Export CSV des heures du {start} au {end} ({len(docs)} entrées)", pid)
@@ -1950,7 +1965,7 @@ async def export_punches_payroll(start: str = Query(...), end: str = Query(...),
     pid = principal["pharmacy_id"] or "ph1"
     docs = await db.punches.find(
         {"pharmacy_id": pid, "date": {"$gte": start, "$lte": end}}, {"_id": 0}).to_list(5000)
-    rows = [r for r in aggregate_punch_hours(docs) if r["total_hours"] > 0]
+    rows = [r for r in aggregate_punch_hours(docs, await get_punch_settings(pid)) if r["total_hours"] > 0]
     if not rows:
         raise HTTPException(status_code=400, detail="Aucune heure complétée dans cette période.")
     profiles = await db.employee_profiles.find(
@@ -3039,6 +3054,388 @@ async def get_benefit_image(benefit_id: str, user: dict = Depends(get_current_us
                     headers={"Cache-Control": "private, max-age=3600"})
 
 
+# ---------------------------------------------------------------------------
+# Quarts ouverts (libre-service)
+# ---------------------------------------------------------------------------
+class OpenShiftIn(BaseModel):
+    date: str
+    start: str
+    end: str
+    department: str = "Général"
+    branch_id: str = ""
+    positions: list = []
+    note: str = ""
+
+
+class OpenShiftClaimIn(BaseModel):
+    position: str = ""
+    employee_name: str = ""
+
+
+@api_router.post("/open-shifts")
+async def create_open_shift(payload: OpenShiftIn, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    _validate_shift_core(payload.date, payload.start, payload.end)
+    doc = {"id": str(uuid.uuid4()), "pharmacy_id": pid, "date": payload.date,
+           "start": payload.start, "end": payload.end,
+           "department": payload.department if payload.department in DEPARTMENTS_BE else "Général",
+           "branch_id": payload.branch_id or "", "positions": [str(p)[:60] for p in payload.positions][:12],
+           "note": (payload.note or "")[:300], "status": "open",
+           "claimed_by": None, "claimed_by_name": None, "claimed_at": None,
+           "created_by": principal["email"], "created_at": datetime.now(timezone.utc).isoformat()}
+    await db.open_shifts.insert_one({**doc})
+    pos_txt = f" — réservé : {', '.join(doc['positions'])}" if doc["positions"] else ""
+    await db.notifications.insert_one({
+        "id": str(uuid.uuid4()), "pharmacy_id": pid, "target_roles": ["employee"],
+        "title": "Nouveau quart à combler", "detail": f"{payload.date} de {payload.start} à {payload.end} ({doc['department']}){pos_txt}. Premier arrivé, premier servi !",
+        "module": "scheduling", "icon": "schedule", "tone": "sky",
+        "created_at": datetime.now(timezone.utc).isoformat()})
+    await log_audit(principal["email"], principal["role"], "QUART_OUVERT_PUBLIE", "quart_ouvert", doc["id"],
+                    f"Quart ouvert publié : {payload.date} {payload.start}-{payload.end} ({doc['department']})", pid)
+    return doc
+
+
+@api_router.get("/open-shifts")
+async def list_open_shifts(user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    is_admin = user["role"] in ("admin", "manager", "superadmin")
+    docs = await db.open_shifts.find({"pharmacy_id": pid, "status": {"$ne": "cancelled"}}, {"_id": 0}) \
+        .sort("date", 1).to_list(200)
+    today = datetime.now(timezone.utc).astimezone(MONTREAL_TZ).date().isoformat()
+    out = []
+    for d in docs:
+        if d["status"] == "open" and d["date"] < today:
+            continue
+        if not is_admin and d["status"] == "claimed" and d.get("claimed_by") != user.get("employee_id"):
+            continue
+        out.append(d)
+    return out
+
+
+@api_router.post("/open-shifts/{os_id}/claim")
+async def claim_open_shift(os_id: str, payload: OpenShiftClaimIn, user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    emp_id = user.get("employee_id")
+    if not emp_id:
+        raise HTTPException(status_code=400, detail="Aucun dossier employé associé à votre compte.")
+    doc = await db.open_shifts.find_one({"id": os_id, "pharmacy_id": pid}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Quart introuvable.")
+    if doc["positions"] and payload.position and payload.position not in doc["positions"]:
+        raise HTTPException(status_code=400, detail=f"Ce quart est réservé aux postes : {', '.join(doc['positions'])}.")
+    leave = await db.leave_requests.find_one({
+        "pharmacy_id": pid, "employee_id": emp_id, "status": "Approuvée",
+        "start_date": {"$lte": doc["date"]}, "end_date": {"$gte": doc["date"]}}, {"_id": 0, "id": 1})
+    if leave:
+        raise HTTPException(status_code=400, detail="Vous êtes en congé approuvé ce jour-là.")
+    name = payload.employee_name or user.get("name") or user["email"]
+    claimed = await db.open_shifts.find_one_and_update(
+        {"id": os_id, "pharmacy_id": pid, "status": "open"},
+        {"$set": {"status": "claimed", "claimed_by": emp_id, "claimed_by_name": name,
+                  "claimed_position": payload.position or "",
+                  "claimed_at": datetime.now(timezone.utc).isoformat()}},
+        projection={"_id": 0})
+    if not claimed:
+        raise HTTPException(status_code=409, detail="Trop tard — ce quart vient d'être réclamé par un collègue.")
+    shift_doc = {"id": str(uuid.uuid4()), "pharmacy_id": pid, "employee_id": emp_id,
+                 "date": doc["date"], "start": doc["start"], "end": doc["end"],
+                 "department": doc["department"], "resource_ids": [], "ai_generated": False,
+                 "proposal_id": "", "branch_id": doc.get("branch_id") or "",
+                 "notes": "Quart ouvert réclamé", "updated_at": datetime.now(timezone.utc).isoformat()}
+    await db.shifts.insert_one({**shift_doc})
+    await _mark_shifts_ready(pid)
+    await _notify_admins(pid, "Quart ouvert réclamé",
+                         f"{name} a pris le quart du {doc['date']} de {doc['start']} à {doc['end']} ({doc['department']}).",
+                         module="scheduling", tone="emerald")
+    await _notify_shift_change(pid, emp_id, "Quart confirmé",
+                               f"Le quart du {doc['date']} de {doc['start']} à {doc['end']} ({doc['department']}) est à vous.",
+                               "emerald", module="scheduling")
+    await log_audit(user["email"], user["role"], "QUART_OUVERT_RECLAME", "quart_ouvert", os_id,
+                    f"{name} a réclamé le quart du {doc['date']} {doc['start']}-{doc['end']}", pid)
+    return {"ok": True, "shift": shift_doc}
+
+
+@api_router.delete("/open-shifts/{os_id}")
+async def cancel_open_shift(os_id: str, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    res = await db.open_shifts.update_one({"id": os_id, "pharmacy_id": pid, "status": "open"},
+                                          {"$set": {"status": "cancelled"}})
+    if res.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Quart introuvable ou déjà réclamé.")
+    await log_audit(principal["email"], principal["role"], "QUART_OUVERT_RETIRE", "quart_ouvert", os_id,
+                    "Quart ouvert retiré", pid)
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Sondages éclair & mur de reconnaissance
+# ---------------------------------------------------------------------------
+class PollIn(BaseModel):
+    question: str
+    options: list
+    anonymous: bool = True
+
+
+class PollVoteIn(BaseModel):
+    option_id: str
+
+
+@api_router.post("/polls")
+async def create_poll(payload: PollIn, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    question = payload.question.strip()[:300]
+    labels = [str(o).strip()[:120] for o in payload.options if str(o).strip()]
+    if not question:
+        raise HTTPException(status_code=400, detail="La question est requise.")
+    if not (2 <= len(labels) <= 6):
+        raise HTTPException(status_code=400, detail="Entre 2 et 6 choix de réponse.")
+    doc = {"id": str(uuid.uuid4()), "pharmacy_id": pid, "question": question,
+           "options": [{"id": str(uuid.uuid4())[:8], "label": lb} for lb in labels],
+           "anonymous": bool(payload.anonymous), "status": "open", "votes": [],
+           "created_by": principal["email"], "created_at": datetime.now(timezone.utc).isoformat()}
+    await db.polls.insert_one({**doc})
+    await db.notifications.insert_one({
+        "id": str(uuid.uuid4()), "pharmacy_id": pid, "target_roles": ["employee"],
+        "title": "Nouveau sondage éclair", "detail": question, "module": "team", "icon": "poll",
+        "tone": "sky", "created_at": datetime.now(timezone.utc).isoformat()})
+    await log_audit(principal["email"], principal["role"], "CREATION_SONDAGE", "sondage", doc["id"], question, pid)
+    return {k: v for k, v in doc.items() if k != "votes"}
+
+
+def _poll_view(doc: dict, user: dict) -> dict:
+    votes = doc.get("votes") or []
+    my = next((v for v in votes if v["email"] == user["email"]), None)
+    is_admin = user["role"] in ("admin", "manager", "superadmin")
+    show_results = is_admin or my is not None or doc["status"] == "closed"
+    counts = {o["id"]: 0 for o in doc["options"]}
+    for v in votes:
+        if v["option_id"] in counts:
+            counts[v["option_id"]] += 1
+    view = {"id": doc["id"], "question": doc["question"], "options": doc["options"],
+            "anonymous": doc["anonymous"], "status": doc["status"],
+            "created_at": doc["created_at"], "total_votes": len(votes),
+            "my_vote": my["option_id"] if my else None,
+            "results": counts if show_results else None}
+    if is_admin and not doc["anonymous"]:
+        view["voters"] = [{"name": v["name"], "option_id": v["option_id"]} for v in votes]
+    return view
+
+
+@api_router.get("/polls")
+async def list_polls(user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    docs = await db.polls.find({"pharmacy_id": pid}, {"_id": 0}).sort("created_at", -1).to_list(50)
+    return [_poll_view(d, user) for d in docs]
+
+
+@api_router.post("/polls/{poll_id}/vote")
+async def vote_poll(poll_id: str, payload: PollVoteIn, user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    doc = await db.polls.find_one({"id": poll_id, "pharmacy_id": pid}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Sondage introuvable.")
+    if doc["status"] != "open":
+        raise HTTPException(status_code=400, detail="Ce sondage est terminé.")
+    if not any(o["id"] == payload.option_id for o in doc["options"]):
+        raise HTTPException(status_code=400, detail="Choix invalide.")
+    if any(v["email"] == user["email"] for v in (doc.get("votes") or [])):
+        raise HTTPException(status_code=400, detail="Vous avez déjà voté.")
+    await db.polls.update_one({"id": poll_id}, {"$push": {"votes": {
+        "email": user["email"], "name": user.get("name") or user["email"],
+        "option_id": payload.option_id, "at": datetime.now(timezone.utc).isoformat()}}})
+    fresh = await db.polls.find_one({"id": poll_id}, {"_id": 0})
+    return _poll_view(fresh, user)
+
+
+@api_router.post("/polls/{poll_id}/close")
+async def close_poll(poll_id: str, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    res = await db.polls.update_one({"id": poll_id, "pharmacy_id": pid}, {"$set": {"status": "closed"}})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Sondage introuvable.")
+    return {"ok": True}
+
+
+@api_router.delete("/polls/{poll_id}")
+async def delete_poll(poll_id: str, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    res = await db.polls.delete_one({"id": poll_id, "pharmacy_id": pid})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Sondage introuvable.")
+    return {"ok": True}
+
+
+KUDOS_CATEGORIES = ("Merci", "Bravo", "Étoile du service", "Esprit d'équipe", "Dépassement")
+
+
+class KudosIn(BaseModel):
+    to_employee_id: str
+    to_name: str
+    category: str = "Bravo"
+    message: str = ""
+
+
+@api_router.post("/kudos")
+async def create_kudos(payload: KudosIn, user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    if not payload.to_employee_id or not payload.to_name.strip():
+        raise HTTPException(status_code=400, detail="Choisissez un(e) collègue à féliciter.")
+    doc = {"id": str(uuid.uuid4()), "pharmacy_id": pid,
+           "from_email": user["email"], "from_name": user.get("name") or user["email"],
+           "from_employee_id": user.get("employee_id") or "",
+           "to_employee_id": payload.to_employee_id, "to_name": payload.to_name.strip()[:80],
+           "category": payload.category if payload.category in KUDOS_CATEGORIES else "Bravo",
+           "message": payload.message.strip()[:400], "applause": [],
+           "created_at": datetime.now(timezone.utc).isoformat()}
+    await db.kudos.insert_one({**doc})
+    await _notify_shift_change(pid, payload.to_employee_id, f"{doc['category']} de {doc['from_name']} !",
+                               doc["message"] or "Vous avez reçu une félicitation publique sur le mur d'équipe.",
+                               "emerald", module="team", icon="kudos")
+    return doc
+
+
+@api_router.get("/kudos")
+async def list_kudos(user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    docs = await db.kudos.find({"pharmacy_id": pid}, {"_id": 0}).sort("created_at", -1).to_list(60)
+    return [{**d, "applause_count": len(d.get("applause") or []),
+             "my_applause": user["email"] in (d.get("applause") or []),
+             "applause": None} for d in docs]
+
+
+@api_router.post("/kudos/{kudos_id}/applaud")
+async def applaud_kudos(kudos_id: str, user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    doc = await db.kudos.find_one({"id": kudos_id, "pharmacy_id": pid}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Félicitation introuvable.")
+    applause = doc.get("applause") or []
+    if user["email"] in applause:
+        applause.remove(user["email"])
+    else:
+        applause.append(user["email"])
+    await db.kudos.update_one({"id": kudos_id}, {"$set": {"applause": applause}})
+    return {"applause_count": len(applause), "my_applause": user["email"] in applause}
+
+
+@api_router.delete("/kudos/{kudos_id}")
+async def delete_kudos(kudos_id: str, user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    doc = await db.kudos.find_one({"id": kudos_id, "pharmacy_id": pid}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Félicitation introuvable.")
+    if user["role"] not in ("admin", "manager", "superadmin") and doc["from_email"] != user["email"]:
+        raise HTTPException(status_code=403, detail="Réservé à l'auteur ou à l'administration.")
+    await db.kudos.delete_one({"id": kudos_id})
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Punch : réglages (arrondis, pauses)
+# ---------------------------------------------------------------------------
+async def get_punch_settings(pid: str) -> dict:
+    doc = await db.punch_settings.find_one({"pharmacy_id": pid}, {"_id": 0}) or {}
+    return {"rounding_minutes": int(doc.get("rounding_minutes") or 0),
+            "rounding_mode": doc.get("rounding_mode") or "nearest",
+            "breaks_paid": bool(doc.get("breaks_paid"))}
+
+
+def _round_dt(dt: datetime, minutes: int, mode: str) -> datetime:
+    if minutes <= 0:
+        return dt
+    secs = minutes * 60
+    ts = dt.timestamp()
+    if mode == "up":
+        rounded = math.ceil(ts / secs) * secs
+    elif mode == "down":
+        rounded = math.floor(ts / secs) * secs
+    else:
+        rounded = round(ts / secs) * secs
+    return datetime.fromtimestamp(rounded, tz=timezone.utc)
+
+
+def punch_break_minutes(p: dict) -> float:
+    total = 0.0
+    for b in (p.get("breaks") or []):
+        if b.get("start") and b.get("end"):
+            total += (datetime.fromisoformat(b["end"]) - datetime.fromisoformat(b["start"])).total_seconds() / 60
+    return round(total, 1)
+
+
+def punch_hours(p: dict, settings: dict) -> float:
+    if not p.get("punch_out"):
+        return 0.0
+    m = int(settings.get("rounding_minutes") or 0)
+    mode = settings.get("rounding_mode") or "nearest"
+    t_in = _round_dt(datetime.fromisoformat(p["punch_in"]), m, mode)
+    t_out = _round_dt(datetime.fromisoformat(p["punch_out"]), m, mode)
+    h = max(0.0, (t_out - t_in).total_seconds() / 3600)
+    if not settings.get("breaks_paid"):
+        h = max(0.0, h - punch_break_minutes(p) / 60)
+    return h
+
+
+class PunchSettingsIn(BaseModel):
+    rounding_minutes: int = 0
+    rounding_mode: str = "nearest"
+    breaks_paid: bool = False
+
+
+@api_router.get("/punch/settings")
+async def read_punch_settings(principal: dict = Depends(get_principal)):
+    return await get_punch_settings(principal["pharmacy_id"] or "ph1")
+
+
+@api_router.put("/punch/settings")
+async def write_punch_settings(payload: PunchSettingsIn, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    if payload.rounding_minutes not in (0, 5, 10, 15):
+        raise HTTPException(status_code=400, detail="Arrondi permis : 0, 5, 10 ou 15 minutes.")
+    if payload.rounding_mode not in ("nearest", "up", "down"):
+        raise HTTPException(status_code=400, detail="Mode d'arrondi invalide.")
+    await db.punch_settings.update_one({"pharmacy_id": pid}, {"$set": {
+        "pharmacy_id": pid, "rounding_minutes": payload.rounding_minutes,
+        "rounding_mode": payload.rounding_mode, "breaks_paid": payload.breaks_paid,
+        "updated_at": datetime.now(timezone.utc).isoformat()}}, upsert=True)
+    mode_txt = {"nearest": "au plus proche", "up": "vers le haut", "down": "vers le bas"}[payload.rounding_mode]
+    await log_audit(principal["email"], principal["role"], "REGLAGES_PUNCH", "punch", pid,
+                    f"Arrondi {payload.rounding_minutes} min ({mode_txt}), pauses {'payées' if payload.breaks_paid else 'non payées'}", pid)
+    return await get_punch_settings(pid)
+
+
+async def do_break(pid: str, employee_id: str, employee_name: str, actor: str) -> dict:
+    open_p = await db.punches.find_one(
+        {"pharmacy_id": pid, "employee_id": employee_id, "punch_out": None}, {"_id": 0})
+    if not open_p:
+        raise HTTPException(status_code=400, detail="Aucun quart en cours — punchez votre entrée d'abord.")
+    breaks = open_p.get("breaks") or []
+    now = datetime.now(timezone.utc)
+    if breaks and not breaks[-1].get("end"):
+        mins = round((now - datetime.fromisoformat(breaks[-1]["start"])).total_seconds() / 60)
+        breaks[-1]["end"] = now.isoformat()
+        action, detail = "break_end", f"{employee_name} — fin de pause ({mins} min)"
+    else:
+        breaks.append({"start": now.isoformat(), "end": None})
+        action, detail = "break_start", f"{employee_name} — début de pause"
+    await db.punches.update_one({"id": open_p["id"]}, {"$set": {"breaks": breaks}})
+    await log_audit(actor, "system", "PUNCH_PAUSE", "punch", open_p["id"], detail, pid)
+    return {"action": action, "employee_name": employee_name, "time": now.isoformat()}
+
+
+@api_router.post("/punch/break")
+async def punch_break_by_code(payload: PunchCodeIn, request: Request):
+    identifier = await punch_throttle_check(request)
+    prof = await resolve_punch_code(payload.code.strip(), identifier)
+    return await do_break(prof["pharmacy_id"], prof["employee_id"], prof.get("employee_name", ""), "borne")
+
+
+@api_router.post("/punch/me/break")
+async def punch_break_me(user: dict = Depends(get_current_user)):
+    if not user.get("employee_id"):
+        raise HTTPException(status_code=400, detail="Aucun dossier employé associé à votre compte.")
+    return await do_break(user.get("pharmacy_id") or "", user["employee_id"], user["name"], user["email"])
+
+
 def _time_to_minutes(t: str) -> int:
     h, m = t.split(":")
     return int(h) * 60 + int(m)
@@ -3245,10 +3642,11 @@ async def punch_cost(start: str = Query(...), end: str = Query(...), principal: 
     profiles = await db.employee_profiles.find(
         {"pharmacy_id": pid}, {"_id": 0, "employee_id": 1, "hourly_rate": 1}).to_list(500)
     rate_by = {p["employee_id"]: p.get("hourly_rate") for p in profiles}
+    p_settings = await get_punch_settings(pid)
     per: dict = {}
     for p in punches:
         try:
-            h = (datetime.fromisoformat(p["punch_out"]) - datetime.fromisoformat(p["punch_in"])).total_seconds() / 3600
+            h = punch_hours(p, p_settings)
         except (ValueError, TypeError):
             continue
         e = per.setdefault(p["employee_id"], {"employee_name": p.get("employee_name", ""), "hours": 0.0})

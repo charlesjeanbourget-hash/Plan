@@ -33,6 +33,7 @@ import TrainingModule from '@/components/modules/TrainingModule';
 import TasksModule from '@/components/modules/TasksModule';
 import DeliveriesModule from '@/components/modules/DeliveriesModule';
 import MessagesModule from '@/components/modules/MessagesModule';
+import TeamModule from '@/components/modules/TeamModule';
 import { NotificationBell } from '@/components/NotificationBell';
 
 const MODULES: Record<ModuleKey, () => JSX.Element> = {
@@ -41,6 +42,7 @@ const MODULES: Record<ModuleKey, () => JSX.Element> = {
   deliveries: DeliveriesModule,
   myspace: MySpaceModule,
   messages: MessagesModule,
+  team: TeamModule,
   employees: EmployeeDossier,
   licenses: LicensesModule,
   scheduling: SchedulingModule,

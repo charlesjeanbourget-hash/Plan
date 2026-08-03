@@ -39,6 +39,7 @@ export const PunchHoursPanel = (): JSX.Element => {
   const [offset, setOffset] = useState(0);
   const [rows, setRows] = useState<PunchSummaryRow[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [punchSettings, setPunchSettings] = useState({ rounding_minutes: 0, rounding_mode: 'nearest', breaks_paid: false });
   const [detailEmployee, setDetailEmployee] = useState<PunchSummaryRow | null>(null);
   const [detailPunches, setDetailPunches] = useState<Punch[]>([]);
   const [manualOpen, setManualOpen] = useState(false);
@@ -79,11 +80,21 @@ export const PunchHoursPanel = (): JSX.Element => {
     if (!settings) return;
     try {
       await axios.post(`${API}/pay-settings`, { period_type: settings.period_type, anchor: settings.anchor }, { headers });
-      toast.success('Période de paie enregistrée.');
+      await axios.put(`${API}/punch/settings`, punchSettings, { headers });
+      toast.success('Réglages de paie et de punch enregistrés.');
       setSettingsOpen(false);
       setOffset(0);
     } catch {
       toast.error('Enregistrement impossible.');
+    }
+  };
+
+  const loadPunchSettings = async (): Promise<void> => {
+    try {
+      const res = await axios.get<{ rounding_minutes: number; rounding_mode: string; breaks_paid: boolean }>(`${API}/punch/settings`, { headers });
+      setPunchSettings(res.data);
+    } catch {
+      /* défauts */
     }
   };
 
@@ -339,10 +350,10 @@ export const PunchHoursPanel = (): JSX.Element => {
         </table>
       </div>
 
-      <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+      <Dialog open={settingsOpen} onOpenChange={(o) => { setSettingsOpen(o); if (o) void loadPunchSettings(); }}>
         <DialogContent data-testid="pay-settings-dialog">
           <DialogHeader>
-            <DialogTitle className="font-heading">Période de paie</DialogTitle>
+            <DialogTitle className="font-heading">Période de paie & règles de punch</DialogTitle>
           </DialogHeader>
           {settings && (
             <form onSubmit={(e) => void saveSettings(e)} className="space-y-4">
@@ -359,6 +370,39 @@ export const PunchHoursPanel = (): JSX.Element => {
               <div className="space-y-2">
                 <Label>Date de début d'une période (ancrage)</Label>
                 <Input data-testid="period-anchor-input" type="date" value={settings.anchor} onChange={(e) => setSettings({ ...settings, anchor: e.target.value })} required />
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 space-y-3">
+                <p className="text-xs font-bold text-slate-700 uppercase tracking-wide">Arrondis & pauses (feuilles de temps)</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Arrondi des punchs</Label>
+                    <Select value={String(punchSettings.rounding_minutes)} onValueChange={(v) => setPunchSettings((p) => ({ ...p, rounding_minutes: Number(v) }))}>
+                      <SelectTrigger data-testid="rounding-minutes-select"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="0">Aucun (à la minute)</SelectItem>
+                        <SelectItem value="5">5 minutes</SelectItem>
+                        <SelectItem value="10">10 minutes</SelectItem>
+                        <SelectItem value="15">15 minutes (quart d'heure)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Sens de l'arrondi</Label>
+                    <Select value={punchSettings.rounding_mode} onValueChange={(v) => setPunchSettings((p) => ({ ...p, rounding_mode: v }))}>
+                      <SelectTrigger data-testid="rounding-mode-select"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="nearest">Au plus proche</SelectItem>
+                        <SelectItem value="up">Vers le haut</SelectItem>
+                        <SelectItem value="down">Vers le bas</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <label data-testid="breaks-paid-checkbox" className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                  <input type="checkbox" checked={punchSettings.breaks_paid} onChange={() => setPunchSettings((p) => ({ ...p, breaks_paid: !p.breaks_paid }))} className="accent-emerald-600 w-4 h-4" />
+                  Pauses payées (sinon déduites automatiquement des heures)
+                </label>
+                <p className="text-[11px] text-slate-500">Ex. : arrondi 15 min « au plus proche » — une entrée à 8 h 07 devient 8 h 00, une sortie à 16 h 08 devient 16 h 15.</p>
               </div>
               <Button data-testid="pay-settings-save-button" type="submit" className="w-full rounded-full bg-emerald-600 hover:bg-emerald-700">Enregistrer</Button>
             </form>

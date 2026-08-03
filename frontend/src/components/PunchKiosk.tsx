@@ -51,6 +51,30 @@ export default function PunchKiosk({ onNavigate }: Props): JSX.Element {
     }
   };
 
+  const doBreak = async (): Promise<void> => {
+    if (busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      const res = await axios.post<{ action: string; employee_name: string; time: string }>(`${API}/punch/break`, { code });
+      setResult({
+        action: res.data.action === 'break_start' ? 'in' : 'out',
+        employee_name: res.data.employee_name,
+        time: res.data.time,
+        break_label: res.data.action === 'break_start' ? 'Bonne pause ! Repunchez votre NIP pour reprendre.' : 'Reprise du travail enregistrée. Bon quart !',
+      } as PunchActionResult & { break_label: string });
+      setCode('');
+      setPreview(null);
+      window.setTimeout(() => setResult(null), 8000);
+    } catch (err) {
+      setError(extractDetail(err));
+      setCode('');
+      setPreview(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const confirm = async (): Promise<void> => {
     if (busy) return;
     setBusy(true);
@@ -99,15 +123,27 @@ export default function PunchKiosk({ onNavigate }: Props): JSX.Element {
             <p className="text-sm text-slate-600 mb-6">
               {preview.next_action === 'in'
                 ? 'Vous allez puncher votre ENTRÉE.'
-                : `Vous allez puncher votre SORTIE${preview.since ? ` (entrée à ${fmtTime(preview.since)})` : ''}.`}
+                : preview.on_break
+                  ? `Vous êtes en PAUSE${preview.break_since ? ` depuis ${fmtTime(preview.break_since)}` : ''}.`
+                  : `Quart en cours${preview.since ? ` (entrée à ${fmtTime(preview.since)})` : ''} — pause ou sortie ?`}
             </p>
+            {preview.next_action === 'out' && (
+              <button
+                data-testid="kiosk-break-button"
+                onClick={() => void doBreak()}
+                disabled={busy}
+                className={`w-full h-14 rounded-2xl font-bold disabled:opacity-40 active:scale-95 transition-all mb-3 ${preview.on_break ? 'bg-sky-600 text-white hover:bg-sky-700' : 'bg-amber-500 text-white hover:bg-amber-600'}`}
+              >
+                {preview.on_break ? 'Reprendre le travail' : 'Prendre une pause'}
+              </button>
+            )}
             <button
               data-testid="kiosk-confirm-yes"
               onClick={() => void confirm()}
               disabled={busy}
               className="w-full h-14 rounded-2xl bg-emerald-600 text-white font-bold hover:bg-emerald-700 disabled:opacity-40 active:scale-95 transition-all mb-3"
             >
-              Oui, c'est moi — confirmer
+              {preview.next_action === 'in' ? 'Oui, puncher mon entrée' : 'Puncher ma sortie'}
             </button>
             <button
               data-testid="kiosk-confirm-no"
@@ -133,9 +169,11 @@ export default function PunchKiosk({ onNavigate }: Props): JSX.Element {
                   Bonjour {result.employee_name} !
                 </p>
                 <p className="text-sm text-slate-600 mt-1">
-                  {result.action === 'in'
-                    ? `Entrée enregistrée à ${fmtTime(result.time)}. Bon quart de travail !`
-                    : `Sortie enregistrée à ${fmtTime(result.time)} — durée : ${result.duration_hours} h. À bientôt !`}
+                  {(result as PunchActionResult & { break_label?: string }).break_label
+                    ? (result as PunchActionResult & { break_label?: string }).break_label
+                    : result.action === 'in'
+                      ? `Entrée enregistrée à ${fmtTime(result.time)}. Bon quart de travail !`
+                      : `Sortie enregistrée à ${fmtTime(result.time)} — durée : ${result.duration_hours} h. À bientôt !`}
                 </p>
               </div>
             )}

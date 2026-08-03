@@ -17,6 +17,7 @@ import { WeekTemplatesDialog } from '@/components/WeekTemplatesDialog';
 import { DeptCopyDialog } from '@/components/DeptCopyDialog';
 import { BudgetActualCard } from '@/components/BudgetActualCard';
 import { ReadReceiptsDialog } from '@/components/ReadReceiptsDialog';
+import { OpenShiftsPanel } from '@/components/OpenShiftsPanel';
 import { downloadSchedulePdf } from '@/lib/schedulePdf';
 import { hoursBetween } from '@/lib/schedule';
 import { DEPARTMENTS } from '@/lib/pharmacy';
@@ -567,6 +568,9 @@ export default function SchedulingModule(): JSX.Element {
           </Select>
         </div>
       </div>
+
+      {isAdmin && <OpenShiftsPanel mode="admin" />}
+      {!isAdmin && <OpenShiftsPanel mode="employee" />}
 
       {isAdmin && gapDays.length > 0 && (
         <div data-testid="understaffing-alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4">

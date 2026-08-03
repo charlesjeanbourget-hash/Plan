@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, FormEvent } from 'react';
 import axios from 'axios';
 import { useHR } from '@/context/HRContext';
+import { OpenShiftsPanel } from '@/components/OpenShiftsPanel';
 import { useAuth } from '@/context/AuthContext';
 import { LeaveType } from '@/types';
 import { ModuleHeader, StatusBadge } from '@/components/modules/shared';
@@ -135,6 +136,7 @@ export default function MySpaceModule(): JSX.Element {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="lg:col-span-2">
+          <OpenShiftsPanel mode="employee" />
           <MyPunchCard />
         </div>
         {me.position === 'Infirmier(ère)' && (
