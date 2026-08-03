@@ -46,6 +46,7 @@ interface ChatMessage {
   sender_role: string;
   body: string;
   created_at: string;
+  kind?: string;
   attachment?: AttachmentMeta | null;
 }
 
@@ -67,7 +68,7 @@ const timeLabel = (iso: string): string =>
   new Date(iso).toLocaleString('fr-CA', { dateStyle: 'short', timeStyle: 'short' });
 
 const roleLabel = (role: string): string =>
-  role === 'admin' ? 'Propriétaire' : role === 'manager' ? 'Gestionnaire' : 'Employé(e)';
+  role === 'admin' ? 'Propriétaire' : role === 'manager' ? 'Gestionnaire' : role === 'system' ? 'Automatique' : 'Employé(e)';
 
 const AttachmentView = ({ att, token, mine }: { att: AttachmentMeta; token: string; mine: boolean }): JSX.Element => {
   const [data, setData] = useState<string | null>(null);
@@ -407,6 +408,19 @@ export default function MessagesModule(): JSX.Element {
                   <p data-testid="thread-empty" className="text-sm text-slate-400 text-center py-10">Aucun message — écrivez le premier !</p>
                 )}
                 {messages.map((m) => {
+                  if (m.kind === 'birthday') {
+                    return (
+                      <div key={m.id} data-testid={`birthday-message-${m.id}`} className="flex justify-center">
+                        <div className="max-w-[85%] rounded-2xl border border-bronze-200 bg-gradient-to-r from-emerald-50 via-bronze-50 to-emerald-50 px-5 py-3.5 text-center shadow-sm">
+                          <p className="text-[11px] font-bold text-bronze-700 inline-flex items-center gap-1.5 mb-1">
+                            <Cake className="w-3.5 h-3.5" /> Arrière Plan · message automatique
+                          </p>
+                          <p className="text-sm text-slate-800 whitespace-pre-wrap">{m.body}</p>
+                          <p className="text-[10px] text-slate-400 mt-1">{timeLabel(m.created_at)}</p>
+                        </div>
+                      </div>
+                    );
+                  }
                   const mine = m.sender_email === currentUser?.email;
                   const pinned = active.pinned_message?.id === m.id;
                   return (

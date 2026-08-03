@@ -1770,6 +1770,49 @@ async def birthdays_today(user: dict = Depends(get_current_user)):
     return [{"employee_id": d.get("employee_id", ""), "employee_name": d.get("employee_name") or ""} for d in docs]
 
 
+async def send_birthday_wishes(pharmacy_id: Optional[str] = None) -> int:
+    today = datetime.now(MONTREAL_TZ).date()
+    query: dict = {"birth_date": {"$regex": f"-{today.strftime('%m-%d')}$"}}
+    if pharmacy_id:
+        query["pharmacy_id"] = pharmacy_id
+    sent = 0
+    async for prof in db.employee_profiles.find(query, {"_id": 0}):
+        pid = prof.get("pharmacy_id") or "ph1"
+        emp_name = prof.get("employee_name") or "un(e) collègue"
+        convo = await db.conversations.find_one({"pharmacy_id": pid, "type": "equipe"}, {"_id": 0},
+                                                sort=[("created_at", 1)])
+        if not convo:
+            continue
+        dup = await db.chat_messages.find_one({
+            "conversation_id": convo["id"], "kind": "birthday",
+            "birthday_for": prof.get("employee_id"), "birthday_date": today.isoformat()})
+        if dup:
+            continue
+        now = datetime.now(timezone.utc).isoformat()
+        first_name = emp_name.split(" ")[0]
+        body = (f"🎂 Joyeux anniversaire {emp_name} ! 🎉 Toute l'équipe te souhaite une journée aussi "
+                f"agréable que ton sourire au comptoir. Laissez un petit mot à {first_name} juste ici !")
+        doc = {"id": str(uuid.uuid4()), "conversation_id": convo["id"], "pharmacy_id": pid,
+               "sender_email": "systeme@arriereplan.app", "sender_name": "Arrière Plan",
+               "sender_role": "system", "kind": "birthday",
+               "birthday_for": prof.get("employee_id"), "birthday_date": today.isoformat(),
+               "body": body, "attachment": None, "created_at": now}
+        await db.chat_messages.insert_one({**doc})
+        await db.conversations.update_one({"id": convo["id"]}, {"$set": {
+            "last_message": body[:80], "last_sender": "Arrière Plan", "last_message_at": now}})
+        sent += 1
+    return sent
+
+
+@api_router.post("/chat/birthday-wishes/run")
+async def run_birthday_wishes(user: dict = Depends(get_current_user)):
+    if user["role"] not in ("admin", "manager", "superadmin"):
+        raise HTTPException(status_code=403, detail="Accès réservé aux gestionnaires.")
+    pid = None if user["role"] == "superadmin" else (user.get("pharmacy_id") or "ph1")
+    sent = await send_birthday_wishes(pid)
+    return {"sent": sent}
+
+
 # ==================== Punch des heures ====================
 
 class PunchCodeIn(BaseModel):
@@ -5292,6 +5335,11 @@ async def shift_reminder_job():
     logger.info(f"Rappels de quart demain : {sent} notification(s) créée(s)")
 
 
+async def birthday_wishes_job():
+    sent = await send_birthday_wishes()
+    logger.info(f"Souhaits d'anniversaire automatiques : {sent} message(s) publié(s)")
+
+
 @api_router.get("/reports/budget-history")
 async def budget_history(months: int = Query(6, ge=1, le=12), principal: dict = Depends(get_principal)):
     pid = principal["pharmacy_id"] or "ph1"
@@ -6419,6 +6467,7 @@ async def startup_tasks():
     scheduler.add_job(weekly_task_report_job, CronTrigger(day_of_week="mon", hour=7, minute=0))
     scheduler.add_job(monthly_budget_report_job, CronTrigger(day=1, hour=7, minute=30))
     scheduler.add_job(shift_reminder_job, CronTrigger(hour=18, minute=0))
+    scheduler.add_job(birthday_wishes_job, CronTrigger(hour=7, minute=5))
     scheduler.add_job(leave_carryover_job, CronTrigger(month=1, day=1, hour=0, minute=45))
     scheduler.start()
 

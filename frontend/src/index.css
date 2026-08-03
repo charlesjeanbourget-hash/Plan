@@ -106,3 +106,9 @@ html.simple-mode .text-\[11px\] {
   font-size: 0.78rem !important;
   letter-spacing: 0.02em !important;
 }
+
+/* Visite guidée : barre de progression de l'étape en cours */
+@keyframes tourProgress {
+  from { width: 0%; }
+  to { width: 100%; }
+}

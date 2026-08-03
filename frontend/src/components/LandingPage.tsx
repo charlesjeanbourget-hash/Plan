@@ -1,12 +1,13 @@
 import { View } from '@/types';
 import { BrandLogo } from '@/components/BrandLogo';
 import { LandingShowcase } from '@/components/LandingShowcase';
+import { GuidedTour } from '@/components/GuidedTour';
 import { PayrollSection } from '@/components/PayrollSection';
 import { ComparisonSection } from '@/components/ComparisonSection';
 import { TestimonialsSection } from '@/components/TestimonialsSection';
 import { DemoSection } from '@/components/DemoSection';
 import { FaqSection } from '@/components/FaqSection';
-import { Users, Briefcase, Building2, ArrowRight, CheckCircle2, ShieldCheck, Leaf } from 'lucide-react';
+import { Users, Briefcase, Building2, ArrowRight, CheckCircle2, ShieldCheck, Leaf, PlayCircle } from 'lucide-react';
 
 interface Props {
   onNavigate: (view: View) => void;
@@ -75,6 +76,13 @@ export default function LandingPage({ onNavigate }: Props): JSX.Element {
                 Accéder à la plateforme <ArrowRight className="w-4 h-4" />
               </button>
               <button
+                data-testid="hero-cta-tour"
+                onClick={() => scrollToId('visite')}
+                className="px-7 py-3.5 rounded-full bg-slate-900 text-white font-semibold text-sm hover:bg-slate-800 transition-colors inline-flex items-center gap-2"
+              >
+                <PlayCircle className="w-4 h-4" /> Visite guidée (60 s)
+              </button>
+              <button
                 data-testid="hero-cta-careers"
                 onClick={() => onNavigate('careers')}
                 className="px-7 py-3.5 rounded-full border border-bronze-300 text-bronze-800 font-semibold text-sm hover:bg-bronze-50 hover:border-bronze-400 transition-colors"
@@ -99,6 +107,8 @@ export default function LandingPage({ onNavigate }: Props): JSX.Element {
           </div>
         </div>
       </section>
+
+      <GuidedTour />
 
       <section className="bg-slate-50 border-y border-slate-200" data-testid="roi-section">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-14 sm:py-16 grid grid-cols-1 md:grid-cols-3 gap-6">
