@@ -2712,19 +2712,15 @@ class StationsAssignIn(BaseModel):
     week_start: str
 
 
-@api_router.post("/work-stations/assign")
-async def auto_assign_stations(payload: StationsAssignIn, principal: dict = Depends(get_principal)):
-    if principal["role"] not in ("admin", "manager", "superadmin"):
-        raise HTTPException(status_code=403, detail="Accès réservé aux gestionnaires.")
-    pid = principal["pharmacy_id"] or "ph1"
-    start = date.fromisoformat(payload.week_start)
-    days = [(start + timedelta(days=i)).isoformat() for i in range(7)]
+async def _assign_stations_range(pid: str, days: list[str], notify: bool = True) -> int:
     cfg = await get_work_stations_config(pid)
     periods = cfg.get("rush_periods", [])
     by_dept: dict = {}
     for st in cfg.get("stations", []):
         if st.get("active"):
             by_dept.setdefault(st["department"], []).append(st)
+    if not by_dept:
+        return 0
     caps = {p["employee_id"]: (p.get("capacities") or [])
             async for p in db.employee_profiles.find({"pharmacy_id": pid}, {"_id": 0, "employee_id": 1, "capacities": 1})}
     shifts = await db.shifts.find({"pharmacy_id": pid, "date": {"$in": days}}, {"_id": 0}).to_list(3000)
@@ -2756,9 +2752,21 @@ async def auto_assign_stations(payload: StationsAssignIn, principal: dict = Depe
                 await db.shifts.update_one({"id": sh["id"], "pharmacy_id": pid},
                                            {"$set": {"station": best["name"],
                                                      "updated_at": datetime.now(timezone.utc).isoformat()}})
-                await _notify_shift_change(pid, sh["employee_id"], "Poste de travail assigné",
-                                           f"Votre quart {_fmt_shift_txt(sh)}.", "sky")
+                if notify:
+                    await _notify_shift_change(pid, sh["employee_id"], "Poste de travail assigné",
+                                               f"Votre quart {_fmt_shift_txt(sh)}.", "sky")
                 assigned += 1
+    return assigned
+
+
+@api_router.post("/work-stations/assign")
+async def auto_assign_stations(payload: StationsAssignIn, principal: dict = Depends(get_principal)):
+    if principal["role"] not in ("admin", "manager", "superadmin"):
+        raise HTTPException(status_code=403, detail="Accès réservé aux gestionnaires.")
+    pid = principal["pharmacy_id"] or "ph1"
+    start = date.fromisoformat(payload.week_start)
+    days = [(start + timedelta(days=i)).isoformat() for i in range(7)]
+    assigned = await _assign_stations_range(pid, days)
     if assigned:
         await log_audit(principal["email"], principal["role"], "ATTRIBUTION_POSTES", "horaire", pid,
                         f"Attribution automatique des postes : {assigned} quart(s) (semaine du {payload.week_start})", pid)
@@ -4561,6 +4569,7 @@ async def schedule_generate(payload: ScheduleGenIn, principal: dict = Depends(ge
         "status": "generating", "error": None, "summary": "", "shifts": [],
         "instructions": payload.instructions, "absences": absences,
         "department": department, "existing_mode": existing_mode,
+        "roster_branches": {e.id: e.branch_id for e in payload.roster},
         "priorities": settings.get("priorities") or {},
         "alerts": [], "warnings_count": 0,
         "estimated_cost": None, "weekly_budget": weekly_budget,
@@ -4663,11 +4672,43 @@ async def apply_proposal(proposal_id: str, principal: dict = Depends(get_princip
             detail="Les employés doivent approuver (ou le délai doit être écoulé sans refus) avant d'appliquer l'horaire.")
     await db.schedule_proposals.update_one({"id": proposal_id}, {"$set": {
         "applied_at": datetime.now(timezone.utc).isoformat()}})
+    pid = doc["pharmacy_id"]
+    week_days = [(date.fromisoformat(doc["week_start"]) + timedelta(days=i)).isoformat() for i in range(7)]
+    existing_docs = await db.shifts.find({"pharmacy_id": pid, "date": {"$in": week_days}},
+                                         {"_id": 0, "employee_id": 1, "date": 1, "start": 1, "end": 1}).to_list(3000)
+    existing_keys = {(e["employee_id"], e["date"], e["start"], e["end"]) for e in existing_docs}
+    branches = doc.get("roster_branches") or {}
+    inserted = 0
+    inserted_emps: set = set()
+    for s in doc.get("shifts", []):
+        key = (s["employee_id"], s["date"], s["start"], s["end"])
+        if key in existing_keys:
+            continue
+        shift_doc = _shift_doc(ShiftIn(
+            id=s.get("id") or "", employee_id=s["employee_id"], date=s["date"], start=s["start"], end=s["end"],
+            department=s.get("department") or doc.get("department") or "Général",
+            ai_generated=True, proposal_id=proposal_id,
+            branch_id=branches.get(s["employee_id"], "")), pid)
+        await db.shifts.update_one({"id": shift_doc["id"], "pharmacy_id": pid}, {"$set": shift_doc}, upsert=True)
+        existing_keys.add(key)
+        inserted_emps.add(s["employee_id"])
+        inserted += 1
+    if inserted:
+        await _mark_shifts_ready(pid)
+    stations_assigned = await _assign_stations_range(pid, week_days, notify=False)
+    for eid in inserted_emps:
+        await _notify_shift_change(pid, eid, "Nouvel horaire confirmé",
+                                   f"Votre horaire de la semaine du {doc['week_start']} est confirmé — "
+                                   "consultez vos quarts et postes de travail dans Mon espace.", "emerald")
     await log_audit(principal["email"], principal["role"], "APPLICATION_HORAIRE", "horaire", proposal_id,
-                    f"Horaire IA de la semaine du {doc['week_start']} appliqué ({len(doc.get('shifts', []))} quarts)",
-                    doc["pharmacy_id"])
+                    f"Horaire IA de la semaine du {doc['week_start']} appliqué ({len(doc.get('shifts', []))} quarts, "
+                    f"{inserted} ajoutés, {stations_assigned} poste(s) attribués automatiquement)",
+                    pid)
     updated = await db.schedule_proposals.find_one({"id": proposal_id}, {"_id": 0})
-    return proposal_view(updated)
+    result = proposal_view(updated)
+    result["inserted_count"] = inserted
+    result["stations_assigned"] = stations_assigned
+    return result
 
 
 @api_router.delete("/schedule/proposals/{proposal_id}")

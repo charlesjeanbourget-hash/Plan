@@ -86,7 +86,7 @@ const saveAutoAdded = (s: Set<string>): void => localStorage.setItem(AUTO_KEY, J
 
 export const ScheduleProposals = (): JSX.Element => {
   const { token } = useAuth();
-  const { state, addShift, deleteShift } = useHR();
+  const { state, addShift, deleteShift, refreshShifts } = useHR();
   const headers = { Authorization: `Bearer ${token ?? ''}` };
   const [proposals, setProposals] = useState<ScheduleProposal[]>([]);
   const [genOpen, setGenOpen] = useState(false);
@@ -417,16 +417,14 @@ export const ScheduleProposals = (): JSX.Element => {
 
   const apply = async (p: ScheduleProposal): Promise<void> => {
     try {
-      await axios.post(`${API}/schedule/proposals/${p.id}/apply`, {}, { headers });
-      const missing = p.shifts.filter((s) => !state.shifts.some((x) =>
-        x.employeeId === s.employee_id && x.date === s.date && x.startTime === s.start && x.endTime === s.end));
-      missing.forEach((s) => addShift({
-        id: s.id, employeeId: s.employee_id, date: s.date, startTime: s.start, endTime: s.end,
-        aiGenerated: true, proposalId: p.id, department: s.department || p.department || 'Général',
-      }));
-      toast.success(missing.length === 0
-        ? `Horaire de la semaine du ${p.week_start} confirmé — tous les quarts étaient déjà au calendrier.`
-        : `Horaire confirmé — ${missing.length} quart(s) ajoutés, ${p.shifts.length - missing.length} déjà au calendrier.`);
+      const res = await axios.post<{ inserted_count?: number; stations_assigned?: number }>(
+        `${API}/schedule/proposals/${p.id}/apply`, {}, { headers });
+      const inserted = res.data.inserted_count ?? 0;
+      const stationsAssigned = res.data.stations_assigned ?? 0;
+      await refreshShifts();
+      toast.success(inserted === 0
+        ? `Horaire de la semaine du ${p.week_start} confirmé — tous les quarts étaient déjà au calendrier${stationsAssigned > 0 ? ` (${stationsAssigned} poste(s) attribués automatiquement)` : ''}.`
+        : `Horaire confirmé — ${inserted} quart(s) ajoutés au calendrier et ${stationsAssigned} poste(s) de travail attribués automatiquement selon les compétences.`);
       await refresh();
     } catch (err) {
       const detail = axios.isAxiosError(err) && err.response ? (err.response.data as { detail?: unknown }).detail : null;

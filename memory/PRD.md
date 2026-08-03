@@ -419,3 +419,10 @@ Question utilisateur : « l'IA prend-elle en considération les remplaçants d'a
 3. **Compteurs tâches par quart** : badge shift-progress-{date}-{quart} « X/Y faites · Z à faire » (ambre) ou « Y/Y faites ✓ » (vert) visible admin/gestionnaire/employé.
 4. **Filtres d'horaire stricts** : filtre département masque désormais les employés sans quart du département cette semaine (les autres lignes disparaissent) ; filtre succursale déjà strict (multi-succursales incluses). Réappliqué : branchId+station dans handleAdd/handleDrop (édit précédemment perdu).
 - Nettoyage post-tests : config quasi-défaut, quarts/tâches de test supprimés. Reste 1 shift 2099-12-31 (Julie, héritage it.37, sans impact).
+
+## Itération 50 (3 août 2026) — Attribution automatique des postes à l'application d'un horaire IA — testée (curl E2E)
+1. Refactor : logique d'attribution extraite dans `_assign_stations_range(pid, days, notify)` (server.py), réutilisée par POST /work-stations/assign (notify=True).
+2. `generate_schedule` : la proposal stocke `roster_branches` {employee_id: branch_id} pour imputer la bonne succursale à l'application.
+3. `apply_proposal` (POST /schedule/proposals/{id}/apply) fait maintenant TOUT côté serveur : insertion des quarts manquants (dedupe employee/date/start/end, ai_generated, branch_id du roster, via _shift_doc/ShiftIn) + `_assign_stations_range(notify=False)` immédiat + 1 notification groupée par employé (« Nouvel horaire confirmé — consultez vos quarts et postes ») + audit enrichi. Réponse enrichie : inserted_count, stations_assigned.
+4. Frontend `ScheduleProposals.apply` : plus de boucle addShift — lit inserted_count/stations_assigned, appelle refreshShifts(), toast « N quart(s) ajoutés et M poste(s) attribués automatiquement ». Le flux d'APERÇU à la génération (auto-ajout des quarts au calendrier via addShift) reste inchangé : à l'apply, ces quarts existent déjà → seule l'attribution des postes s'exécute.
+- Vérifié E2E : proposal artificielle approuvée → apply → inserted=2, stations_assigned=2 (Accueil + Saisie selon compétences), branch_id=br1 respecté. Données de test nettoyées.
