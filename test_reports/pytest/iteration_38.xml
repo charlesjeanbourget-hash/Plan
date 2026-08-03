@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="5" time="3.745" timestamp="2026-08-03T10:27:19.578183+00:00" hostname="agent-env-5f35255d-4b36-4220-a229-8613b5162e3a"><testcase classname="tests.test_iteration38" name="test_superadmin_task_appears_in_get" time="0.666" /><testcase classname="tests.test_iteration38" name="test_work_stations_defaults" time="0.417" /><testcase classname="tests.test_iteration38" name="test_work_stations_put_and_403" time="0.864" /><testcase classname="tests.test_iteration38" name="test_auto_assign_stations" time="0.947"><failure message="TypeError: string indices must be integers, not 'str'">backend/tests/test_iteration38.py:166: in test_auto_assign_stations
+    mine = [s for s in shifts if s["id"] in created_ids]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/tests/test_iteration38.py:166: in &lt;listcomp&gt;
+    mine = [s for s in shifts if s["id"] in created_ids]
+                                 ^^^^^^^
+E   TypeError: string indices must be integers, not 'str'</failure></testcase><testcase classname="tests.test_iteration38" name="test_shift_station_field_and_notification" time="0.506" /></testsuite></testsuites>

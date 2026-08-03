@@ -157,7 +157,15 @@ export default function MySpaceModule(): JSX.Element {
           <div className="space-y-2.5">
             {myShifts.map((s) => (
               <div key={s.id} className="flex items-center justify-between py-2 border-b border-slate-100 last:border-0">
-                <p className="text-sm font-semibold text-slate-800">{s.date === today ? "Aujourd'hui" : s.date}</p>
+                <div>
+                  <p className="text-sm font-semibold text-slate-800">{s.date === today ? "Aujourd'hui" : s.date}</p>
+                  {((s.department && s.department !== 'Général') || s.station) && (
+                    <p data-testid={`myshift-station-${s.id}`} className="text-xs text-emerald-700 font-semibold">
+                      {s.department && s.department !== 'Général' ? s.department : ''}
+                      {s.station ? `${s.department && s.department !== 'Général' ? ' — ' : ''}Poste : ${s.station}` : ''}
+                    </p>
+                  )}
+                </div>
                 <p className="text-sm text-slate-600">{s.startTime} – {s.endTime}</p>
               </div>
             ))}

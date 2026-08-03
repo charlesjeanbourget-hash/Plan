@@ -34,6 +34,7 @@ interface ServerShift {
   ai_generated?: boolean;
   proposal_id?: string;
   branch_id?: string;
+  station?: string;
   notes?: string;
 }
 
@@ -49,6 +50,7 @@ const shiftFromServer = (d: ServerShift): Shift => ({
   proposalId: d.proposal_id || undefined,
   notes: d.notes || undefined,
   branchId: d.branch_id || undefined,
+  station: d.station || undefined,
 });
 
 const shiftToServer = (s: Shift, branchId: string): Record<string, unknown> => ({
@@ -62,6 +64,7 @@ const shiftToServer = (s: Shift, branchId: string): Record<string, unknown> => (
   ai_generated: s.aiGenerated ?? false,
   proposal_id: s.proposalId ?? '',
   branch_id: s.branchId || branchId,
+  station: s.station ?? '',
   notes: s.notes ?? '',
 });
 
@@ -106,6 +109,7 @@ interface HRContextValue {
   addResource: (r: Omit<Resource, 'id'>) => void;
   updateResource: (id: string, patch: Partial<Resource>) => void;
   deleteResource: (id: string) => void;
+  refreshShifts: () => Promise<void>;
   resetData: () => void;
 }
 
@@ -251,6 +255,7 @@ export const HRProvider = ({ children }: { children: ReactNode }) => {
           body.branch_id = patch.branchId ?? branchOf(patch.employeeId);
         }
         if (patch.branchId !== undefined) body.branch_id = patch.branchId;
+        if (patch.station !== undefined) body.station = patch.station;
         if (patch.date !== undefined) body.date = patch.date;
         if (patch.startTime !== undefined) body.start = patch.startTime;
         if (patch.endTime !== undefined) body.end = patch.endTime;
@@ -336,6 +341,7 @@ export const HRProvider = ({ children }: { children: ReactNode }) => {
       localStorage.setItem(STATE_KEY, JSON.stringify(SEED_STATE));
       setState(SEED_STATE);
     },
+    refreshShifts: syncShifts,
   };
 
   return <HRContext.Provider value={value}>{children}</HRContext.Provider>;

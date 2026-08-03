@@ -24,7 +24,7 @@ import bcrypt
 import jwt
 from typing import Optional
 from pathlib import Path
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime, timezone, date, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -2437,6 +2437,7 @@ class ShiftIn(BaseModel):
     ai_generated: bool = False
     proposal_id: str = ""
     branch_id: str = ""
+    station: str = ""
     notes: str = ""
 
 
@@ -2450,6 +2451,7 @@ class ShiftPatchIn(BaseModel):
     ai_generated: Optional[bool] = None
     proposal_id: Optional[str] = None
     branch_id: Optional[str] = None
+    station: Optional[str] = None
     notes: Optional[str] = None
 
 
@@ -2475,7 +2477,7 @@ def _shift_doc(s: ShiftIn, pid: str) -> dict:
             "department": s.department if s.department in DEPARTMENTS_BE else "Général",
             "resource_ids": [str(r) for r in (s.resource_ids or [])][:20],
             "ai_generated": bool(s.ai_generated), "proposal_id": s.proposal_id or "",
-            "branch_id": s.branch_id or "", "notes": (s.notes or "")[:500],
+            "branch_id": s.branch_id or "", "station": (s.station or "")[:80], "notes": (s.notes or "")[:500],
             "updated_at": datetime.now(timezone.utc).isoformat()}
 
 
@@ -2496,7 +2498,8 @@ async def _notify_shift_change(pid: str, employee_id: str, title: str, detail: s
 
 def _fmt_shift_txt(d: dict) -> str:
     dept = d.get("department") or "Général"
-    return f"le {d['date']} de {d['start']} à {d['end']}" + (f" ({dept})" if dept != "Général" else "")
+    label = dept + (f" — poste {d['station']}" if d.get("station") else "")
+    return f"le {d['date']} de {d['start']} à {d['end']}" + (f" ({label})" if label != "Général" else "")
 
 
 @api_router.get("/shifts")
@@ -2550,12 +2553,14 @@ async def update_calendar_shift(shift_id: str, payload: ShiftPatchIn, principal:
         patch["department"] = "Général"
     if "resource_ids" in patch:
         patch["resource_ids"] = [str(r) for r in patch["resource_ids"]][:20]
+    if "station" in patch:
+        patch["station"] = (patch["station"] or "")[:80]
     patch["updated_at"] = datetime.now(timezone.utc).isoformat()
     await db.shifts.update_one({"id": shift_id, "pharmacy_id": pid}, {"$set": patch})
     await _mark_shifts_ready(pid)
     merged = {**doc, **patch}
     relevant = any(patch.get(k) is not None and patch[k] != doc.get(k)
-                   for k in ("date", "start", "end", "department", "employee_id"))
+                   for k in ("date", "start", "end", "department", "employee_id", "station"))
     if relevant:
         if patch.get("employee_id") and patch["employee_id"] != doc["employee_id"]:
             await _notify_shift_change(pid, doc["employee_id"], "Quart retiré",
@@ -2581,6 +2586,183 @@ async def delete_calendar_shift(shift_id: str, principal: dict = Depends(get_pri
         await _notify_shift_change(pid, doc["employee_id"], "Quart retiré",
                                    f"Votre quart {_fmt_shift_txt(doc)} a été retiré de l'horaire.", "red")
     return {"status": "supprimé"}
+
+
+# ==================== Postes de travail par département ====================
+
+def _st(dept: str, sid: str, name: str, comp: str, normal: int, rush: int, active: bool) -> dict:
+    return {"id": sid, "department": dept, "name": name, "competence": comp,
+            "normal_count": normal, "rush_count": rush, "active": active}
+
+
+DEFAULT_WORK_STATIONS = [
+    _st("Laboratoire", "lab-accueil", "Accueil client / Réception des ordonnances", "Accueil et réception des ordonnances", 1, 2, True),
+    _st("Laboratoire", "lab-saisie", "Saisie / Entrée de données", "Saisie informatique des ordonnances", 1, 2, True),
+    _st("Laboratoire", "lab-comptage", "Comptage / Préparation des ordonnances", "Comptage et préparation des ordonnances", 1, 2, True),
+    _st("Laboratoire", "lab-robot", "Robot de dispensation", "Opération du robot de dispensation", 1, 1, True),
+    _st("Laboratoire", "lab-dispill", "Dispill / Piluliers", "Préparation des Dispill et piluliers", 1, 1, True),
+    _st("Laboratoire", "lab-verification", "Vérification contenant-contenu", "Vérification contenant-contenu", 1, 1, False),
+    _st("Laboratoire", "lab-remise", "Remise des ordonnances / Caisse labo", "Remise des ordonnances et caisse", 1, 2, False),
+    _st("Laboratoire", "lab-telephone", "Téléphone / Renouvellements", "Gestion des appels et renouvellements", 1, 1, False),
+    _st("Laboratoire", "lab-fax", "Télécopies / Liaisons prescripteurs", "Liaisons avec les prescripteurs", 1, 1, False),
+    _st("Laboratoire", "lab-magistrales", "Préparations magistrales (non stériles)", "Préparations magistrales", 1, 1, False),
+    _st("Laboratoire", "lab-steriles", "Préparations stériles", "Préparations stériles", 1, 1, False),
+    _st("Laboratoire", "lab-stocks", "Commandes / Réception des stocks du labo", "Gestion des stocks du laboratoire", 1, 1, False),
+    _st("Laboratoire", "lab-retours", "Retours / Périmés / Rappels", "Gestion des retours et périmés", 1, 1, False),
+    _st("Laboratoire", "lab-narcotiques", "Narcotiques et substances contrôlées", "Gestion des narcotiques", 1, 1, False),
+    _st("Laboratoire", "lab-chsld", "Piluliers résidences / CHSLD", "Préparation piluliers établissements", 1, 1, False),
+    _st("Laboratoire", "lab-vaccination", "Vaccination / Injections", "Vaccination et injections", 1, 1, False),
+    _st("Laboratoire", "lab-mvl", "Conseils MVL au comptoir", "Conseils médicaments en vente libre", 1, 1, False),
+    _st("Laboratoire", "lab-pharmacien-verif", "Pharmacien — validation des ordonnances", "Validation pharmaceutique", 1, 2, False),
+    _st("Laboratoire", "lab-pharmacien-clinique", "Pharmacien — actes cliniques (Loi 31/41)", "Actes cliniques pharmaceutiques", 1, 1, False),
+    _st("Laboratoire", "lab-stagiaire", "Étudiant / Stagiaire en pharmacie", "", 1, 1, False),
+    _st("Plancher", "pl-conseil", "Conseil clients / Plancher", "Service à la clientèle", 1, 2, True),
+    _st("Plancher", "pl-caisse", "Caisse avant / Loterie", "Opération de caisse", 1, 2, False),
+    _st("Plancher", "pl-tablettes", "Mise en tablettes / Facing", "Mise en marché", 1, 1, False),
+    _st("Plancher", "pl-etiquetage", "Étiquetage et changements de prix", "Étiquetage et affichage des prix", 1, 1, False),
+    _st("Plancher", "pl-cosmetiques", "Cosmétiques / Dermoconseil", "Conseil en cosmétiques", 1, 1, False),
+    _st("Plancher", "pl-photo", "Comptoir photo", "Service photo", 1, 1, False),
+    _st("Plancher", "pl-gerant", "Gérant de plancher", "Gestion du plancher", 1, 1, False),
+    _st("Entrepôt", "en-reception", "Réception et vérification des commandes", "Réception de marchandises", 1, 1, True),
+    _st("Entrepôt", "en-rangement", "Rangement / Rotation des stocks", "Gestion des stocks", 1, 1, False),
+    _st("Entrepôt", "en-inventaire", "Inventaire cyclique", "Prise d'inventaire", 1, 1, False),
+    _st("Livraison", "li-livreur", "Livreur", "Livraison à domicile", 1, 2, True),
+    _st("Livraison", "li-preparation", "Préparation des livraisons / Facturation", "Préparation des commandes de livraison", 1, 1, False),
+    _st("Livraison", "li-repartition", "Répartition / Tournées", "Planification des tournées", 1, 1, False),
+    _st("Administration", "ad-gestion", "Gestion / Horaires et RH", "Gestion administrative", 1, 1, False),
+    _st("Administration", "ad-comptabilite", "Comptabilité / Facturation", "Comptabilité", 1, 1, False),
+    _st("Administration", "ad-secretariat", "Réception téléphonique / Secrétariat", "Secrétariat", 1, 1, False),
+    _st("Général", "ge-polyvalent", "Polyvalent (toutes zones)", "", 1, 1, False),
+    _st("Général", "ge-entretien", "Entretien / Salubrité", "Entretien des lieux", 1, 1, False),
+]
+
+DEFAULT_RUSH_PERIODS = [{"days": [0, 1, 2, 3, 4], "start": "10:00", "end": "14:00"}]
+
+
+class WorkStationIn(BaseModel):
+    id: str = ""
+    department: str
+    name: str
+    competence: str = ""
+    normal_count: int = Field(1, ge=0, le=20)
+    rush_count: int = Field(1, ge=0, le=20)
+    active: bool = True
+
+
+class RushPeriodIn(BaseModel):
+    days: list[int] = []
+    start: str = "10:00"
+    end: str = "14:00"
+
+
+class WorkStationsConfigIn(BaseModel):
+    stations: list[WorkStationIn]
+    rush_periods: list[RushPeriodIn] = []
+
+
+async def get_work_stations_config(pid: str) -> dict:
+    doc = await db.work_stations.find_one({"pharmacy_id": pid}, {"_id": 0})
+    if not doc:
+        doc = {"pharmacy_id": pid, "stations": [dict(s) for s in DEFAULT_WORK_STATIONS],
+               "rush_periods": [dict(p) for p in DEFAULT_RUSH_PERIODS],
+               "updated_at": datetime.now(timezone.utc).isoformat()}
+        await db.work_stations.insert_one({**doc})
+    return doc
+
+
+@api_router.get("/work-stations")
+async def list_work_stations(user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    doc = await get_work_stations_config(pid)
+    return {"stations": doc.get("stations", []), "rush_periods": doc.get("rush_periods", [])}
+
+
+@api_router.put("/work-stations")
+async def save_work_stations(payload: WorkStationsConfigIn, principal: dict = Depends(get_principal)):
+    if principal["role"] not in ("admin", "manager", "superadmin"):
+        raise HTTPException(status_code=403, detail="Accès réservé aux gestionnaires.")
+    pid = principal["pharmacy_id"] or "ph1"
+    stations = []
+    for s in payload.stations[:120]:
+        if s.department not in DEPARTMENTS_BE or not s.name.strip():
+            continue
+        stations.append({"id": s.id or str(uuid.uuid4()), "department": s.department,
+                         "name": s.name.strip()[:80], "competence": s.competence.strip()[:120],
+                         "normal_count": s.normal_count, "rush_count": max(s.rush_count, s.normal_count),
+                         "active": s.active})
+    periods = []
+    for p in payload.rush_periods[:14]:
+        if not re.fullmatch(r"\d{2}:\d{2}", p.start) or not re.fullmatch(r"\d{2}:\d{2}", p.end) or p.end <= p.start:
+            continue
+        periods.append({"days": sorted({d for d in p.days if 0 <= d <= 6}), "start": p.start, "end": p.end})
+    doc = {"pharmacy_id": pid, "stations": stations, "rush_periods": periods,
+           "updated_at": datetime.now(timezone.utc).isoformat()}
+    await db.work_stations.update_one({"pharmacy_id": pid}, {"$set": doc}, upsert=True)
+    await log_audit(principal["email"], principal["role"], "CONFIG_POSTES", "horaire", pid,
+                    f"Postes de travail mis à jour ({len(stations)} postes, {len(periods)} période(s) de rush)", pid)
+    return {"stations": stations, "rush_periods": periods}
+
+
+def _shift_in_rush(sh: dict, periods: list) -> bool:
+    wd = date.fromisoformat(sh["date"]).weekday()
+    return any(wd in (p.get("days") or []) and sh["start"] < p["end"] and sh["end"] > p["start"] for p in periods)
+
+
+class StationsAssignIn(BaseModel):
+    week_start: str
+
+
+@api_router.post("/work-stations/assign")
+async def auto_assign_stations(payload: StationsAssignIn, principal: dict = Depends(get_principal)):
+    if principal["role"] not in ("admin", "manager", "superadmin"):
+        raise HTTPException(status_code=403, detail="Accès réservé aux gestionnaires.")
+    pid = principal["pharmacy_id"] or "ph1"
+    start = date.fromisoformat(payload.week_start)
+    days = [(start + timedelta(days=i)).isoformat() for i in range(7)]
+    cfg = await get_work_stations_config(pid)
+    periods = cfg.get("rush_periods", [])
+    by_dept: dict = {}
+    for st in cfg.get("stations", []):
+        if st.get("active"):
+            by_dept.setdefault(st["department"], []).append(st)
+    caps = {p["employee_id"]: (p.get("capacities") or [])
+            async for p in db.employee_profiles.find({"pharmacy_id": pid}, {"_id": 0, "employee_id": 1, "capacities": 1})}
+    shifts = await db.shifts.find({"pharmacy_id": pid, "date": {"$in": days}}, {"_id": 0}).to_list(3000)
+    assigned = 0
+    for day in days:
+        for dept, stations in by_dept.items():
+            day_shifts = sorted([s for s in shifts if s["date"] == day and (s.get("department") or "Général") == dept],
+                                key=lambda x: x["start"])
+            names = {st["name"] for st in stations}
+            counts = {st["name"]: sum(1 for s in day_shifts if s.get("station") == st["name"]) for st in stations}
+            for sh in day_shifts:
+                if sh.get("station") in names or (sh.get("station") and sh["station"] not in names):
+                    continue
+                rush = _shift_in_rush(sh, periods)
+                emp_caps = caps.get(sh["employee_id"], [])
+
+                def _needed(st: dict) -> int:
+                    return st["rush_count"] if rush else st["normal_count"]
+
+                open_st = [st for st in stations if counts[st["name"]] < _needed(st)]
+                qualified = [st for st in open_st
+                             if not st.get("competence") or not emp_caps or task_qualification_ok(st["competence"], emp_caps)]
+                pool = qualified or open_st
+                if not pool:
+                    continue
+                best = min(pool, key=lambda st: (counts[st["name"]] / max(_needed(st), 1), -_needed(st)))
+                sh["station"] = best["name"]
+                counts[best["name"]] += 1
+                await db.shifts.update_one({"id": sh["id"], "pharmacy_id": pid},
+                                           {"$set": {"station": best["name"],
+                                                     "updated_at": datetime.now(timezone.utc).isoformat()}})
+                await _notify_shift_change(pid, sh["employee_id"], "Poste de travail assigné",
+                                           f"Votre quart {_fmt_shift_txt(sh)}.", "sky")
+                assigned += 1
+    if assigned:
+        await log_audit(principal["email"], principal["role"], "ATTRIBUTION_POSTES", "horaire", pid,
+                        f"Attribution automatique des postes : {assigned} quart(s) (semaine du {payload.week_start})", pid)
+    return {"assigned": assigned, "week_start": payload.week_start}
 
 
 # ==================== Congés (serveur, Loi 25) ====================
@@ -4786,9 +4968,10 @@ class TaskCopyWeekIn(BaseModel):
 @api_router.get("/tasks")
 async def list_tasks(start: str = Query(...), end: str = Query(...), user: dict = Depends(get_current_user)):
     pid = user.get("pharmacy_id") or ""
+    await materialize_recurring_tasks(pid or "ph1", start, end)
+    query: dict = {"date": {"$gte": start, "$lte": end}}
     if pid:
-        await materialize_recurring_tasks(pid, start, end)
-    query: dict = {"pharmacy_id": pid, "date": {"$gte": start, "$lte": end}}
+        query["pharmacy_id"] = pid
     if user["role"] not in ("admin", "manager", "superadmin"):
         eid = user.get("employee_id") or ""
         query["$or"] = [{"assignee_employee_id": eid}, {"assignee_employee_id": ""}]

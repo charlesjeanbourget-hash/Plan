@@ -309,11 +309,21 @@ export default function TasksModule(): JSX.Element {
               ) : (
                 SHIFTS.filter((s) => dayTasks.some((t) => t.shift === s)).map((s) => {
                   const ShiftIcon = SHIFT_ICONS[s] ?? Sun;
+                  const sTasks = dayTasks.filter((t) => t.shift === s);
+                  const sDone = sTasks.filter((t) => t.done).length;
                   return (
                     <div key={s} className="mb-3 last:mb-0">
-                      <p className="text-[11px] uppercase tracking-[0.15em] text-bronze-700 font-bold mb-1.5 inline-flex items-center gap-1.5">
-                        <ShiftIcon className="w-3.5 h-3.5" /> {s}
-                      </p>
+                      <div className="flex items-center justify-between mb-1.5 gap-2">
+                        <p className="text-[11px] uppercase tracking-[0.15em] text-bronze-700 font-bold inline-flex items-center gap-1.5">
+                          <ShiftIcon className="w-3.5 h-3.5" /> {s}
+                        </p>
+                        <span
+                          data-testid={`shift-progress-${d}-${s}`}
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap ${sDone === sTasks.length ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-800'}`}
+                        >
+                          {sDone}/{sTasks.length} faites{sDone < sTasks.length ? ` · ${sTasks.length - sDone} à faire` : ' ✓'}
+                        </span>
+                      </div>
                       <div className="space-y-1.5">
                         {dayTasks.filter((t) => t.shift === s).map((t) => (
                           <div key={t.id} data-testid={`task-item-${t.id}`} className={`flex items-start gap-2.5 rounded-lg border px-3 py-2 transition-colors ${t.done ? 'border-emerald-200 bg-emerald-50/60' : 'border-slate-200'} ${t.id === highlightId ? 'ring-2 ring-bronze-400' : ''}`}>

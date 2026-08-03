@@ -92,6 +92,23 @@ export interface Shift {
   proposalId?: string;
   department?: string;
   branchId?: string;
+  station?: string;
+}
+
+export interface WorkStation {
+  id: string;
+  department: string;
+  name: string;
+  competence: string;
+  normal_count: number;
+  rush_count: number;
+  active: boolean;
+}
+
+export interface RushPeriod {
+  days: number[];
+  start: string;
+  end: string;
 }
 
 export type ResourceType = 'lieu' | 'equipement';

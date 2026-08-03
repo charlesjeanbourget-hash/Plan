@@ -2,7 +2,10 @@ import { useState, useEffect, useCallback, FormEvent } from 'react';
 import axios from 'axios';
 import { useHR } from '@/context/HRContext';
 import { useAuth } from '@/context/AuthContext';
-import { ReplacementRequestDoc, Appointment, Shift, Employee } from '@/types';
+import { ReplacementRequestDoc, Appointment, Shift, Employee, WorkStation, RushPeriod } from '@/types';
+import { WorkStationsPanel } from '@/components/WorkStationsPanel';
+import { WorkStationsDialog } from '@/components/WorkStationsDialog';
+import { isQualified } from '@/lib/qualif';
 import { ModuleHeader } from '@/components/modules/shared';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -65,7 +68,7 @@ const monthGridDays = (anchor: Date): string[] => {
 };
 
 export default function SchedulingModule(): JSX.Element {
-  const { state, addShift, deleteShift, updateShift, setShiftSwapStatus, getEmployee } = useHR();
+  const { state, addShift, deleteShift, updateShift, setShiftSwapStatus, getEmployee, refreshShifts } = useHR();
   const { currentUser, token } = useAuth();
   const isAdmin = currentUser?.role !== 'employee';
   const [weekOffset, setWeekOffset] = useState(0);
@@ -76,6 +79,11 @@ export default function SchedulingModule(): JSX.Element {
   const [date, setDate] = useState(iso(new Date()));
   const [department, setDepartment] = useState('Général');
   const [shiftBranch, setShiftBranch] = useState('');
+  const [shiftStation, setShiftStation] = useState('');
+  const [stations, setStations] = useState<WorkStation[]>([]);
+  const [rushPeriods, setRushPeriods] = useState<RushPeriod[]>([]);
+  const [stationsCfgOpen, setStationsCfgOpen] = useState(false);
+  const [empCaps, setEmpCaps] = useState<Record<string, string[]>>({});
   const [deptFilter, setDeptFilter] = useState('all');
   const [startTime, setStartTime] = useState('09:00');
   const [endTime, setEndTime] = useState('17:00');
@@ -103,13 +111,15 @@ export default function SchedulingModule(): JSX.Element {
   const [weekDeptBudgets, setWeekDeptBudgets] = useState<Record<string, number>>({});
   useEffect(() => {
     if (!isAdmin || !token) return;
-    axios.get<{ employee_id: string; hourly_rate?: number; department?: string }[]>(`${API}/profiles`, { headers: { Authorization: `Bearer ${token}` } })
+    axios.get<{ employee_id: string; hourly_rate?: number; department?: string; capacities?: string[] }[]>(`${API}/profiles`, { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => {
         const m: Record<string, number> = {};
         const dd: Record<string, string> = {};
+        const cc: Record<string, string[]> = {};
         r.data.forEach((p) => {
           m[p.employee_id] = p.hourly_rate ?? 0;
           if (p.department) dd[p.employee_id] = p.department;
+          cc[p.employee_id] = p.capacities ?? [];
         });
         state.employees.forEach((emp) => {
           if ((m[emp.id] ?? 0) <= 0 && emp.hourlyRate > 0) {
@@ -121,7 +131,11 @@ export default function SchedulingModule(): JSX.Element {
         });
         setRates(m);
         setDeptDefaults(dd);
+        setEmpCaps(cc);
       })
+      .catch(() => undefined);
+    axios.get<{ stations: WorkStation[]; rush_periods: RushPeriod[] }>(`${API}/work-stations`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => { setStations(r.data.stations); setRushPeriods(r.data.rush_periods); })
       .catch(() => undefined);
     axios.get<{ dept_budgets?: Record<string, number> }>(`${API}/schedule/settings`, { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => setWeekDeptBudgets(r.data.dept_budgets ?? {}))
@@ -291,8 +305,8 @@ export default function SchedulingModule(): JSX.Element {
       toast.error('Cet employé est en congé approuvé ce jour-là. Confirmez pour enregistrer quand même.');
       return;
     }
-    addShift({ employeeId, date, startTime, endTime, resourceIds: selectedResources, department });
-    toast.success(`Quart de travail ajouté au calendrier « ${department} ».`);
+    addShift({ employeeId, date, startTime, endTime, resourceIds: selectedResources, department, branchId: shiftBranch || undefined, station: shiftStation || undefined });
+    toast.success(`Quart de travail ajouté au calendrier « ${department} »${shiftStation ? ` — poste ${shiftStation}` : ''}.`);
     setSelectedResources([]);
     setLeaveOverride(false);
     setDialogOpen(false);
@@ -308,6 +322,7 @@ export default function SchedulingModule(): JSX.Element {
     setShiftBranch(branchFilter !== 'all' && dialogEmpBranches.includes(branchFilter) ? branchFilter : dialogEmpBranches[0] ?? '');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [employeeId, dialogOpen]);
+  useEffect(() => { setShiftStation(''); }, [department, dialogOpen]);
   const dialogLeaveConflict = employeeId && date ? approvedLeaveFor(employeeId, date) : undefined;
 
   const toggleResource = (id: string): void => {
@@ -328,7 +343,7 @@ export default function SchedulingModule(): JSX.Element {
       return;
     }
     if (copy) {
-      addShift({ employeeId: empId, date: d, startTime: shift.startTime, endTime: shift.endTime, resourceIds: [...(shift.resourceIds ?? [])], department: shift.department });
+      addShift({ employeeId: empId, date: d, startTime: shift.startTime, endTime: shift.endTime, resourceIds: [...(shift.resourceIds ?? [])], department: shift.department, branchId: shift.branchId, station: shift.station });
       toast.success(`Quart ${shift.startTime}–${shift.endTime} dupliqué pour ${empName} le ${d}.`);
       return;
     }
@@ -583,6 +598,26 @@ export default function SchedulingModule(): JSX.Element {
       {isAdmin && <OpenShiftsPanel mode="admin" />}
       {!isAdmin && <OpenShiftsPanel mode="employee" />}
 
+      {isAdmin && viewMode === 'week' && (
+        <WorkStationsPanel
+          stations={stations}
+          rushPeriods={rushPeriods}
+          days={days}
+          shifts={state.shifts}
+          onConfigure={() => setStationsCfgOpen(true)}
+          onAssigned={() => void refreshShifts()}
+        />
+      )}
+      {isAdmin && (
+        <WorkStationsDialog
+          open={stationsCfgOpen}
+          onOpenChange={setStationsCfgOpen}
+          stations={stations}
+          rushPeriods={rushPeriods}
+          onSaved={(s, p) => { setStations(s); setRushPeriods(p); }}
+        />
+      )}
+
       {isAdmin && gapDays.length > 0 && (
         <div data-testid="understaffing-alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -651,7 +686,7 @@ export default function SchedulingModule(): JSX.Element {
             </tr>
           </thead>
           <tbody>
-            {state.employees.filter(inBranch).map((emp) => {
+            {state.employees.filter(inBranch).filter((e) => deptFilter === 'all' || visibleShifts.some((s) => s.employeeId === e.id && s.date >= days[0] && s.date <= days[6])).map((emp) => {
               const rowHours = visibleShifts
                 .filter((s) => s.employeeId === emp.id && s.date >= days[0] && s.date <= days[6])
                 .reduce((sum, s) => sum + hoursBetween(s.startTime, s.endTime), 0);
@@ -723,6 +758,9 @@ export default function SchedulingModule(): JSX.Element {
                           </div>
                           <p className="text-[10px] text-slate-500 mt-0.5">
                             {fmtHours(hoursBetween(s.startTime, s.endTime))}
+                            {s.station && (
+                              <span data-testid={`shift-station-${s.id}`} className="ml-1.5 inline-flex items-center rounded bg-emerald-50 border border-emerald-200 text-emerald-700 px-1 py-px text-[9px] font-semibold">{s.station}</span>
+                            )}
                             {deptFilter === 'all' && s.department && s.department !== 'Général' && (
                               <span data-testid={`shift-dept-${s.id}`} className="ml-1.5 inline-flex items-center rounded bg-slate-100 border border-slate-200 text-slate-500 px-1 py-px text-[9px] font-semibold">{s.department}</span>
                             )}
@@ -1040,6 +1078,42 @@ export default function SchedulingModule(): JSX.Element {
                 <p className="text-[11px] text-slate-400">Cet employé travaille dans plusieurs succursales — le coût du quart sera imputé au budget de la succursale choisie.</p>
               </div>
             )}
+            {(() => {
+              const deptStations = stations.filter((st) => st.active && st.department === department);
+              if (deptStations.length === 0) return null;
+              const caps = empCaps[employeeId] ?? [];
+              return (
+                <div className="space-y-2">
+                  <Label>Poste de travail ({department})</Label>
+                  <Select value={shiftStation || 'none'} onValueChange={(v) => setShiftStation(v === 'none' ? '' : v)}>
+                    <SelectTrigger data-testid="shift-station-select"><SelectValue placeholder="Choisir le poste…" /></SelectTrigger>
+                    <SelectContent className="max-h-64">
+                      <SelectItem value="none">Aucun poste précis</SelectItem>
+                      {deptStations.map((st) => {
+                        const known = caps.length > 0 && !!st.competence;
+                        const ok = known && isQualified(st.competence, caps);
+                        return (
+                          <SelectItem key={st.id} value={st.name}>
+                            {st.name}{known ? (ok ? ' · ✓ qualifié(e)' : ' · ⚠ hors compétences') : ''}
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
+                  {shiftStation && (() => {
+                    const st = deptStations.find((x) => x.name === shiftStation);
+                    if (!st || !st.competence || caps.length === 0 || isQualified(st.competence, caps)) return null;
+                    return (
+                      <p data-testid="station-qualif-warning" className="text-xs text-amber-700 font-semibold inline-flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                        <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                        Ce poste requiert « {st.competence} », absent des capacités du profil de cet employé.
+                      </p>
+                    );
+                  })()}
+                  <p className="text-[11px] text-slate-400">L'employé verra son poste sur son quart. Besoin : {(() => { const st = deptStations.find((x) => x.name === shiftStation); return st ? `${st.normal_count} en période normale · ${st.rush_count} en rush` : 'choisissez un poste pour voir le besoin'; })()}</p>
+                </div>
+              );
+            })()}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Début</Label>
