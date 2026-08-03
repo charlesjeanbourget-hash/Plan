@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, Fragment } from 'react';
 import axios from 'axios';
 import { useAuth } from '@/context/AuthContext';
 import { Shift, WorkStation, RushPeriod } from '@/types';
@@ -118,8 +118,8 @@ export const WorkStationsPanel = ({ stations, rushPeriods, days, shifts, onConfi
               </thead>
               <tbody>
                 {Object.entries(byDept).map(([dept, sts]) => (
-                  <>
-                    <tr key={`h-${dept}`}>
+                  <Fragment key={dept}>
+                    <tr>
                       <td colSpan={8} className="pt-2.5 pb-1 text-[10px] uppercase tracking-[0.18em] font-bold text-bronze-700">{dept}</td>
                     </tr>
                     {sts.map((st) => (
@@ -145,7 +145,7 @@ export const WorkStationsPanel = ({ stations, rushPeriods, days, shifts, onConfi
                         })}
                       </tr>
                     ))}
-                  </>
+                  </Fragment>
                 ))}
               </tbody>
             </table>
