@@ -1574,6 +1574,7 @@ class ProfileIn(BaseModel):
     payroll_number: Optional[str] = None
     department: Optional[str] = None
     hourly_rate: Optional[float] = None
+    birth_date: Optional[str] = None
 
 
 def sanitize_profile(doc: dict) -> dict:
