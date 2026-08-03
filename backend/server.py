@@ -2724,8 +2724,29 @@ async def _assign_stations_range(pid: str, days: list[str], notify: bool = True)
     caps = {p["employee_id"]: (p.get("capacities") or [])
             async for p in db.employee_profiles.find({"pharmacy_id": pid}, {"_id": 0, "employee_id": 1, "capacities": 1})}
     shifts = await db.shifts.find({"pharmacy_id": pid, "date": {"$in": days}}, {"_id": 0}).to_list(3000)
+    hist_start = (date.fromisoformat(days[0]) - timedelta(days=7)).isoformat()
+    last_station: dict = {}
+    async for h in db.shifts.find({"pharmacy_id": pid, "date": {"$gte": hist_start, "$lt": days[0]},
+                                   "station": {"$nin": ["", None]}},
+                                  {"_id": 0, "employee_id": 1, "date": 1, "station": 1}):
+        key = (h["employee_id"], h["station"])
+        if h["date"] > last_station.get(key, ""):
+            last_station[key] = h["date"]
+
+    def _recency(emp: str, st_name: str, day_s: str) -> float:
+        last = last_station.get((emp, st_name), "")
+        if not last:
+            return 0.0
+        delta = (date.fromisoformat(day_s) - date.fromisoformat(last)).days
+        return max(0.0, (8 - delta) / 8)
+
     assigned = 0
     for day in days:
+        for sh in shifts:
+            if sh["date"] == day and sh.get("station"):
+                key = (sh["employee_id"], sh["station"])
+                if day > last_station.get(key, ""):
+                    last_station[key] = day
         for dept, stations in by_dept.items():
             day_shifts = sorted([s for s in shifts if s["date"] == day and (s.get("department") or "Général") == dept],
                                 key=lambda x: x["start"])
@@ -2746,9 +2767,11 @@ async def _assign_stations_range(pid: str, days: list[str], notify: bool = True)
                 pool = qualified or open_st
                 if not pool:
                     continue
-                best = min(pool, key=lambda st: (counts[st["name"]] / max(_needed(st), 1), -_needed(st)))
+                best = min(pool, key=lambda st: (_recency(sh["employee_id"], st["name"], day),
+                                                 counts[st["name"]] / max(_needed(st), 1), -_needed(st)))
                 sh["station"] = best["name"]
                 counts[best["name"]] += 1
+                last_station[(sh["employee_id"], best["name"])] = day
                 await db.shifts.update_one({"id": sh["id"], "pharmacy_id": pid},
                                            {"$set": {"station": best["name"],
                                                      "updated_at": datetime.now(timezone.utc).isoformat()}})

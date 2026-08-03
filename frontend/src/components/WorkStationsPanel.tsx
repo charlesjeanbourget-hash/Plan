@@ -47,7 +47,7 @@ export const WorkStationsPanel = ({ stations, rushPeriods, days, shifts, onConfi
       const res = await axios.post<{ assigned: number }>(`${API}/work-stations/assign`, { week_start: days[0] },
         { headers: { Authorization: `Bearer ${token ?? ''}` } });
       toast.success(res.data.assigned > 0
-        ? `${res.data.assigned} quart(s) ont reçu un poste automatiquement (compétences et besoins respectés).`
+        ? `${res.data.assigned} quart(s) ont reçu un poste automatiquement (compétences, besoins et rotation respectés).`
         : 'Aucun quart à assigner — tous les quarts de la semaine ont déjà un poste ou aucun quart ne correspond.');
       onAssigned();
     } catch {
@@ -93,7 +93,7 @@ export const WorkStationsPanel = ({ stations, rushPeriods, days, shifts, onConfi
           <div className="flex flex-wrap gap-2 mb-4">
             <Button data-testid="assign-stations-button" size="sm" onClick={() => void runAssign()} disabled={assigning}
               className="rounded-full bg-emerald-600 hover:bg-emerald-700 text-xs">
-              <Wand2 className="w-3.5 h-3.5 mr-1" /> {assigning ? 'Attribution en cours…' : 'Attribution automatique (compétences + besoins)'}
+              <Wand2 className="w-3.5 h-3.5 mr-1" /> {assigning ? 'Attribution en cours…' : 'Attribution automatique (compétences + besoins + rotation)'}
             </Button>
             <Button data-testid="configure-stations-button" size="sm" variant="outline" className="rounded-full text-xs" onClick={onConfigure}>
               <Settings2 className="w-3.5 h-3.5 mr-1" /> Configurer les postes et périodes de rush
@@ -151,7 +151,7 @@ export const WorkStationsPanel = ({ stations, rushPeriods, days, shifts, onConfi
             </table>
           </div>
           <p className="text-[11px] text-slate-400 mt-2">
-            Rouge : sous le minimum · Ambre : insuffisant pour le rush (jours marqués •) · Orange : au-delà du besoin. Chaque pharmacie configure ses propres postes et périodes.
+            Rouge : sous le minimum · Ambre : insuffisant pour le rush (jours marqués •) · Orange : au-delà du besoin. L'attribution automatique fait tourner les employés d'un poste à l'autre d'une journée à l'autre pour éviter la monotonie.
           </p>
         </div>
       )}
