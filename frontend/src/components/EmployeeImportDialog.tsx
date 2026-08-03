@@ -16,16 +16,16 @@ const norm = (s: string): string =>
   s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
 
 const HEADER_ALIASES: Record<string, string[]> = {
-  firstName: ['prenom', 'firstname', 'first'],
-  lastName: ['nom', 'nomdefamille', 'lastname', 'surname', 'last'],
-  fullName: ['nomcomplet', 'name', 'employe', 'employee', 'membre', 'fullname'],
-  email: ['courriel', 'email', 'emailaddress', 'adressecourriel', 'mail', 'adresseemail'],
-  phone: ['telephone', 'phone', 'cellulaire', 'mobile', 'tel', 'numerodetelephone'],
-  position: ['poste', 'position', 'role', 'titre', 'emploi', 'jobtitle', 'fonction'],
-  hourlyRate: ['tauxhoraire', 'taux', 'hourlyrate', 'salairehoraire', 'rate', 'salaire', 'wage'],
+  firstName: ['prenom', 'firstname', 'first', 'prenoms'],
+  lastName: ['nom', 'nomdefamille', 'nomfamille', 'famille', 'lastname', 'surname', 'last'],
+  fullName: ['nomcomplet', 'name', 'employe', 'employee', 'membre', 'fullname', 'nomprenom', 'prenomnom', 'nometprenom', 'prenometnom', 'employes', 'nomemploye', 'nomdelemploye', 'personnel', 'staff'],
+  email: ['courriel', 'email', 'emailaddress', 'adressecourriel', 'mail', 'adresseemail', 'adressedecourriel', 'courrielprofessionnel'],
+  phone: ['telephone', 'phone', 'cellulaire', 'mobile', 'tel', 'numerodetelephone', 'numerotelephone', 'telephonecellulaire', 'cell'],
+  position: ['poste', 'postes', 'position', 'positions', 'role', 'roles', 'titre', 'emploi', 'jobtitle', 'fonction', 'titredemploi', 'occupation'],
+  hourlyRate: ['tauxhoraire', 'taux', 'hourlyrate', 'salairehoraire', 'rate', 'salaire', 'wage', 'tauxdesalaire', 'remuneration'],
   branch: ['succursale', 'branch', 'site', 'location', 'etablissement', 'pharmacie', 'lieu', 'lieudetravail'],
   hireDate: ['datedembauche', 'embauche', 'hiredate', 'dateembauche', 'startdate', 'datededebut', 'debut'],
-  weeklyHours: ['heuresparsemaine', 'heuressemaine', 'hoursperweek', 'heures', 'weeklyhours', 'heuressem'],
+  weeklyHours: ['heuresparsemaine', 'heuressemaine', 'hoursperweek', 'heures', 'weeklyhours', 'heuressem', 'heuresgaranties', 'hressem'],
   address: ['adresse', 'address', 'domicile'],
   emergencyContact: ['contactdurgence', 'urgence', 'emergencycontact', 'emergency', 'personneaurgence'],
   department: ['departement', 'department', 'dept', 'equipe', 'team'],
@@ -34,10 +34,7 @@ const HEADER_ALIASES: Record<string, string[]> = {
 const matchPosition = (raw: string): Position | null => {
   const n = norm(raw);
   if (!n) return null;
-  const exact = POSITIONS.find((p) => {
-    const np = norm(p);
-    return np === n || np.includes(n) || n.includes(np);
-  });
+  const exact = POSITIONS.find((p) => norm(p) === n);
   if (exact) return exact;
   if (n.includes('pharmacien')) return 'Pharmacien(ne)';
   if (n.includes('assistant') || n === 'atp') return 'ATP';
@@ -48,7 +45,11 @@ const matchPosition = (raw: string): Position | null => {
   if (n.includes('entrepot')) return "Commis d'entrepôt";
   if (n.includes('livreur') || n.includes('livraison') || n.includes('chauffeur')) return 'Livreur(se)';
   if (n.includes('commis')) return 'Commis';
-  return null;
+  const partial = POSITIONS.filter((p) => {
+    const np = norm(p);
+    return np.includes(n) || n.includes(np);
+  }).sort((a, b) => norm(b).length - norm(a).length);
+  return partial[0] ?? null;
 };
 
 const parseDateCell = (raw: unknown): string => {
@@ -129,33 +130,65 @@ export const EmployeeImportDialog = ({ open, onClose }: Props): JSX.Element => {
     try {
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf, { cellDates: true });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: '' });
-      if (rawRows.length === 0) {
-        toast.error('Fichier vide ou en-têtes introuvables — vérifiez la première ligne du fichier.');
+      const findHeaderRow = (matrix: unknown[][]): { headerIdx: number; map: Record<string, number> } | null => {
+        for (let i = 0; i < Math.min(matrix.length, 25); i++) {
+          const row = matrix[i] ?? [];
+          const map: Record<string, number> = {};
+          row.forEach((cell, ci) => {
+            const nh = norm(String(cell ?? ''));
+            if (!nh) return;
+            const field = Object.keys(HEADER_ALIASES).find((f) => HEADER_ALIASES[f].includes(nh) || norm(f) === nh);
+            if (field && !(field in map)) map[field] = ci;
+          });
+          if (map.firstName !== undefined || map.fullName !== undefined || map.lastName !== undefined) {
+            return { headerIdx: i, map };
+          }
+        }
+        return null;
+      };
+      let matrix: unknown[][] = [];
+      let header: { headerIdx: number; map: Record<string, number> } | null = null;
+      for (const name of wb.SheetNames) {
+        const m = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[name], { header: 1, defval: '' });
+        const h = findHeaderRow(m);
+        if (h) { matrix = m; header = h; break; }
+      }
+      if (!header) {
+        const first = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
+        const firstRow = first.find((r) => (r ?? []).some((c) => String(c ?? '').trim()));
+        const cols = (firstRow ?? []).map((c) => String(c ?? '').trim()).filter(Boolean).slice(0, 8).join(', ');
+        toast.error(
+          `Aucune colonne de nom reconnue${cols ? ` — colonnes détectées : ${cols}` : ''}. Renommez vos en-têtes (ex. Prénom, Nom, Courriel) ou téléchargez le modèle.`,
+          { duration: 10000 }
+        );
         return;
       }
-      const headerMap: Record<string, string> = {};
-      Object.keys(rawRows[0]).forEach((h) => {
-        const nh = norm(h);
-        const field = Object.keys(HEADER_ALIASES).find((f) => HEADER_ALIASES[f].includes(nh) || norm(f) === nh);
-        if (field && !(field in headerMap)) headerMap[field] = h;
-      });
-      if (!headerMap.firstName && !headerMap.fullName && !headerMap.lastName) {
-        toast.error("Aucune colonne de nom reconnue (Prénom/Nom ou Nom complet). Téléchargez le modèle pour voir le format attendu.");
+      const map = header.map;
+      const rawRows = matrix
+        .slice(header.headerIdx + 1)
+        .filter((r) => (r ?? []).some((c) => String(c ?? '').trim() !== ''));
+      if (rawRows.length === 0) {
+        toast.error('Aucune ligne d\'employé trouvée sous la ligne d\'en-têtes.');
         return;
       }
       const existingEmails = new Set(state.employees.filter((e) => !e.anonymized).map((e) => e.email.toLowerCase().trim()).filter(Boolean));
       const existingNames = new Set(state.employees.filter((e) => !e.anonymized).map((e) => norm(`${e.firstName}${e.lastName}`)));
       const seenInFile = new Set<string>();
       const parsed: ParsedRow[] = rawRows.map((r) => {
-        const get = (f: string): string => String(headerMap[f] ? r[headerMap[f]] ?? '' : '').trim();
+        const get = (f: string): string => String(map[f] !== undefined ? r[map[f]] ?? '' : '').trim();
         let firstName = get('firstName');
         let lastName = get('lastName');
         if ((!firstName || !lastName) && get('fullName')) {
           const parts = get('fullName').split(/\s+/);
           firstName = firstName || parts[0] || '';
           lastName = lastName || parts.slice(1).join(' ');
+        }
+        if (firstName && !lastName && map.fullName === undefined && map.firstName === undefined) {
+          const parts = firstName.split(/\s+/);
+          if (parts.length > 1) {
+            firstName = parts[0];
+            lastName = parts.slice(1).join(' ');
+          }
         }
         const warnings: string[] = [];
         const email = get('email').toLowerCase();
@@ -177,7 +210,7 @@ export const EmployeeImportDialog = ({ open, onClose }: Props): JSX.Element => {
         const branch = state.branches.find((b) => norm(b.name) === norm(rawBranch) || norm(b.name).includes(norm(rawBranch)) || (norm(rawBranch) && norm(rawBranch).includes(norm(b.name))));
         const branchId = branch?.id ?? state.branches[0]?.id ?? '';
         if (rawBranch && !branch) warnings.push(`Succursale « ${rawBranch} » inconnue → ${state.branches[0]?.name ?? 'défaut'}`);
-        const hourlyRate = parseNum(r[headerMap.hourlyRate] ?? '');
+        const hourlyRate = parseNum(map.hourlyRate !== undefined ? r[map.hourlyRate] : '');
         if (hourlyRate <= 0) warnings.push('Taux horaire manquant');
         const rawDept = get('department');
         const department = DEPARTMENTS.find((d) => norm(d) === norm(rawDept)) ?? '';
@@ -185,8 +218,8 @@ export const EmployeeImportDialog = ({ open, onClose }: Props): JSX.Element => {
         return {
           firstName, lastName, email, phone: get('phone'),
           position, branchId, branchLabel: branch?.name ?? state.branches[0]?.name ?? '',
-          hireDate: parseDateCell(headerMap.hireDate ? r[headerMap.hireDate] : ''),
-          weeklyHours: parseNum(r[headerMap.weeklyHours] ?? '') || 35,
+          hireDate: parseDateCell(map.hireDate !== undefined ? r[map.hireDate] : ''),
+          weeklyHours: parseNum(map.weeklyHours !== undefined ? r[map.weeklyHours] : '') || 35,
           hourlyRate, address: get('address'), emergencyContact: get('emergencyContact'), department,
           status: isDup ? 'duplicate' : 'ok', warnings,
         } as ParsedRow;

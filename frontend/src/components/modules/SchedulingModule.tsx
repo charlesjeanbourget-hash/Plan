@@ -216,6 +216,56 @@ export default function SchedulingModule(): JSX.Element {
 
   useEffect(() => { void refreshAppointments(); }, [refreshAppointments]);
 
+  const [traffic, setTraffic] = useState<Record<string, Record<string, number>>>({});
+  const [trafficPeriods, setTrafficPeriods] = useState<{ start_md: string; end_md: string; traffic: Record<string, Record<string, number>> }[]>([]);
+  const [weekTasks, setWeekTasks] = useState<{ date: string; shift: string; done: boolean }[]>([]);
+
+  useEffect(() => {
+    if (!isAdmin || !token) return;
+    axios.get<{ traffic?: Record<string, Record<string, number>>; traffic_periods?: { start_md: string; end_md: string; traffic: Record<string, Record<string, number>> }[] }>(`${API}/schedule/settings`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => { setTraffic(r.data.traffic ?? {}); setTrafficPeriods(r.data.traffic_periods ?? []); })
+      .catch(() => { /* silencieux */ });
+  }, [isAdmin, token]);
+
+  useEffect(() => {
+    if (!isAdmin || !token) return;
+    axios.get<{ date: string; shift: string; done: boolean }[]>(`${API}/tasks?start=${days[0]}&end=${days[6]}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => setWeekTasks(r.data))
+      .catch(() => setWeekTasks([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin, token, days[0], days[6]]);
+
+  const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+  const STAFF_BLOCKS = [
+    { key: 'matin', label: 'Matin', mid: '10:00' },
+    { key: 'apres_midi', label: 'Après-midi', mid: '14:30' },
+    { key: 'soir', label: 'Soir', mid: '19:00' },
+  ];
+
+  const trafficFor = (d: string): Record<string, number> => {
+    const md = d.slice(5);
+    const period = trafficPeriods.find((p) => (p.start_md <= p.end_md ? md >= p.start_md && md <= p.end_md : md >= p.start_md || md <= p.end_md));
+    const grid = period?.traffic ?? traffic;
+    return grid[DAY_KEYS[new Date(`${d}T12:00:00`).getDay()]] ?? {};
+  };
+
+  const staffingGaps = isAdmin ? days.map((d) => {
+    const t = trafficFor(d);
+    const dayShifts = state.shifts.filter((s) => s.date === d);
+    const blocks = STAFF_BLOCKS.map((b) => {
+      const clients = Number(t[b.key] ?? 0);
+      const present = new Set(dayShifts.filter((s) => s.startTime <= b.mid && b.mid < s.endTime).map((s) => s.employeeId)).size;
+      const tasksCount = weekTasks.filter((tk) => tk.date === d && tk.shift === b.label && !tk.done).length;
+      const needed = Math.max(clients > 0 ? Math.ceil(clients / 10) : 0, tasksCount > 0 ? 1 : 0);
+      return { label: b.label, needed, present, missing: Math.max(0, needed - present), tasksCount };
+    });
+    return { date: d, missing: blocks.reduce((s2, b) => s2 + b.missing, 0), blocks };
+  }) : [];
+  const gapDays = staffingGaps.filter((g) => g.missing > 0);
+  const gapByDate: Record<string, number> = {};
+  staffingGaps.forEach((g) => { gapByDate[g.date] = g.missing; });
+  const fmtGapDay = (d: string): string => new Date(`${d}T12:00:00`).toLocaleDateString('fr-CA', { weekday: 'short', day: 'numeric', month: 'short' });
+
   const removeAppointment = async (id: string): Promise<void> => {
     try {
       await axios.delete(`${API}/appointments/${id}`, { headers: { Authorization: `Bearer ${token ?? ''}` } });
@@ -518,6 +568,31 @@ export default function SchedulingModule(): JSX.Element {
         </div>
       </div>
 
+      {isAdmin && gapDays.length > 0 && (
+        <div data-testid="understaffing-alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex gap-2.5 min-w-0">
+              <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-red-800">Effectif insuffisant pour l'achalandage et les tâches prévues cette semaine</p>
+                <p className="text-xs text-red-700 mt-1">
+                  {gapDays.map((g) => `${fmtGapDay(g.date)} : −${g.missing} personne(s) (${g.blocks.filter((b) => b.missing > 0).map((b) => `${b.label} −${b.missing}`).join(', ')})`).join(' · ')}
+                </p>
+                <p className="text-[11px] text-red-500 mt-1">Estimation : 1 employé pour ~10 clients/h selon votre grille d'achalandage, plus au moins 1 personne par plage ayant des tâches planifiées.</p>
+              </div>
+            </div>
+            <Button
+              data-testid="request-agency-button"
+              size="sm"
+              onClick={() => window.dispatchEvent(new CustomEvent('ap-navigate', { detail: { module: 'replacements' } }))}
+              className="rounded-full bg-red-600 hover:bg-red-700 text-white shrink-0"
+            >
+              Demander un remplaçant d'agence
+            </Button>
+          </div>
+        </div>
+      )}
+
       {moveShiftId && (
         <div data-testid="move-mode-banner" className="mb-4 flex items-center gap-2 rounded-xl bg-bronze-50 border border-bronze-300 px-4 py-2.5 text-sm text-bronze-900">
           <Hand className="w-4 h-4 shrink-0" />
@@ -550,6 +625,11 @@ export default function SchedulingModule(): JSX.Element {
                 <th key={d} className={`px-3 py-3 border-b border-r border-slate-200 text-center ${d === today ? 'bg-emerald-600 text-white' : 'text-slate-700'}`}>
                   <span className="block text-sm font-bold font-heading">{FULL_DAYS[i]}</span>
                   <span className={`block text-[11px] font-normal mt-0.5 ${d === today ? 'text-emerald-100' : 'text-slate-400'}`}>{dayDate(d)}</span>
+                  {isAdmin && (gapByDate[d] ?? 0) > 0 && (
+                    <span data-testid={`understaffed-badge-${d}`} title="Effectif insuffisant — pensez à un remplaçant d'agence" className={`inline-block mt-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold ${d === today ? 'bg-white text-red-600' : 'bg-red-100 text-red-700'}`}>
+                      −{gapByDate[d]}
+                    </span>
+                  )}
                 </th>
               ))}
               <th className="px-4 py-3 border-b border-slate-200 text-right text-[11px] uppercase tracking-[0.18em] text-slate-400 font-semibold w-32 bg-slate-100/60">Total</th>

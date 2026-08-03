@@ -400,7 +400,7 @@ export default function TasksModule(): JSX.Element {
               </div>
             </div>
             <div className="space-y-2">
-              <Label>Catalogue de tâches (Commerce & Laboratoire)</Label>
+              <Label>Catalogue de tâches (Commerce, Laboratoire, Entrepôt, Caisse, Livraison, Administration)</Label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Select value={tDomain} onValueChange={(v) => { setTDomain(v); setTCatalog(''); }}>
                   <SelectTrigger data-testid="task-domain-select"><SelectValue /></SelectTrigger>
