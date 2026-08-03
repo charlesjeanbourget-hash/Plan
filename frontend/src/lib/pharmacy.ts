@@ -60,6 +60,12 @@ export const PHARMACY_TASKS: string[] = [
   'Prise de tension artérielle et suivis cliniques',
   'Numérisation et classement des ordonnances',
   'Préparation des livraisons',
+  'Manutention et réception en entrepôt',
+  'Comptoir postal',
+  'Gestion des consignes',
+  'Chaîne de froid (produits réfrigérés)',
+  'Conciliation bancaire et factures fournisseurs',
+  'Gestion des horaires et des remplacements',
 ];
 
 export const PHARMACY_RESTRICTIONS: string[] = [

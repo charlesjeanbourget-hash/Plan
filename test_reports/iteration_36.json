@@ -1,0 +1,35 @@
+{
+  "summary": "Testé bout-en-bout les 4 nouvelles fonctionnalités de l'itération 36. Backend : 14/14 tests pytest passent (benefits CRUD, filtrage employé, images Gemini générées, protections image draft, validations 400, upload PDF employé→403, upload PDF admin→job done en ~20s, delete). Frontend admin (Playwright) : (1) task-domain-select propose bien les 6 domaines exacts (Commerce, Laboratoire, Entrepôt, Caisse, Livraison, Administration) + catalogue Entrepôt affiche 13 tâches ; (2) TaskTemplatesDialog expose les 4 nouveaux modèles (entrepot=13 items, caisse, livraison, administration) ; (3) leave-pdf-e2 déclenche téléchargement 'releve-conges-2026-julie-gagnon.pdf' ; (4) après 16s de synchro, watermarks leave-watermark-e2-2026-09-02 et 2026-09-03 visibles ; ouverture Nouveau quart pour Julie sur 2026-09-02 affiche shift-leave-warning, 1er clic sur shift-submit-button ne ferme PAS le dialogue et le bouton devient « Enregistrer quand même », 2e clic crée le quart. (5) Module Avantages admin : 10 avantages existants + création d'un TEST_UI Avantage → Brouillon → Publier (statut passe à Publié) → suppression double-clic (toast « Avantage supprimé »). Frontend employée (Julie/ATP) : (6) my-leave-pdf-button télécharge le PDF ; (7) voit 7 avantages publiés + admissibles à son poste ; NE voit PAS « Formation clinique et frais professionnels » (réservé Pharmacien/Infirmier) ni les brouillons ; aucun bouton benefit-add-button / benefits-upload-button. Aucun bug bloquant.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "TasksModule → dialogue Nouvelle tâche", "issues": ["Le label du sélecteur de catalogue affiche encore « Catalogue de tâches (Commerce & Laboratoire) » alors qu'il y a maintenant 6 domaines. Cosmétique — mettre à jour le libellé (TasksModule.tsx ligne 403)."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration36.py",
+    "/app/test_reports/pytest/iteration_36.xml"
+  ],
+  "action_items": [
+    "(mineur / cosmétique) Mettre à jour le label 'Catalogue de tâches (Commerce & Laboratoire)' dans TasksModule.tsx (ligne 403) pour refléter les 6 domaines."
+  ],
+  "critical_code_review_comments": [
+    "process_benefits_import et generate_benefit_image utilisent asyncio.create_task sans capture d'exception → si l'appel IA lève une exception non gérée (hors du try/except interne), elle sera silencieusement perdue. Le code actuel gère bien les erreurs dans les 2 fonctions, mais envisager un logger.exception explicite pour faciliter le debug futur.",
+    "GET /api/benefits filtre par status côté serveur pour non-admin mais NE filtre PAS par eligible_roles ; le filtrage par poste est fait côté frontend (BenefitsModule). Ce n'est pas une fuite de sécurité (les infos publiées sont OK à voir), mais si le client considère l'admissibilité comme confidentielle, il faudrait filtrer côté serveur."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration36.py"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "Créé puis supprimé pendant les tests : 1 avantage manuel (TEST_UI Avantage démo iter36) via UI, 1 avantage manuel (TEST_Avantage iteration 36) + N avantages via upload PDF via API pytest (tous nettoyés par la fixture de teardown). 1 quart Julie 2026-09-02 09:00-17:00 créé par le test de double confirmation (localStorage — n'affecte pas les autres sessions).",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "Voir /app/memory/test_credentials.md (admin@luminahr.ca / Nlpx!tTE3Aw27 ; julie@luminahr.ca / O1ka!gfVV6e54)",
+  "context_for_next_testing_agent": "État actuel base : ~10 avantages publiés + 1 brouillon ('Assurance dentaire familiale'). Les tests d'upload backend créent maintenant des avantages supplémentaires (nettoyés en fin de module). Attention : la synchro des congés côté frontend prend ~15s après le chargement du module Horaires — attendre avant de tester le filigrane/blocage. Pour tester les téléchargements PDF utiliser page.expect_download(). Login = POST /api/auth/login → réponse contient access_token (pas token). Pour switcher d'utilisateur en test rapide : soit logout via sidebar-logout-button, soit setItem luminahr_auth_v3 puis reload.",
+  "rca_of_the_issue": "N/A — aucun bug bloquant. Un unique point mineur cosmétique (label du catalogue à jour dans TasksModule)."
+}

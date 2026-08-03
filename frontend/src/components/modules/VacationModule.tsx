@@ -9,7 +9,8 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, Check, X, ChevronLeft, ChevronRight, TreePalm, Lock, History, Wallet, Trash2, RefreshCcw } from 'lucide-react';
+import { Plus, Check, X, ChevronLeft, ChevronRight, TreePalm, Lock, History, Wallet, Trash2, RefreshCcw, FileDown } from 'lucide-react';
+import { downloadLeaveSummary } from '@/lib/leavePdf';
 import { toast } from 'sonner';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -246,6 +247,25 @@ export default function VacationModule(): JSX.Element {
     setCarryRunning(false);
   };
 
+  const pharmacyName = state.pharmacies.find((p) => p.id === currentUser?.pharmacyId)?.name ?? 'Arrière Plan';
+
+  const exportLeavePdf = async (empId: string, empName: string): Promise<void> => {
+    const year = new Date().getFullYear();
+    const b = balances.find((x) => x.employee_id === empId);
+    const bals = LEAVE_TYPES.map((t) => ({
+      type: t,
+      alloc: b?.allocations[t] ?? 0,
+      carry: b?.carryover?.[t] ?? 0,
+      used: b?.used[t] ?? 0,
+      remaining: b?.remaining[t] ?? 0,
+    }));
+    const reqs = requests
+      .filter((r) => r.employee_id === empId && r.start_date.startsWith(String(year)) && r.status !== 'Annulée')
+      .map((r) => ({ type: r.type, start: r.start_date, end: r.end_date, days: r.days, status: r.status }));
+    await downloadLeaveSummary(empName, year, bals, reqs, pharmacyName);
+    toast.success('Relevé annuel téléchargé.');
+  };
+
   const visibleRequests = requests.filter((r) => r.status !== 'Annulée' || !isAdmin);
 
   return (
@@ -258,6 +278,19 @@ export default function VacationModule(): JSX.Element {
             {isAdmin && (
               <Button data-testid="carryover-button" variant="outline" onClick={() => void openPolicy()} className="rounded-full border-bronze-300 text-bronze-800 hover:bg-bronze-50">
                 <RefreshCcw className="w-4 h-4 mr-1" /> Report de soldes
+              </Button>
+            )}
+            {!isAdmin && (
+              <Button
+                data-testid="my-leave-pdf-button"
+                variant="outline"
+                onClick={() => {
+                  const meEmp = getEmployee(currentUser?.employeeId ?? '');
+                  void exportLeavePdf(currentUser?.employeeId ?? '', meEmp ? `${meEmp.firstName} ${meEmp.lastName}` : 'Employé');
+                }}
+                className="rounded-full border-bronze-300 text-bronze-800 hover:bg-bronze-50"
+              >
+                <FileDown className="w-4 h-4 mr-1" /> Relevé annuel (PDF)
               </Button>
             )}
             <Button data-testid="add-leave-button" onClick={() => { setStartDate(selStart); setEndDate(selEnd || selStart); setDialogOpen(true); }} className="rounded-full bg-emerald-600 hover:bg-emerald-700">
@@ -384,9 +417,12 @@ export default function VacationModule(): JSX.Element {
                           </td>
                         );
                       })}
-                      <td className="py-2.5 text-right">
+                      <td className="py-2.5 text-right whitespace-nowrap">
                         <Button data-testid={`alloc-button-${e.id}`} size="sm" variant="outline" className="rounded-full text-xs border-bronze-300 text-bronze-800 hover:bg-bronze-50" onClick={() => openAlloc(b, e.id, `${e.firstName} ${e.lastName}`)}>
                           Allouer des jours
+                        </Button>
+                        <Button data-testid={`leave-pdf-${e.id}`} size="sm" variant="outline" className="rounded-full text-xs ml-1.5" onClick={() => void exportLeavePdf(e.id, `${e.firstName} ${e.lastName}`)}>
+                          <FileDown className="w-3 h-3 mr-1" /> Relevé
                         </Button>
                       </td>
                     </tr>

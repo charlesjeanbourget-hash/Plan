@@ -11,7 +11,7 @@ export interface CatalogSection {
 }
 
 export interface CatalogDomain {
-  key: 'commerce' | 'labo';
+  key: 'commerce' | 'labo' | 'entrepot' | 'caisse' | 'livraison' | 'administration';
   label: string;
   sections: CatalogSection[];
 }
@@ -190,6 +190,151 @@ export const TASK_CATALOG: CatalogDomain[] = [
           { title: 'Préparer le travail du lendemain (piluliers, ordonnances à venir)', description: '', competences: ['Préparation des piluliers (Dispill)', 'Fermeture de la pharmacie'] },
           { title: 'Nettoyer les comptoirs et équipements du laboratoire', description: '', competences: ['Nettoyage et désinfection du laboratoire'] },
           { title: 'Balancer le poste du laboratoire et fermer les systèmes', description: '', competences: ['Fermeture de la pharmacie', 'Gestion de la caisse'] },
+        ],
+      },
+    ],
+  },
+  {
+    key: 'entrepot',
+    label: 'Entrepôt (arrière-boutique)',
+    sections: [
+      {
+        key: 'reception-entrepot',
+        label: 'Réception des marchandises',
+        tasks: [
+          { title: 'Accueillir les livreurs et décharger les camions', description: '', competences: ['Manutention et réception en entrepôt', 'Réception de marchandise'] },
+          { title: 'Vérifier les bordereaux d\'expédition avec la marchandise reçue', description: 'Validation des quantités', competences: ['Réception de marchandise'] },
+          { title: 'Réceptionner les palettes volumineuses et les colis', description: 'Papier hygiénique, eau, etc.', competences: ['Manutention et réception en entrepôt'] },
+          { title: 'Ranger les produits réfrigérés reçus en priorité', description: 'Chaîne de froid', competences: ['Chaîne de froid (produits réfrigérés)', 'Réception de marchandise'] },
+        ],
+      },
+      {
+        key: 'manutention',
+        label: 'Manipulation & entreposage',
+        tasks: [
+          { title: 'Déballer et trier la marchandise par département', description: '', competences: ['Manutention et réception en entrepôt'] },
+          { title: 'Manipuler les transpalettes et chariots de façon sécuritaire', description: 'SST', competences: ['Manutention et réception en entrepôt'] },
+          { title: 'Décomposer les cartons et utiliser la presse à carton', description: 'Compacteur', competences: ['Manutention et réception en entrepôt'] },
+          { title: 'Maintenir l\'ordre et la propreté dans l\'entrepôt', description: 'Prévention des accidents (SST)', competences: ['Manutention et réception en entrepôt', 'Entretien de l\'aire de vente'] },
+        ],
+      },
+      {
+        key: 'rotation-entrepot',
+        label: 'Gestion & rotation des stocks',
+        tasks: [
+          { title: 'Appliquer la méthode FIFO (premier entré, premier sorti)', description: 'Éviter les pertes', competences: ['Rotation des stocks et dates de péremption'] },
+          { title: 'Vérifier les dates de péremption des produits de consommation', description: 'Nourriture, lait maternisé', competences: ['Rotation des stocks et dates de péremption'] },
+          { title: 'Étiqueter et acheminer les arrivages vers le plancher', description: '', competences: ['Étiquetage et mise en tablette', 'Manutention et réception en entrepôt'] },
+        ],
+      },
+      {
+        key: 'retours-entrepot',
+        label: 'Retours fournisseurs',
+        tasks: [
+          { title: 'Préparer les boîtes de retours pour les fournisseurs', description: 'Produits endommagés, rappels, invendus saisonniers', competences: ['Gestion des retours et des périmés'] },
+          { title: 'Documenter les retours et faire le suivi des notes de crédit', description: '', competences: ['Gestion des retours et des périmés', 'Conciliation bancaire et factures fournisseurs'] },
+        ],
+      },
+    ],
+  },
+  {
+    key: 'caisse',
+    label: 'Caisse (service avant)',
+    sections: [
+      {
+        key: 'transactions',
+        label: 'Opérations de transaction',
+        tasks: [
+          { title: 'Scanner les articles et encaisser les paiements', description: 'Comptant, débit, crédit', competences: ['Gestion de la caisse'] },
+          { title: 'Traiter les échanges avec présentation du reçu', description: '', competences: ['Gestion de la caisse', 'Service à la clientèle'] },
+          { title: 'Opérer le comptoir postal', description: 'Si la pharmacie inclut un bureau de poste', competences: ['Comptoir postal'] },
+        ],
+      },
+      {
+        key: 'balancement',
+        label: 'Argent & balancement',
+        tasks: [
+          { title: 'Compter le fond de caisse aux changements de quart', description: '', competences: ['Gestion de la caisse'] },
+          { title: 'Fermer les caisses (rapports X et Z) et balancer les terminaux', description: '', competences: ['Gestion de la caisse', 'Fermeture de la pharmacie'] },
+          { title: 'Sécuriser l\'argent au coffre et préparer le dépôt', description: '', competences: ['Gestion de la caisse'] },
+        ],
+      },
+      {
+        key: 'services-annexes',
+        label: 'Services annexes',
+        tasks: [
+          { title: 'Gérer le terminal Loto (validation, rapports, inventaire de billets)', description: '', competences: ['Gestion de la loterie'] },
+          { title: 'Vendre et activer les cartes-cadeaux', description: '', competences: ['Gestion de la caisse'] },
+          { title: 'Gérer les consignes (bouteilles, canettes) et les bacs', description: 'Réception et remboursement', competences: ['Gestion des consignes'] },
+        ],
+      },
+    ],
+  },
+  {
+    key: 'livraison',
+    label: 'Livraison',
+    sections: [
+      {
+        key: 'planification-livraison',
+        label: 'Planification & préparation',
+        tasks: [
+          { title: 'Imprimer la liste des livraisons de la journée', description: '', competences: ['Préparation des livraisons'] },
+          { title: 'Assembler et valider les sacs de livraison', description: 'Combiner ordonnances et achats du plancher', competences: ['Préparation des livraisons'] },
+          { title: 'Traiter les paiements préalables et la facturation aux comptes clients', description: '', competences: ['Préparation des livraisons', 'Facturation et tiers payeurs (assurances)'] },
+          { title: 'Optimiser la tournée par quartiers ou codes postaux', description: '', competences: ['Livraison des ordonnances'] },
+        ],
+      },
+      {
+        key: 'chaine-froid',
+        label: 'Chaîne de froid',
+        tasks: [
+          { title: 'Identifier les produits réfrigérés à livrer', description: 'Insuline, vaccins, produits biologiques', competences: ['Chaîne de froid (produits réfrigérés)'] },
+          { title: 'Préparer les glacières avec ice packs calibrés (2-8 °C)', description: '', competences: ['Chaîne de froid (produits réfrigérés)', 'Préparation des livraisons'] },
+          { title: 'Consigner les températures de transport si requis', description: '', competences: ['Chaîne de froid (produits réfrigérés)', 'Suivi de la conformité (Loi 25, registres)'] },
+        ],
+      },
+      {
+        key: 'execution-livraison',
+        label: 'Exécution & suivi',
+        tasks: [
+          { title: 'Remettre les commandes au livreur avec les manifestes', description: '', competences: ['Préparation des livraisons', 'Livraison des ordonnances'] },
+          { title: 'Recueillir les signatures à la porte', description: 'Obligatoire pour narcotiques et contrôlés', competences: ['Livraison des ordonnances'] },
+          { title: 'Traiter les retours de livraison (patients absents)', description: 'Remise en inventaire ou au réfrigérateur', competences: ['Livraison des ordonnances', 'Chaîne de froid (produits réfrigérés)'] },
+        ],
+      },
+    ],
+  },
+  {
+    key: 'administration',
+    label: 'Administration / Gestion',
+    sections: [
+      {
+        key: 'rh-dotation',
+        label: 'Ressources humaines & dotation',
+        tasks: [
+          { title: 'Créer et publier les horaires de travail de la semaine', description: 'Pharmaciens, ATP, commis, cosméticiennes', competences: ['Gestion des horaires et des remplacements'] },
+          { title: 'Gérer les absences de dernière minute et trouver des remplaçants', description: '', competences: ['Gestion des horaires et des remplacements'] },
+          { title: 'Approuver les feuilles de temps et préparer la paie', description: '', competences: ['Gestion des horaires et des remplacements', 'Conciliation bancaire et factures fournisseurs'] },
+          { title: 'Mener le recrutement, les entrevues et la formation des nouveaux', description: '', competences: ['Formation des nouveaux employés'] },
+        ],
+      },
+      {
+        key: 'finances',
+        label: 'Finances & comptabilité',
+        tasks: [
+          { title: 'Faire la conciliation bancaire', description: 'Quotidienne ou hebdomadaire', competences: ['Conciliation bancaire et factures fournisseurs'] },
+          { title: 'Vérifier et payer les factures fournisseurs', description: '', competences: ['Conciliation bancaire et factures fournisseurs'] },
+          { title: 'Suivre les allocations commerciales des fabricants', description: '', competences: ['Conciliation bancaire et factures fournisseurs'] },
+          { title: 'Traiter les formulaires de réclamation et notes de crédit', description: 'Ex. formulaires 4430', competences: ['Conciliation bancaire et factures fournisseurs', 'Suivi de la conformité (Loi 25, registres)'] },
+        ],
+      },
+      {
+        key: 'operations',
+        label: 'Gestion des opérations',
+        tasks: [
+          { title: 'Commander les fournitures opérationnelles', description: 'Fioles, couvercles, étiquettes, sacs de caisse', competences: ['Commandes et gestion de l\'inventaire'] },
+          { title: 'Gérer les contrats d\'entretien (ménage, alarme, informatique)', description: '', competences: ['Conciliation bancaire et factures fournisseurs'] },
+          { title: 'Analyser les indicateurs de performance (KPI)', description: 'Ratio salaires/ventes, croissance Rx, rotation des stocks', competences: ['Gestion des horaires et des remplacements', 'Conciliation bancaire et factures fournisseurs'] },
         ],
       },
     ],

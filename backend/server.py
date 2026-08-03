@@ -18,6 +18,7 @@ import hashlib
 import requests
 from zoneinfo import ZoneInfo
 from pypdf import PdfReader
+import base64
 import resend
 import bcrypt
 import jwt
@@ -2806,6 +2807,236 @@ async def leave_carryover_job():
     async for policy in db.leave_policies.find({"carryover_enabled": True}, {"_id": 0, "pharmacy_id": 1}):
         res = await run_leave_carryover(policy["pharmacy_id"], year)
         logger.info(f"Report de soldes {policy['pharmacy_id']} : {res.get('processed', 0)} employé(s)")
+
+
+# ---------------------------------------------------------------------------
+# Avantages sociaux
+# ---------------------------------------------------------------------------
+BENEFIT_CATEGORIES = ("Santé", "Dentaire", "Vision", "Retraite & épargne", "Congés & vacances",
+                      "Rabais employés", "Formation & développement", "Bien-être", "Assurances", "Autre")
+
+BENEFITS_SYSTEM = """Tu es un expert RH québécois. On te fournit le texte d'un document d'avantages sociaux d'une compagnie (pharmacie). Transforme-le en cartes d'avantages claires et chaleureuses pour les employés.
+Réponds UNIQUEMENT en JSON strict :
+{"benefits": [{"title": "titre court et clair", "description": "2 à 3 phrases simples et engageantes en français expliquant l'avantage et comment en profiter", "category": "une valeur parmi : Santé, Dentaire, Vision, Retraite & épargne, Congés & vacances, Rabais employés, Formation & développement, Bien-être, Assurances, Autre", "details": ["3 à 6 points concrets (montants, pourcentages, conditions, admissibilité)"], "eligible_roles": [], "monthly_value": "ex.: Employeur paie 50 % — ou chaîne vide"}]}
+Règles : eligible_roles reste vide (= tous les employés) SAUF si le document réserve clairement l'avantage à certains postes; utilise alors uniquement ces valeurs exactes : Pharmacien(ne), ATP, Technicien(ne) de laboratoire, Infirmier(ère), Gestionnaire, Commis, Caissier(ère), Commis d'entrepôt, Livreur(se). Regroupe intelligemment (maximum 20 avantages). N'invente aucun montant."""
+
+
+class BenefitIn(BaseModel):
+    title: str
+    description: str = ""
+    category: str = "Autre"
+    details: list = []
+    eligible_roles: list = []
+    monthly_value: str = ""
+
+
+class BenefitUpdateIn(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    category: Optional[str] = None
+    details: Optional[list] = None
+    eligible_roles: Optional[list] = None
+    monthly_value: Optional[str] = None
+    status: Optional[str] = None
+
+
+def benefit_public(doc: dict) -> dict:
+    return {k: v for k, v in doc.items() if k not in ("_id", "image_b64")}
+
+
+def _clean_benefit_fields(title: str, description: str, category: str, details: list,
+                          eligible_roles: list, monthly_value: str) -> dict:
+    return {
+        "title": title.strip()[:120],
+        "description": description.strip()[:2000],
+        "category": category if category in BENEFIT_CATEGORIES else "Autre",
+        "details": [str(x).strip()[:300] for x in details if str(x).strip()][:12],
+        "eligible_roles": [str(x).strip()[:60] for x in eligible_roles if str(x).strip()][:15],
+        "monthly_value": monthly_value.strip()[:120],
+    }
+
+
+async def generate_benefit_image(benefit_id: str, title: str, category: str):
+    try:
+        chat = LlmChat(
+            api_key=os.environ['EMERGENT_LLM_KEY'],
+            session_id=f"benefit-img-{benefit_id}",
+            system_message="Tu génères des illustrations professionnelles.",
+        ).with_model("gemini", "gemini-3.1-flash-image-preview").with_params(modalities=["image", "text"])
+        prompt = (
+            f"Illustration moderne et chaleureuse représentant un avantage social offert aux employés d'une pharmacie : « {title} » (catégorie : {category}). "
+            "Style flat design premium et éditorial, palette vert émeraude (#059669) et bronze doré (#c36030) sur fond crème très pâle, "
+            "formes douces et arrondies, personnages stylisés inclusifs, composition aérée, AUCUN texte, AUCUNE lettre, AUCUN chiffre dans l'image. Format paysage."
+        )
+        _, images = await chat.send_message_multimodal_response(UserMessage(text=prompt))
+        if not images:
+            raise ValueError("Aucune image générée")
+        await db.benefits.update_one({"id": benefit_id}, {"$set": {
+            "image_b64": images[0]["data"], "image_mime": images[0].get("mime_type") or "image/png",
+            "image_status": "done", "updated_at": datetime.now(timezone.utc).isoformat()}})
+    except Exception as exc:
+        logger.error(f"Image avantage {benefit_id} : {exc}")
+        await db.benefits.update_one({"id": benefit_id}, {"$set": {"image_status": "error"}})
+
+
+async def process_benefits_import(job_id: str, pid: str, text: str, actor_email: str, actor_role: str):
+    try:
+        llm = LlmChat(
+            api_key=os.environ['EMERGENT_LLM_KEY'],
+            session_id=f"benefits-{job_id}",
+            system_message=BENEFITS_SYSTEM,
+        ).with_model("openai", "gpt-5.4")
+        resp = await llm.send_message(UserMessage(
+            text=f"Voici le texte extrait du document d'avantages sociaux de la compagnie :\n\n{text[:100000]}"))
+        raw = resp if isinstance(resp, str) else getattr(resp, "content", None) or str(resp)
+        data = parse_llm_json(raw)
+        now = datetime.now(timezone.utc).isoformat()
+        count = 0
+        for b in (data.get("benefits") or [])[:20]:
+            fields = _clean_benefit_fields(str(b.get("title") or ""), str(b.get("description") or ""),
+                                           str(b.get("category") or "Autre"), b.get("details") or [],
+                                           b.get("eligible_roles") or [], str(b.get("monthly_value") or ""))
+            if not fields["title"]:
+                continue
+            doc = {"id": str(uuid.uuid4()), "pharmacy_id": pid, **fields,
+                   "status": "draft", "source": "pdf", "image_status": "pending",
+                   "created_by": actor_email, "created_at": now, "updated_at": now}
+            await db.benefits.insert_one(doc)
+            asyncio.create_task(generate_benefit_image(doc["id"], doc["title"], doc["category"]))
+            count += 1
+        if count == 0:
+            raise ValueError("Aucun avantage reconnu dans ce document")
+        await db.benefit_imports.update_one({"id": job_id}, {"$set": {"status": "done", "created_count": count}})
+        await log_audit(actor_email, actor_role, "IMPORT_AVANTAGES", "avantage", job_id,
+                        f"{count} avantage(s) créés par IA à partir d'un PDF", pid)
+    except Exception as exc:
+        logger.error(f"Import avantages {job_id} : {exc}")
+        await db.benefit_imports.update_one({"id": job_id}, {"$set": {"status": "error", "error": str(exc)}})
+
+
+@api_router.post("/benefits/upload")
+async def upload_benefits_pdf(file: UploadFile = File(...), principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    if file.content_type != "application/pdf":
+        raise HTTPException(status_code=400, detail="Format non autorisé : déposez le document d'avantages en PDF.")
+    data = await file.read()
+    if len(data) > TRAINING_MAX_SIZE:
+        raise HTTPException(status_code=400, detail="Fichier trop volumineux (maximum 15 Mo).")
+    try:
+        text = await asyncio.to_thread(extract_pdf_text, data)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Impossible de lire ce PDF.")
+    if len(text.strip()) < 200:
+        raise HTTPException(status_code=400, detail="Ce PDF ne contient pas assez de texte lisible (document numérisé en image ?).")
+    job = {"id": str(uuid.uuid4()), "pharmacy_id": pid, "status": "processing", "created_count": 0,
+           "error": None, "filename": file.filename, "created_at": datetime.now(timezone.utc).isoformat()}
+    await db.benefit_imports.insert_one(job)
+    asyncio.create_task(process_benefits_import(job["id"], pid, text, principal["email"], principal["role"]))
+    return {"job_id": job["id"], "status": "processing"}
+
+
+@api_router.get("/benefits/imports/{job_id}")
+async def get_benefits_import(job_id: str, principal: dict = Depends(get_principal)):
+    doc = await db.benefit_imports.find_one({"id": job_id, "pharmacy_id": principal["pharmacy_id"] or "ph1"}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Import introuvable.")
+    return doc
+
+
+@api_router.get("/benefits")
+async def list_benefits(user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    q: dict = {"pharmacy_id": pid}
+    if user["role"] not in ("admin", "manager", "superadmin"):
+        q["status"] = "published"
+    return await db.benefits.find(q, {"_id": 0, "image_b64": 0}).sort("created_at", -1).to_list(300)
+
+
+@api_router.post("/benefits")
+async def create_benefit(payload: BenefitIn, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    fields = _clean_benefit_fields(payload.title, payload.description, payload.category,
+                                   payload.details, payload.eligible_roles, payload.monthly_value)
+    if not fields["title"]:
+        raise HTTPException(status_code=400, detail="Le titre de l'avantage est requis.")
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {"id": str(uuid.uuid4()), "pharmacy_id": pid, **fields,
+           "status": "draft", "source": "manuel", "image_status": "pending",
+           "created_by": principal["email"], "created_at": now, "updated_at": now}
+    await db.benefits.insert_one(doc)
+    asyncio.create_task(generate_benefit_image(doc["id"], doc["title"], doc["category"]))
+    await log_audit(principal["email"], principal["role"], "CREATION_AVANTAGE", "avantage", doc["id"],
+                    f"Avantage « {doc['title']} » créé manuellement", pid)
+    return benefit_public(doc)
+
+
+@api_router.put("/benefits/{benefit_id}")
+async def update_benefit(benefit_id: str, payload: BenefitUpdateIn, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    doc = await db.benefits.find_one({"id": benefit_id, "pharmacy_id": pid}, {"_id": 0, "image_b64": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Avantage introuvable.")
+    updates: dict = {}
+    if payload.title is not None or payload.description is not None or payload.category is not None \
+            or payload.details is not None or payload.eligible_roles is not None or payload.monthly_value is not None:
+        fields = _clean_benefit_fields(
+            payload.title if payload.title is not None else doc["title"],
+            payload.description if payload.description is not None else doc.get("description", ""),
+            payload.category if payload.category is not None else doc.get("category", "Autre"),
+            payload.details if payload.details is not None else doc.get("details", []),
+            payload.eligible_roles if payload.eligible_roles is not None else doc.get("eligible_roles", []),
+            payload.monthly_value if payload.monthly_value is not None else doc.get("monthly_value", ""))
+        if not fields["title"]:
+            raise HTTPException(status_code=400, detail="Le titre de l'avantage est requis.")
+        updates.update(fields)
+    if payload.status is not None:
+        if payload.status not in ("draft", "published"):
+            raise HTTPException(status_code=400, detail="Statut invalide.")
+        updates["status"] = payload.status
+    updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.benefits.update_one({"id": benefit_id}, {"$set": updates})
+    await log_audit(principal["email"], principal["role"], "MODIF_AVANTAGE", "avantage", benefit_id,
+                    f"Avantage « {updates.get('title', doc['title'])} » mis à jour"
+                    + (f" — statut {updates['status']}" if "status" in updates else ""), pid)
+    fresh = await db.benefits.find_one({"id": benefit_id}, {"_id": 0, "image_b64": 0})
+    return fresh
+
+
+@api_router.delete("/benefits/{benefit_id}")
+async def delete_benefit(benefit_id: str, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    doc = await db.benefits.find_one({"id": benefit_id, "pharmacy_id": pid}, {"_id": 0, "image_b64": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Avantage introuvable.")
+    await db.benefits.delete_one({"id": benefit_id})
+    await log_audit(principal["email"], principal["role"], "SUPPRESSION_AVANTAGE", "avantage", benefit_id,
+                    f"Avantage « {doc['title']} » supprimé", pid)
+    return {"ok": True}
+
+
+@api_router.post("/benefits/{benefit_id}/generate-image")
+async def regenerate_benefit_image(benefit_id: str, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    doc = await db.benefits.find_one({"id": benefit_id, "pharmacy_id": pid}, {"_id": 0, "image_b64": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Avantage introuvable.")
+    await db.benefits.update_one({"id": benefit_id}, {"$set": {"image_status": "pending"}})
+    asyncio.create_task(generate_benefit_image(benefit_id, doc["title"], doc.get("category", "Autre")))
+    return {"ok": True}
+
+
+@api_router.get("/benefits/{benefit_id}/image")
+async def get_benefit_image(benefit_id: str, user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    q: dict = {"id": benefit_id, "pharmacy_id": pid}
+    if user["role"] not in ("admin", "manager", "superadmin"):
+        q["status"] = "published"
+    doc = await db.benefits.find_one(q, {"_id": 0, "image_b64": 1, "image_mime": 1})
+    if not doc or not doc.get("image_b64"):
+        raise HTTPException(status_code=404, detail="Aucune image pour cet avantage.")
+    return Response(content=base64.b64decode(doc["image_b64"]),
+                    media_type=doc.get("image_mime") or "image/png",
+                    headers={"Cache-Control": "private, max-age=3600"})
 
 
 def _time_to_minutes(t: str) -> int:

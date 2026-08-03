@@ -141,6 +141,10 @@ export default function SchedulingModule(): JSX.Element {
     return new Date(t.getFullYear(), t.getMonth(), 1);
   });
   const [moveShiftId, setMoveShiftId] = useState<string | null>(null);
+  const [leaveOverride, setLeaveOverride] = useState(false);
+
+  const approvedLeaveFor = (empId: string, d: string) =>
+    state.leaveRequests.find((l) => l.employeeId === empId && l.status === 'Approuvée' && l.startDate <= d && d <= l.endDate);
 
   useEffect(() => {
     if (!moveShiftId) return undefined;
@@ -165,6 +169,13 @@ export default function SchedulingModule(): JSX.Element {
     setMoveShiftId(null);
     if (!s) return;
     if ((empId ?? s.employeeId) === s.employeeId && d === s.date) return;
+    const targetEmp = empId ?? s.employeeId;
+    const leaveTarget = approvedLeaveFor(targetEmp, d);
+    if (leaveTarget) {
+      const emp2 = state.employees.find((e) => e.id === targetEmp);
+      toast.error(`Impossible : ${emp2 ? `${emp2.firstName} ${emp2.lastName}` : 'cet employé'} est en congé approuvé du ${leaveTarget.startDate} au ${leaveTarget.endDate}.`);
+      return;
+    }
     updateShift(s.id, { ...(empId ? { employeeId: empId } : {}), date: d });
     const emp = state.employees.find((e) => e.id === (empId ?? s.employeeId));
     toast.success(`Quart ${s.startTime}–${s.endTime} déplacé${emp ? ` vers ${emp.firstName} ${emp.lastName}` : ''} le ${d}.`);
@@ -221,11 +232,21 @@ export default function SchedulingModule(): JSX.Element {
   const handleAdd = (e: FormEvent<HTMLFormElement>): void => {
     e.preventDefault();
     if (!employeeId) return;
+    const conflict = approvedLeaveFor(employeeId, date);
+    if (conflict && !leaveOverride) {
+      setLeaveOverride(true);
+      toast.error('Cet employé est en congé approuvé ce jour-là. Confirmez pour enregistrer quand même.');
+      return;
+    }
     addShift({ employeeId, date, startTime, endTime, resourceIds: selectedResources, department });
     toast.success(`Quart de travail ajouté au calendrier « ${department} ».`);
     setSelectedResources([]);
+    setLeaveOverride(false);
     setDialogOpen(false);
   };
+
+  useEffect(() => { setLeaveOverride(false); }, [employeeId, date, dialogOpen]);
+  const dialogLeaveConflict = employeeId && date ? approvedLeaveFor(employeeId, date) : undefined;
 
   const toggleResource = (id: string): void => {
     setSelectedResources((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -239,6 +260,11 @@ export default function SchedulingModule(): JSX.Element {
     if (!shift) return;
     const emp = getEmployee(empId);
     const empName = emp ? `${emp.firstName} ${emp.lastName}` : 'l\'employé';
+    const leaveTarget = approvedLeaveFor(empId, d);
+    if (leaveTarget) {
+      toast.error(`Impossible : ${empName} est en congé approuvé du ${leaveTarget.startDate} au ${leaveTarget.endDate}.`);
+      return;
+    }
     if (copy) {
       addShift({ employeeId: empId, date: d, startTime: shift.startTime, endTime: shift.endTime, resourceIds: [...(shift.resourceIds ?? [])], department: shift.department });
       toast.success(`Quart ${shift.startTime}–${shift.endTime} dupliqué pour ${empName} le ${d}.`);
@@ -934,8 +960,21 @@ export default function SchedulingModule(): JSX.Element {
                 </div>
               </div>
             )}
-            <Button data-testid="shift-submit-button" type="submit" className="w-full rounded-full bg-emerald-600 hover:bg-emerald-700">
-              Ajouter le quart
+            {dialogLeaveConflict && (
+              <div data-testid="shift-leave-warning" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 flex gap-2 items-start">
+                <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                <p className="text-xs text-red-700 font-semibold">
+                  Cet employé est en congé approuvé du {dialogLeaveConflict.startDate} au {dialogLeaveConflict.endDate}.
+                  {leaveOverride ? ' Cliquez sur « Enregistrer quand même » pour confirmer en connaissance de cause.' : ' L\'enregistrement sera bloqué à moins de confirmer.'}
+                </p>
+              </div>
+            )}
+            <Button
+              data-testid="shift-submit-button"
+              type="submit"
+              className={`w-full rounded-full ${dialogLeaveConflict && leaveOverride ? 'bg-red-600 hover:bg-red-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}
+            >
+              {dialogLeaveConflict && leaveOverride ? 'Enregistrer quand même' : 'Ajouter le quart'}
             </Button>
           </form>
         </DialogContent>

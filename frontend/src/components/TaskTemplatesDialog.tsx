@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Sunrise, Moon, ClipboardList, Plus, Repeat, LucideIcon, Store, FlaskConical } from 'lucide-react';
+import { Sunrise, Moon, ClipboardList, Plus, Repeat, LucideIcon, Store, FlaskConical, Package, Banknote, Truck, Briefcase } from 'lucide-react';
 import { toast } from 'sonner';
 import { catalogDomainItems } from '@/lib/taskCatalog';
 
@@ -69,6 +69,22 @@ const TEMPLATES: Template[] = [
   {
     key: 'labo', label: 'Laboratoire (complet)', shift: 'Matin', icon: FlaskConical,
     items: catalogDomainItems('labo').map((t) => ({ title: t.title, description: t.description })),
+  },
+  {
+    key: 'entrepot', label: 'Entrepôt (complet)', shift: 'Matin', icon: Package,
+    items: catalogDomainItems('entrepot').map((t) => ({ title: t.title, description: t.description })),
+  },
+  {
+    key: 'caisse', label: 'Caisse (complet)', shift: 'Matin', icon: Banknote,
+    items: catalogDomainItems('caisse').map((t) => ({ title: t.title, description: t.description })),
+  },
+  {
+    key: 'livraison', label: 'Livraison (complet)', shift: 'Après-midi', icon: Truck,
+    items: catalogDomainItems('livraison').map((t) => ({ title: t.title, description: t.description })),
+  },
+  {
+    key: 'administration', label: 'Administration (complet)', shift: 'Matin', icon: Briefcase,
+    items: catalogDomainItems('administration').map((t) => ({ title: t.title, description: t.description })),
   },
 ];
 
