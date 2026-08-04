@@ -5634,6 +5634,95 @@ async def birthday_wishes_job():
     logger.info(f"Souhaits d'anniversaire automatiques : {sent} message(s) publié(s)")
 
 
+# ---------------------- Résumé matinal dans le chat d'équipe ----------------------
+
+FR_MONTHS = ("janvier", "février", "mars", "avril", "mai", "juin", "juillet",
+             "août", "septembre", "octobre", "novembre", "décembre")
+
+
+def _fr_date_label(iso: str) -> str:
+    d = date.fromisoformat(iso)
+    return f"{TRAFFIC_DAY_LABELS[d.weekday()]} {d.day} {FR_MONTHS[d.month - 1]}"
+
+
+async def send_morning_digest(date_str: str = "", only_pharmacy: str = "") -> int:
+    today = date_str or datetime.now(timezone.utc).astimezone(MONTREAL_TZ).date().isoformat()
+    query: dict = {"date": today}
+    if only_pharmacy:
+        query["pharmacy_id"] = only_pharmacy
+    shifts = await db.shifts.find(query, {"_id": 0}).to_list(20000)
+    tasks = await db.shift_tasks.find(query, {"_id": 0}).to_list(2000)
+    by_pharmacy: dict = {}
+    for s in shifts:
+        by_pharmacy.setdefault(s["pharmacy_id"], {"shifts": [], "tasks": []})["shifts"].append(s)
+    for t in tasks:
+        by_pharmacy.setdefault(t["pharmacy_id"], {"shifts": [], "tasks": []})["tasks"].append(t)
+    sent = 0
+    for pid, data in by_pharmacy.items():
+        if not data["shifts"] and not data["tasks"]:
+            continue
+        convo = await db.conversations.find_one({"pharmacy_id": pid, "type": "equipe"}, {"_id": 0},
+                                                sort=[("created_at", 1)])
+        if not convo:
+            continue
+        dup = await db.chat_messages.find_one({"conversation_id": convo["id"], "kind": "morning_digest",
+                                               "digest_date": today})
+        if dup:
+            continue
+        profiles = await db.employee_profiles.find(
+            {"pharmacy_id": pid}, {"_id": 0, "employee_id": 1, "employee_name": 1}).to_list(1000)
+        names = {p["employee_id"]: (p.get("employee_name") or "").strip() for p in profiles}
+        day_shifts = sorted(data["shifts"], key=lambda x: (x.get("start") or "", x.get("end") or ""))
+        lines = [f"☀️ Bonjour l'équipe ! Programme du {_fr_date_label(today)} :"]
+        if day_shifts:
+            lines.append(f"\n👥 Quarts ({len(day_shifts)}) :")
+            for s in day_shifts[:15]:
+                who = names.get(s["employee_id"]) or "Employé(e)"
+                dept = s.get("department") or "Général"
+                extra = f" · poste {s['station']}" if s.get("station") else (f" · {dept}" if dept != "Général" else "")
+                lines.append(f"• {who} {s.get('start', '?')}–{s.get('end', '?')}{extra}")
+            if len(day_shifts) > 15:
+                lines.append(f"• … +{len(day_shifts) - 15} autre(s) quart(s)")
+        pending = [t for t in data["tasks"] if not t.get("done")]
+        if pending:
+            lines.append(f"\n📋 Tâches prévues ({len(pending)}) :")
+            for shift_name in TASK_SHIFTS:
+                st = [t for t in pending if t.get("shift") == shift_name]
+                if not st:
+                    continue
+                titles = ", ".join(t["title"] for t in st[:4]) + (f" (+{len(st) - 4})" if len(st) > 4 else "")
+                lines.append(f"• {shift_name} ({len(st)}) : {titles}")
+        lines.append("\nBonne journée ! 💊")
+        body = "\n".join(lines)
+        now = datetime.now(timezone.utc).isoformat()
+        await db.chat_messages.insert_one({
+            "id": str(uuid.uuid4()), "conversation_id": convo["id"], "pharmacy_id": pid,
+            "sender_email": "systeme@arriereplan.app", "sender_name": "Arrière Plan",
+            "sender_role": "system", "kind": "morning_digest", "digest_date": today,
+            "body": body, "attachment": None, "created_at": now})
+        await db.conversations.update_one({"id": convo["id"]}, {"$set": {
+            "last_message": f"☀️ Résumé du jour — {len(day_shifts)} quart(s), {len(pending)} tâche(s)",
+            "last_sender": "Arrière Plan", "last_message_at": now}})
+        await log_audit("système", "system", "RESUME_MATINAL", "chat", today,
+                        f"Résumé matinal publié : {len(day_shifts)} quart(s), {len(pending)} tâche(s) prévues", pid)
+        sent += 1
+    return sent
+
+
+@api_router.post("/chat/morning-digest/run")
+async def run_morning_digest(date_param: str = Query("", alias="date"), principal: dict = Depends(get_principal)):
+    if date_param and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_param):
+        raise HTTPException(status_code=400, detail="Date invalide (format AAAA-MM-JJ).")
+    only = principal["pharmacy_id"] if principal["role"] in ("admin", "manager") else ""
+    sent = await send_morning_digest(date_param, only or "")
+    return {"sent": sent}
+
+
+async def morning_digest_job():
+    sent = await send_morning_digest()
+    logger.info(f"Résumé matinal : {sent} message(s) publié(s) dans les chats d'équipe")
+
+
 @api_router.get("/reports/budget-history")
 async def budget_history(months: int = Query(6, ge=1, le=12), principal: dict = Depends(get_principal)):
     pid = principal["pharmacy_id"] or "ph1"
@@ -6762,6 +6851,7 @@ async def startup_tasks():
     scheduler.add_job(monthly_budget_report_job, CronTrigger(day=1, hour=7, minute=30))
     scheduler.add_job(shift_reminder_job, CronTrigger(hour=18, minute=0))
     scheduler.add_job(birthday_wishes_job, CronTrigger(hour=7, minute=5))
+    scheduler.add_job(morning_digest_job, CronTrigger(hour=6, minute=45))
     scheduler.add_job(leave_carryover_job, CronTrigger(month=1, day=1, hour=0, minute=45))
     scheduler.start()
 
