@@ -1,0 +1,35 @@
+{
+  "summary": "Itération 42 — Tests des 3 nouveaux écarts vs Agendrix : (1) politique de sécurité admin (MFA obligatoire + règles mdp + expiration), (2) enforcement MFA côté backend, (3) synchronisation calendrier personnel ICS. BACKEND pytest 8/8 PASS (/app/backend/tests/test_iteration42.py, /app/test_reports/pytest/iteration_42.xml) : GET /security-settings renvoie la politique par défaut exacte ; PUT borne pw_min_length dans [8,64] et pw_expiry_days dans [0,730] (100→64, 4→8, 5000→730) ; PUT par employée (julie) renvoie 403 ; PUT avec mfa_required=true par admin SANS MFA sur son compte renvoie 400 « Activez d'abord la vérification en 2 étapes... » (protection anti-verrouillage) ; POST /auth/change-password après PUT pw_min_length=12 + pw_require_special=true : mdp faible court → 400 « au moins 12 caractères », mdp long sans spécial → 400 « caractère spécial ». Flux ICS : GET /my/calendar-feed (Bearer) renvoie {token} valide, GET /calendar/{token} PUBLIC renvoie text/calendar avec BEGIN/END:VCALENDAR (VEVENT vérifiés avec DTSTART/DTEND en UTC Z + SUMMARY 'Quart' + LOCATION Sherbrooke quand shifts présents), token invalide → 404, POST /reset régénère (nouveau token OK, ancien token → 404). ENFORCEMENT MFA vérifié manuellement via mongosh + supervisorctl restart : après db.security_settings.updateOne({pharmacy_id:'ph1'},{$set:{mfa_required:true}}) → login julie renvoie user.mfa_setup_required=true, GET /api/time-bank → 403 + header x-mfa-setup-required:1 + detail 'Votre pharmacie exige la vérification en 2 étapes (MFA)...', tandis que /api/auth/me et /api/security-settings restent accessibles (200). REMIS mfa_required=false après le test (vérifié : julie /time-bank → 200). FRONTEND Playwright (admin + Julie via header-login-button/login-*-input) : ✅ Julie → sidebar-link-myspace → CollapsibleSection 'myspace-calendar-sync' expansé → calendar-sync-card visible avec calendar-feed-url (URL contient '/api/calendar/'), calendar-copy-button déclenche toast, calendar-reset-button change bien l'URL affichée (nouveau token !== ancien). ✅ Julie → sidebar-password-button → password-dialog ouvre ; security-policy-panel ABSENT (count=0) — bien réservé admin/manager. ✅ Admin → sidebar-password-button → password-dialog + security-policy-panel visible avec policy-mfa-required, policy-min-length (input number), policy-expiry-select, 4 policy-pw_require_* switches, policy-save-button ; modification pw_min_length 10→12 + save → GET /security-settings confirme 12 ; restore 10 + save → GET confirme 10. Toast succès 'Politique de sécurité de la pharmacie mise à jour.' affiché. Régression de connexion + chargement des modules OK (sidebar rendu, dashboard rendu, aucune erreur console React bloquante — seulement des warnings a11y 'Missing Description' sur DialogContent, non bloquants). Politique DB remise à l'état par défaut au démontage.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dialogue Sécurité de mon compte (password-dialog) et ForgotPasswordDialog", "issues": ["Warning a11y console: 'Missing Description or aria-describedby={undefined} for DialogContent'. Non bloquant mais devrait ajouter <DialogDescription> ou aria-describedby pour la conformité WCAG."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iteration42.py", "/app/test_reports/pytest/iteration_42.xml"],
+  "action_items": [
+    "(Facultatif, a11y) Ajouter <DialogDescription> aux DialogContent du password-dialog (Sidebar.tsx) et forgot-password-dialog (ForgotPasswordDialog.tsx) pour supprimer le warning React 'Missing Description or aria-describedby' — non bloquant."
+  ],
+  "critical_code_review_comments": [
+    "SecurityPolicyPanel.tsx L75 — onChange fallback `Number(e.target.value) || 10` : si l'utilisateur efface entièrement le champ (value=''), l'état saute directement à 10 au lieu de rester vide pendant la saisie. UX mineur : préférer garder la string en état ou utiliser un debounce; le clamping serveur [8,64] rattrape déjà les valeurs invalides.",
+    "server.py L881 — la protection anti-verrouillage vérifie user.get('mfa_enabled') mais pas si le compte a un autre admin actif avec MFA activée dans la pharmacie. Un admin unique pourrait donc être bloqué s'il perd l'accès à son app TOTP après avoir activé mfa_required. Considérer un mécanisme de récupération (codes de secours ou désactivation via superadmin).",
+    "server.py L456 get_security_settings — cache 60 s par pharmacie sans invalidation cross-process : dans un déploiement multi-worker, une modif via PUT n'invalide le cache que du worker qui a traité la requête. Les autres workers verront l'ancienne politique jusqu'à 60 s. Actuellement l'ingress route probablement en sticky, mais à documenter."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration42.py",
+    "/app/test_reports/iteration_42.json",
+    "/app/test_reports/pytest/iteration_42.xml"
+  ],
+  "success_rate": {"backend": "100% (8/8 pytest + enforcement MFA e2e manuel OK)", "frontend": "100% (calendar sync Julie + policy panel admin + panel absent employé)"},
+  "seed_data_creation": "Aucune donnée persistante laissée. Politique de sécurité ph1 remise à {mfa_required:false, pw_min_length:10, pw_require_upper/lower/digit:true, pw_require_special:false, pw_expiry_days:0} en fin de tests (vérifié via GET). Le calendar_token de Julie a été régénéré 2 fois (aucun impact fonctionnel — le token reste valide et Julie peut se resynchroniser sans action supplémentaire). Aucune MFA activée sur les comptes de test.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "admin@luminahr.ca / Nlpx!tTE3Aw27 OK · julie@luminahr.ca / O1ka!gfVV6e54 OK · aucune MFA activée sur les comptes de test.",
+  "context_for_next_testing_agent": "1) Pour tester l'enforcement MFA sans passer par PUT (bloqué si admin n'a pas MFA), utiliser mongosh direct: db.security_settings.updateOne({pharmacy_id:'ph1'},{$set:{mfa_required:true}}) + sudo supervisorctl restart backend (vider cache 60 s). TOUJOURS remettre à false ensuite. 2) SecurityPolicyPanel se démonte quand le dialogue se ferme, et refetch au montage — donc pour vérifier la persistance il faut fermer/rouvrir le dialogue OU relire via l'API. 3) Pour Playwright avec input type=number, page.fill NE clear PAS forcément l'ancienne valeur — utiliser click(click_count=3) puis fill() pour être sûr. 4) L'URL ICS renvoyée par CalendarSyncCard est {REACT_APP_BACKEND_URL}/api/calendar/{token} (calendar-feed-url l'affiche verbatim). 5) L'endpoint /api/calendar/{token} est PUBLIC (pas d'auth) mais nécessite un token valide en DB — sinon 404.",
+  "rca_of_the_issue": "N/A — tous les tests passent. Une seule fausse alarme intermédiaire : Playwright page.fill sur un input type='number' pré-rempli à '10' n'a pas correctement remplacé la valeur (résultat '1012' → clampé à 64 par le backend). Test refait avec click(click_count=3) + fill() → OK. Aucun bug produit."
+}

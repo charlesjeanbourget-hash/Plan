@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
-export const MfaSettings = (): JSX.Element => {
+export const MfaSettings = ({ onChanged }: { onChanged?: (enabled: boolean) => void }): JSX.Element => {
   const { currentUser, token } = useAuth();
   const headers = { Authorization: `Bearer ${token ?? ''}` };
   const [enabled, setEnabled] = useState(currentUser?.mfaEnabled ?? false);
@@ -37,6 +37,7 @@ export const MfaSettings = (): JSX.Element => {
       setEnabled(true);
       setSetup(null);
       setCode('');
+      onChanged?.(true);
     } catch (err) {
       const detail = axios.isAxiosError(err) && err.response ? (err.response.data as { detail?: unknown }).detail : null;
       toast.error(typeof detail === 'string' ? detail : 'Code invalide.');
@@ -52,6 +53,7 @@ export const MfaSettings = (): JSX.Element => {
       toast.success('Vérification en 2 étapes désactivée.');
       setEnabled(false);
       setCode('');
+      onChanged?.(false);
     } catch (err) {
       const detail = axios.isAxiosError(err) && err.response ? (err.response.data as { detail?: unknown }).detail : null;
       toast.error(typeof detail === 'string' ? detail : 'Code invalide.');

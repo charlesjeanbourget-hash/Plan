@@ -211,6 +211,18 @@ async def get_current_user(request: Request) -> dict:
         raise HTTPException(status_code=403,
                             detail="Vous devez d'abord remplacer votre mot de passe temporaire.",
                             headers={"X-Password-Change-Required": "1"})
+    pol = await get_security_settings(user.get("pharmacy_id") or "")
+    path = request.url.path
+    if password_is_expired(user, pol) and path not in ("/api/auth/change-password", "/api/auth/me"):
+        raise HTTPException(status_code=403,
+                            detail="Votre mot de passe a expiré selon la politique de sécurité de votre pharmacie. Veuillez le renouveler.",
+                            headers={"X-Password-Change-Required": "1"})
+    if pol.get("mfa_required") and not user.get("mfa_enabled") and path not in (
+            "/api/auth/me", "/api/auth/mfa/setup", "/api/auth/mfa/enable", "/api/auth/change-password",
+            "/api/security-settings"):
+        raise HTTPException(status_code=403,
+                            detail="Votre pharmacie exige la vérification en 2 étapes (MFA). Activez-la pour continuer.",
+                            headers={"X-Mfa-Setup-Required": "1"})
     return user
 
 
@@ -247,7 +259,7 @@ async def auth_login(payload: LoginIn, request: Request):
     await record_login_event(user, "CONNEXION", request, flagged_new_ip=suspicious)
     if suspicious:
         asyncio.create_task(alert_suspicious_login(user, client_ip(request), request))
-    return {"access_token": create_access_token(user), "user": user_public(user)}
+    return {"access_token": create_access_token(user), "user": {**user_public(user), **(await auth_flags(user))}}
 
 
 class MfaCodeIn(BaseModel):
@@ -329,7 +341,7 @@ async def mfa_verify(payload: MfaVerifyIn, request: Request):
     await record_login_event(user, "CONNEXION", request, flagged_new_ip=suspicious)
     if suspicious:
         asyncio.create_task(alert_suspicious_login(user, client_ip(request), request))
-    return {"access_token": create_access_token(user), "user": user_public(user)}
+    return {"access_token": create_access_token(user), "user": {**user_public(user), **(await auth_flags(user))}}
 
 
 TRUSTED_PROXY_HOPS = max(1, int(os.environ.get("TRUSTED_PROXY_HOPS", "1")))
@@ -418,19 +430,70 @@ async def auth_accept_privacy(user: dict = Depends(get_current_user)):
 
 @api_router.get("/auth/me")
 async def auth_me(user: dict = Depends(get_current_user)):
-    return user_public(user)
+    return {**user_public(user), **(await auth_flags(user))}
 
 
-def validate_password_strength(pw: str) -> Optional[str]:
-    if len(pw) < 10:
-        return "Le mot de passe doit contenir au moins 10 caractères."
-    if not any(c.isupper() for c in pw):
+DEFAULT_SECURITY_SETTINGS = {
+    "mfa_required": False,
+    "pw_min_length": 10,
+    "pw_require_upper": True,
+    "pw_require_lower": True,
+    "pw_require_digit": True,
+    "pw_require_special": False,
+    "pw_expiry_days": 0,
+}
+_SPECIAL_CHARS = set("!@#$%^&*()-_=+[]{};:,.<>?/\\|~'\"`")
+_security_cache: dict = {}
+
+
+async def get_security_settings(pharmacy_id: str) -> dict:
+    if not pharmacy_id:
+        return dict(DEFAULT_SECURITY_SETTINGS)
+    cached = _security_cache.get(pharmacy_id)
+    now_ts = datetime.now(timezone.utc).timestamp()
+    if cached and now_ts - cached[0] < 60:
+        return cached[1]
+    doc = await db.security_settings.find_one({"pharmacy_id": pharmacy_id}, {"_id": 0}) or {}
+    settings = {**DEFAULT_SECURITY_SETTINGS, **{k: v for k, v in doc.items() if k in DEFAULT_SECURITY_SETTINGS}}
+    _security_cache[pharmacy_id] = (now_ts, settings)
+    return settings
+
+
+async def validate_password_strength(pw: str, pharmacy_id: str = "") -> Optional[str]:
+    pol = await get_security_settings(pharmacy_id)
+    min_len = max(8, min(64, int(pol.get("pw_min_length") or 10)))
+    if len(pw) < min_len:
+        return f"Le mot de passe doit contenir au moins {min_len} caractères."
+    if pol.get("pw_require_upper") and not any(c.isupper() for c in pw):
         return "Le mot de passe doit contenir au moins une majuscule."
-    if not any(c.islower() for c in pw):
+    if pol.get("pw_require_lower") and not any(c.islower() for c in pw):
         return "Le mot de passe doit contenir au moins une minuscule."
-    if not any(c.isdigit() for c in pw):
+    if pol.get("pw_require_digit") and not any(c.isdigit() for c in pw):
         return "Le mot de passe doit contenir au moins un chiffre."
+    if pol.get("pw_require_special") and not any(c in _SPECIAL_CHARS for c in pw):
+        return "Le mot de passe doit contenir au moins un caractère spécial (!, @, #, $…)."
     return None
+
+
+def password_is_expired(user: dict, pol: dict) -> bool:
+    days = int(pol.get("pw_expiry_days") or 0)
+    if days <= 0:
+        return False
+    changed = user.get("password_changed_at")
+    if not changed:
+        return False
+    try:
+        return datetime.now(timezone.utc) - datetime.fromisoformat(changed) > timedelta(days=days)
+    except ValueError:
+        return False
+
+
+async def auth_flags(user: dict) -> dict:
+    pol = await get_security_settings(user.get("pharmacy_id") or "")
+    return {
+        "password_expired": password_is_expired(user, pol),
+        "mfa_setup_required": bool(pol.get("mfa_required")) and not user.get("mfa_enabled", False),
+    }
 
 
 @api_router.post("/auth/change-password")
@@ -439,14 +502,15 @@ async def auth_change_password(payload: ChangePasswordIn, request: Request, user
     new_password = payload.new_password.strip()
     if not verify_password(current_password, user["password_hash"]):
         raise HTTPException(status_code=400, detail="Mot de passe actuel incorrect.")
-    err = validate_password_strength(new_password)
+    err = await validate_password_strength(new_password, user.get("pharmacy_id") or "")
     if err:
         raise HTTPException(status_code=400, detail=err)
     if new_password == current_password:
         raise HTTPException(status_code=400, detail="Le nouveau mot de passe doit être différent de l'actuel.")
     await db.users.update_one(
         {"id": user["id"]},
-        {"$set": {"password_hash": hash_password(new_password), "is_temporary_password": False}},
+        {"$set": {"password_hash": hash_password(new_password), "is_temporary_password": False,
+                  "password_changed_at": datetime.now(timezone.utc).isoformat()}},
     )
     await log_audit(user["email"], user["role"], "CHANGEMENT_MOT_DE_PASSE", "utilisateur", user["id"],
                     "Mot de passe modifié par l'utilisateur", user.get("pharmacy_id") or "")
@@ -538,14 +602,15 @@ async def auth_reset_password(payload: ResetPasswordIn, request: Request):
     if hash_reset_code(code) != doc["code_hash"]:
         await db.password_resets.update_one({"id": doc["id"]}, {"$inc": {"attempts": 1}})
         raise HTTPException(status_code=400, detail="Code de vérification incorrect.")
-    err = validate_password_strength(new_password)
-    if err:
-        raise HTTPException(status_code=400, detail=err)
     user = await db.users.find_one({"email": email}, {"_id": 0})
     if not user:
         raise invalid
+    err = await validate_password_strength(new_password, user.get("pharmacy_id") or "")
+    if err:
+        raise HTTPException(status_code=400, detail=err)
     await db.users.update_one({"email": email},
-                              {"$set": {"password_hash": hash_password(new_password), "is_temporary_password": False}})
+                              {"$set": {"password_hash": hash_password(new_password), "is_temporary_password": False,
+                                        "password_changed_at": datetime.now(timezone.utc).isoformat()}})
     await db.password_resets.update_one({"id": doc["id"]}, {"$set": {"used": True}})
     await db.login_attempts.delete_one({"identifier": email})
     await log_audit(email, user["role"], "REINIT_MDP_COURRIEL", "utilisateur", user["id"],
@@ -787,6 +852,130 @@ async def log_audit(actor_email: str, actor_role: str, action: str, resource_typ
 
 def license_public(doc: dict) -> dict:
     return {k: v for k, v in doc.items() if k not in ("_id", "storage_path")}
+
+
+# ==================== Politique de sécurité (par pharmacie) ====================
+
+class SecuritySettingsIn(BaseModel):
+    mfa_required: bool = False
+    pw_min_length: int = 10
+    pw_require_upper: bool = True
+    pw_require_lower: bool = True
+    pw_require_digit: bool = True
+    pw_require_special: bool = False
+    pw_expiry_days: int = 0
+
+
+@api_router.get("/security-settings")
+async def get_security_settings_endpoint(user: dict = Depends(get_current_user)):
+    return await get_security_settings(user.get("pharmacy_id") or "")
+
+
+@api_router.put("/security-settings")
+async def save_security_settings(payload: SecuritySettingsIn, user: dict = Depends(get_current_user)):
+    if user["role"] not in ("admin", "manager", "superadmin"):
+        raise HTTPException(status_code=403, detail="Accès refusé : réservé aux administrateurs (Loi 25).")
+    pid = user.get("pharmacy_id") or ""
+    if not pid:
+        raise HTTPException(status_code=400, detail="Aucune pharmacie associée à ce compte.")
+    if payload.mfa_required and not user.get("mfa_enabled"):
+        raise HTTPException(status_code=400,
+                            detail="Activez d'abord la vérification en 2 étapes sur votre propre compte avant de l'exiger pour toute l'équipe.")
+    doc = payload.model_dump()
+    doc["pw_min_length"] = max(8, min(64, doc["pw_min_length"]))
+    doc["pw_expiry_days"] = max(0, min(730, doc["pw_expiry_days"]))
+    await db.security_settings.update_one({"pharmacy_id": pid}, {"$set": doc}, upsert=True)
+    _security_cache.pop(pid, None)
+    if doc["pw_expiry_days"] > 0:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        await db.users.update_many({"pharmacy_id": pid, "password_changed_at": {"$exists": False}},
+                                   {"$set": {"password_changed_at": now_iso}})
+    await log_audit(user["email"], user["role"], "MODIFICATION_POLITIQUE_SECURITE", "pharmacie", pid,
+                    f"MFA obligatoire : {'oui' if doc['mfa_required'] else 'non'} · mdp min {doc['pw_min_length']} car. · expiration {doc['pw_expiry_days']} j", pid)
+    return await get_security_settings(pid)
+
+
+# ==================== Synchronisation calendrier personnel (ICS) ====================
+
+@api_router.get("/my/calendar-feed")
+async def my_calendar_feed(user: dict = Depends(get_current_user)):
+    if not user.get("employee_id"):
+        raise HTTPException(status_code=400, detail="Aucun dossier employé associé à ce compte.")
+    token_val = user.get("calendar_token")
+    if not token_val:
+        token_val = secrets.token_urlsafe(24)
+        await db.users.update_one({"id": user["id"]}, {"$set": {"calendar_token": token_val}})
+    return {"token": token_val}
+
+
+@api_router.post("/my/calendar-feed/reset")
+async def reset_calendar_feed(user: dict = Depends(get_current_user)):
+    if not user.get("employee_id"):
+        raise HTTPException(status_code=400, detail="Aucun dossier employé associé à ce compte.")
+    token_val = secrets.token_urlsafe(24)
+    await db.users.update_one({"id": user["id"]}, {"$set": {"calendar_token": token_val}})
+    await log_audit(user["email"], user["role"], "REGENERATION_LIEN_CALENDRIER", "utilisateur", user["id"],
+                    "Lien de synchronisation calendrier régénéré", user.get("pharmacy_id") or "")
+    return {"token": token_val}
+
+
+def _ics_escape(text: str) -> str:
+    return text.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
+
+
+def _ics_utc(date_s: str, time_s: str) -> str:
+    local = datetime.fromisoformat(f"{date_s}T{time_s}:00").replace(tzinfo=MONTREAL_TZ)
+    return local.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+@api_router.get("/calendar/{token}")
+async def calendar_ics_feed(token: str):
+    user = await db.users.find_one({"calendar_token": token}, {"_id": 0})
+    if not user or not user.get("employee_id"):
+        raise HTTPException(status_code=404, detail="Flux introuvable.")
+    start = (date.today() - timedelta(days=30)).isoformat()
+    end = (date.today() + timedelta(days=120)).isoformat()
+    query = {"employee_id": user["employee_id"], "date": {"$gte": start, "$lte": end}}
+    if user.get("pharmacy_id"):
+        query["pharmacy_id"] = user["pharmacy_id"]
+    shifts = await db.shifts.find(query, {"_id": 0}).to_list(2000)
+    psettings = await db.pharmacy_settings.find_one({"pharmacy_id": user.get("pharmacy_id") or ""}, {"_id": 0, "address": 1}) or {}
+    location = _ics_escape(psettings.get("address") or "Pharmacie")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    lines = [
+        "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Arriere Plan//Horaires//FR",
+        "CALSCALE:GREGORIAN", "METHOD:PUBLISH",
+        "X-WR-CALNAME:Mes quarts — Arrière Plan", "X-WR-TIMEZONE:America/Toronto",
+    ]
+    for s in shifts:
+        try:
+            dtstart = _ics_utc(s["date"], s["start"])
+            dtend = _ics_utc(s["date"], s["end"])
+        except (KeyError, ValueError):
+            continue
+        summary = f"Quart — {s.get('department') or 'Général'}"
+        if s.get("station"):
+            summary += f" ({s['station']})"
+        if s.get("training"):
+            summary += " · Formation"
+        desc = f"Horaire {s.get('start', '')}–{s.get('end', '')}"
+        if s.get("notes"):
+            desc += f"\nNotes : {s['notes']}"
+        lines += [
+            "BEGIN:VEVENT",
+            f"UID:{s.get('id', '')}@arriereplan",
+            f"DTSTAMP:{stamp}",
+            f"DTSTART:{dtstart}",
+            f"DTEND:{dtend}",
+            f"SUMMARY:{_ics_escape(summary)}",
+            f"DESCRIPTION:{_ics_escape(desc)}",
+            f"LOCATION:{location}",
+            "END:VEVENT",
+        ]
+    lines.append("END:VCALENDAR")
+    ics = "\r\n".join(lines) + "\r\n"
+    return Response(content=ics, media_type="text/calendar; charset=utf-8",
+                    headers={"Content-Disposition": "inline; filename=\"horaire-arriere-plan.ics\""})
 
 
 async def compute_report(scope: dict):

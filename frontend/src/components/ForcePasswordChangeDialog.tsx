@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { ShieldAlert } from 'lucide-react';
 import { toast } from 'sonner';
 
-export const ForcePasswordChangeDialog = (): JSX.Element => {
+export const ForcePasswordChangeDialog = ({ expired = false }: { expired?: boolean }): JSX.Element => {
   const { changePassword, logout } = useAuth();
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
@@ -45,12 +45,13 @@ export const ForcePasswordChangeDialog = (): JSX.Element => {
           </DialogTitle>
         </DialogHeader>
         <p className="text-sm text-slate-500 -mt-2">
-          Votre mot de passe est temporaire. Pour protéger les données de votre pharmacie,
-          choisissez un nouveau mot de passe avant de continuer.
+          {expired
+            ? 'Votre mot de passe a expiré selon la politique de sécurité de votre pharmacie. Choisissez un nouveau mot de passe pour continuer.'
+            : 'Votre mot de passe est temporaire. Pour protéger les données de votre pharmacie, choisissez un nouveau mot de passe avant de continuer.'}
         </p>
         <form onSubmit={(e) => void submit(e)} className="space-y-4">
           <div className="space-y-2">
-            <Label>Mot de passe temporaire actuel</Label>
+            <Label>{expired ? 'Mot de passe actuel' : 'Mot de passe temporaire actuel'}</Label>
             <Input data-testid="force-pw-current" type="password" value={current} onChange={(e) => setCurrent(e.target.value)} required autoComplete="current-password" />
           </div>
           <div className="space-y-2">

@@ -35,6 +35,8 @@ export interface User {
   employeeId?: string;
   pharmacyId?: string;
   isTemporaryPassword?: boolean;
+  passwordExpired?: boolean;
+  mfaSetupRequired?: boolean;
   privacyAcceptedAt?: string | null;
   mfaEnabled?: boolean;
   moduleOverrides?: Record<string, boolean>;

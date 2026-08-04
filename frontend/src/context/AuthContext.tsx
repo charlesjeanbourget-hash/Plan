@@ -13,6 +13,8 @@ interface BackendUser {
   pharmacy_id: string | null;
   employee_id: string | null;
   is_temporary_password: boolean;
+  password_expired?: boolean;
+  mfa_setup_required?: boolean;
   privacy_accepted_at?: string | null;
   mfa_enabled?: boolean;
   module_overrides?: Record<string, boolean>;
@@ -31,6 +33,8 @@ const mapUser = (u: BackendUser): User => ({
   pharmacyId: u.pharmacy_id ?? undefined,
   employeeId: u.employee_id ?? undefined,
   isTemporaryPassword: u.is_temporary_password,
+  passwordExpired: u.password_expired ?? false,
+  mfaSetupRequired: u.mfa_setup_required ?? false,
   privacyAcceptedAt: u.privacy_accepted_at ?? null,
   mfaEnabled: u.mfa_enabled ?? false,
   moduleOverrides: u.module_overrides ?? {},
@@ -54,6 +58,7 @@ interface AuthContextValue {
   verifyMfa: (mfaToken: string, code: string) => Promise<string | null>;
   logout: () => void;
   changePassword: (currentPassword: string, newPassword: string) => Promise<string | null>;
+  refreshUser: () => Promise<void>;
   acceptPrivacy: () => Promise<void>;
 }
 
@@ -131,7 +136,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         { current_password: currentPassword, new_password: newPassword },
         { headers: { Authorization: `Bearer ${auth.token}` } }
       );
-      setAuth({ ...auth, user: { ...auth.user, isTemporaryPassword: false } });
+      setAuth({ ...auth, user: { ...auth.user, isTemporaryPassword: false, passwordExpired: false } });
       return null;
     } catch (err) {
       if (axios.isAxiosError(err) && err.response) {
@@ -142,6 +147,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const logout = (): void => setAuth(null);
+
+  const refreshUser = async (): Promise<void> => {
+    if (!auth) return;
+    try {
+      const res = await axios.get<BackendUser>(`${API}/auth/me`, { headers: { Authorization: `Bearer ${auth.token}` } });
+      setAuth({ token: auth.token, user: mapUser(res.data) });
+    } catch {
+      /* silencieux */
+    }
+  };
 
   const acceptPrivacy = async (): Promise<void> => {
     if (!auth) return;
@@ -156,7 +171,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   return (
     <AuthContext.Provider
-      value={{ currentUser: auth?.user ?? null, token: auth?.token ?? null, login, verifyMfa, logout, changePassword, acceptPrivacy }}
+      value={{ currentUser: auth?.user ?? null, token: auth?.token ?? null, login, verifyMfa, logout, changePassword, refreshUser, acceptPrivacy }}
     >
       {children}
     </AuthContext.Provider>

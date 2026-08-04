@@ -1,6 +1,7 @@
 import { useState, useEffect, FormEvent } from 'react';
 import { ModuleKey } from '@/types';
 import { MfaSettings } from '@/components/MfaSettings';
+import { SecurityPolicyPanel } from '@/components/SecurityPolicyPanel';
 import { useAuth } from '@/context/AuthContext';
 import { BrandLogo } from '@/components/BrandLogo';
 import { InstallAppButton } from '@/components/InstallAppButton';
@@ -188,9 +189,9 @@ export default function Sidebar({ active, onSelect, onLogout }: Props): JSX.Elem
         </div>
       )}
       <Dialog open={pwdOpen} onOpenChange={setPwdOpen}>
-        <DialogContent data-testid="password-dialog">
+        <DialogContent data-testid="password-dialog" className="max-h-[88vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="font-heading">Changer mon mot de passe</DialogTitle>
+            <DialogTitle className="font-heading">Sécurité de mon compte</DialogTitle>
           </DialogHeader>
           {currentUser?.isTemporaryPassword && (
             <p className="text-xs text-bronze-800 bg-bronze-50 border border-bronze-200 rounded-lg p-3">
@@ -222,6 +223,7 @@ export default function Sidebar({ active, onSelect, onLogout }: Props): JSX.Elem
             </Button>
           </form>
           <MfaSettings />
+          <SecurityPolicyPanel />
         </DialogContent>
       </Dialog>
     </>

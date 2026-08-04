@@ -15,6 +15,7 @@ import { SignaturePad } from '@/components/SignaturePad';
 import { MyDocRequests } from '@/components/DocumentRequests';
 import { downloadPayStub } from '@/lib/paystub';
 import { MyPunchCard } from '@/components/MyPunchCard';
+import { CalendarSyncCard } from '@/components/CalendarSyncCard';
 import { NurseDayPanel } from '@/components/NurseDayPanel';
 import { MyProposalsPanel } from '@/components/MyProposalsPanel';
 import { MyEvaluationsPanel } from '@/components/MyEvaluationsPanel';
@@ -314,6 +315,10 @@ export default function MySpaceModule(): JSX.Element {
 
         <CollapsibleSection id="myspace-docs-section" title="Mes documents RH" icon={FileQuestion} className="lg:col-span-2">
           <MyDocRequests />
+        </CollapsibleSection>
+
+        <CollapsibleSection id="myspace-calendar-sync" title="Synchroniser mon calendrier" icon={CalendarClock} className="lg:col-span-2">
+          <CalendarSyncCard />
         </CollapsibleSection>
 
         <CollapsibleSection

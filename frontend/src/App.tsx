@@ -15,6 +15,7 @@ import EmployeeDossier from '@/components/modules/EmployeeDossier';
 import ResourcesModule from '@/components/modules/ResourcesModule';
 import PrivacyPolicy from '@/components/PrivacyPolicy';
 import { ForcePasswordChangeDialog } from '@/components/ForcePasswordChangeDialog';
+import { ForceMfaDialog } from '@/components/ForceMfaDialog';
 import { PrivacyConsentDialog } from '@/components/PrivacyConsentDialog';
 import SchedulingModule from '@/components/modules/SchedulingModule';
 import RecruitmentModule from '@/components/modules/RecruitmentModule';
@@ -98,10 +99,10 @@ function App(): JSX.Element {
   };
 
   if (view === 'dashboard' && currentUser) {
-    if (currentUser.isTemporaryPassword) {
+    if (currentUser.isTemporaryPassword || currentUser.passwordExpired) {
       return (
         <div className="App">
-          <ForcePasswordChangeDialog />
+          <ForcePasswordChangeDialog expired={!currentUser.isTemporaryPassword} />
         </div>
       );
     }
@@ -109,6 +110,13 @@ function App(): JSX.Element {
       return (
         <div className="App">
           <PrivacyConsentDialog />
+        </div>
+      );
+    }
+    if (currentUser.mfaSetupRequired && !currentUser.mfaEnabled) {
+      return (
+        <div className="App">
+          <ForceMfaDialog />
         </div>
       );
     }
