@@ -9,10 +9,18 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DEPARTMENTS } from '@/lib/pharmacy';
 import { POSITIONS } from '@/types';
-import { HandMetal, Plus, X, CheckCircle2, Megaphone } from 'lucide-react';
+import { HandMetal, Plus, X, CheckCircle2, Megaphone, Medal } from 'lucide-react';
 import { toast } from 'sonner';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+
+interface OpenShiftApplicant {
+  employee_id: string;
+  name: string;
+  position: string;
+  hire_date: string;
+  applied_at: string;
+}
 
 interface OpenShift {
   id: string;
@@ -23,6 +31,10 @@ interface OpenShift {
   positions: string[];
   note: string;
   status: string;
+  mode?: string;
+  applicants?: OpenShiftApplicant[];
+  applied?: boolean;
+  applicant_count?: number;
   claimed_by: string | null;
   claimed_by_name: string | null;
 }
@@ -43,6 +55,7 @@ export const OpenShiftsPanel = ({ mode }: { mode: 'admin' | 'employee' }): JSX.E
   const [department, setDepartment] = useState('Général');
   const [positions, setPositions] = useState<string[]>([]);
   const [note, setNote] = useState('');
+  const [pubMode, setPubMode] = useState<'premier_arrive' | 'anciennete'>('premier_arrive');
   const [claiming, setClaiming] = useState<string | null>(null);
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -63,11 +76,14 @@ export const OpenShiftsPanel = ({ mode }: { mode: 'admin' | 'employee' }): JSX.E
 
   const publish = async (): Promise<void> => {
     try {
-      await axios.post(`${API}/open-shifts`, { date, start, end, department, positions, note }, { headers });
-      toast.success('Quart publié — tous les employés sont notifiés. Premier arrivé, premier servi !');
+      await axios.post(`${API}/open-shifts`, { date, start, end, department, positions, note, mode: pubMode }, { headers });
+      toast.success(pubMode === 'anciennete'
+        ? 'Quart publié — les candidatures seront classées par ancienneté.'
+        : 'Quart publié — tous les employés sont notifiés. Premier arrivé, premier servi !');
       setDialogOpen(false);
       setNote('');
       setPositions([]);
+      setPubMode('premier_arrive');
       void refresh();
     } catch (err) {
       const detail = axios.isAxiosError(err) && err.response ? (err.response.data as { detail?: unknown }).detail : null;
@@ -78,11 +94,13 @@ export const OpenShiftsPanel = ({ mode }: { mode: 'admin' | 'employee' }): JSX.E
   const claim = async (s: OpenShift): Promise<void> => {
     setClaiming(s.id);
     try {
-      await axios.post(`${API}/open-shifts/${s.id}/claim`, {
+      const res = await axios.post<{ ok: boolean; applied?: boolean }>(`${API}/open-shifts/${s.id}/claim`, {
         position: me?.position ?? '',
         employee_name: me ? `${me.firstName} ${me.lastName}` : currentUser?.name ?? '',
       }, { headers });
-      toast.success(`Le quart du ${s.date} est à vous ! Il apparaît maintenant dans votre horaire.`);
+      toast.success(res.data.applied
+        ? 'Candidature envoyée ! Le quart sera attribué selon l\'ancienneté.'
+        : `Le quart du ${s.date} est à vous ! Il apparaît maintenant dans votre horaire.`);
       void refresh();
     } catch (err) {
       const detail = axios.isAxiosError(err) && err.response ? (err.response.data as { detail?: unknown }).detail : null;
@@ -90,6 +108,17 @@ export const OpenShiftsPanel = ({ mode }: { mode: 'admin' | 'employee' }): JSX.E
       void refresh();
     }
     setClaiming(null);
+  };
+
+  const award = async (s: OpenShift, employeeId: string, name: string): Promise<void> => {
+    try {
+      await axios.post(`${API}/open-shifts/${s.id}/award`, { employee_id: employeeId }, { headers });
+      toast.success(`Quart attribué à ${name}.`);
+      void refresh();
+    } catch (err) {
+      const detail = axios.isAxiosError(err) && err.response ? (err.response.data as { detail?: unknown }).detail : null;
+      toast.error(typeof detail === 'string' ? detail : 'Attribution impossible.');
+    }
   };
 
   const cancel = async (id: string): Promise<void> => {
@@ -123,25 +152,52 @@ export const OpenShiftsPanel = ({ mode }: { mode: 'admin' | 'employee' }): JSX.E
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
         {openOnes.map((s) => {
           const eligible = !s.positions.length || !me || s.positions.includes(me.position);
+          const seniority = s.mode === 'anciennete';
+          const sortedApplicants = [...(s.applicants ?? [])].sort((a, b) => (a.hire_date || '9999') < (b.hire_date || '9999') ? -1 : 1);
           return (
             <div key={s.id} data-testid={`open-shift-card-${s.id}`} className="bg-white rounded-xl border border-slate-200 p-4">
               <p className="font-heading font-bold text-slate-900 text-sm capitalize">{fmtDate(s.date)}</p>
               <p className="text-sm text-slate-600 mt-0.5">{s.start} – {s.end} · {s.department}</p>
+              {seniority && (
+                <p data-testid={`seniority-badge-${s.id}`} className="text-[10px] font-bold text-violet-700 bg-violet-50 border border-violet-200 rounded-full px-2 py-0.5 inline-flex items-center gap-1 mt-1">
+                  <Medal className="w-3 h-3" /> Attribution par ancienneté
+                </p>
+              )}
               {s.positions.length > 0 && (
                 <p className="text-[11px] text-bronze-700 font-semibold mt-1">Réservé : {s.positions.join(', ')}</p>
               )}
               {s.note && <p className="text-xs text-slate-500 mt-1">{s.note}</p>}
+              {mode === 'admin' && seniority && (
+                <div className="mt-2 space-y-1" data-testid={`applicants-list-${s.id}`}>
+                  {sortedApplicants.length === 0 && <p className="text-[11px] text-slate-400">Aucune candidature pour l'instant.</p>}
+                  {sortedApplicants.map((a, idx) => (
+                    <div key={a.employee_id} className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 border border-slate-200 px-2.5 py-1.5">
+                      <p className="text-xs text-slate-700 truncate">
+                        <span className="font-semibold">{idx + 1}. {a.name}</span>
+                        {a.hire_date && <span className="text-slate-400"> · depuis {a.hire_date.slice(0, 10)}</span>}
+                      </p>
+                      <Button data-testid={`award-shift-${s.id}-${a.employee_id}`} size="sm" onClick={() => void award(s, a.employee_id, a.name)} className="rounded-full bg-violet-600 hover:bg-violet-700 text-white text-[11px] h-6 px-2.5 shrink-0">
+                        Attribuer
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="mt-3 flex gap-2">
                 {mode === 'employee' ? (
                   <Button
                     data-testid={`claim-shift-${s.id}`}
                     size="sm"
-                    disabled={claiming === s.id || !eligible}
+                    disabled={claiming === s.id || !eligible || (seniority && s.applied)}
                     onClick={() => void claim(s)}
-                    className="rounded-full bg-emerald-600 hover:bg-emerald-700 text-white flex-1"
+                    className={`rounded-full text-white flex-1 ${seniority ? 'bg-violet-600 hover:bg-violet-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}
                   >
                     <HandMetal className="w-3.5 h-3.5 mr-1.5" />
-                    {eligible ? (claiming === s.id ? 'Réclamation…' : 'Je le prends !') : 'Poste non admissible'}
+                    {!eligible
+                      ? 'Poste non admissible'
+                      : seniority
+                        ? (s.applied ? 'Candidature envoyée ✓' : (claiming === s.id ? 'Envoi…' : 'Postuler (ancienneté)'))
+                        : (claiming === s.id ? 'Réclamation…' : 'Je le prends !')}
                   </Button>
                 ) : (
                   <Button data-testid={`cancel-open-shift-${s.id}`} size="sm" variant="outline" onClick={() => void cancel(s.id)} className="rounded-full text-xs text-red-600">
@@ -206,6 +262,28 @@ export const OpenShiftsPanel = ({ mode }: { mode: 'admin' | 'employee' }): JSX.E
                   </button>
                 ))}
               </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Mode d'attribution</Label>
+              <div className="flex gap-2">
+                <button
+                  data-testid="open-shift-mode-fifo"
+                  onClick={() => setPubMode('premier_arrive')}
+                  className={`flex-1 px-3 py-2 rounded-xl text-xs font-semibold border transition-colors ${pubMode === 'premier_arrive' ? 'bg-sky-600 text-white border-sky-600' : 'bg-white text-slate-600 border-slate-200 hover:border-sky-300'}`}
+                >
+                  Premier arrivé, premier servi
+                </button>
+                <button
+                  data-testid="open-shift-mode-seniority"
+                  onClick={() => setPubMode('anciennete')}
+                  className={`flex-1 px-3 py-2 rounded-xl text-xs font-semibold border transition-colors ${pubMode === 'anciennete' ? 'bg-violet-600 text-white border-violet-600' : 'bg-white text-slate-600 border-slate-200 hover:border-violet-300'}`}
+                >
+                  Par ancienneté (candidatures)
+                </button>
+              </div>
+              {pubMode === 'anciennete' && (
+                <p className="text-[11px] text-slate-400">Les employés postulent ; vous attribuez le quart en voyant les candidatures classées par date d'embauche.</p>
+              )}
             </div>
             <div className="space-y-1.5">
               <Label>Note (facultatif)</Label>

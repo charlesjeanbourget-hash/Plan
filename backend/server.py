@@ -22,6 +22,8 @@ import base64
 import resend
 import bcrypt
 import jwt
+import pyotp
+import qrcode
 from typing import Optional
 from pathlib import Path
 from pydantic import BaseModel, Field
@@ -158,6 +160,9 @@ def user_public(doc: dict) -> dict:
         "is_temporary_password": doc.get("is_temporary_password", False),
         "suspended": doc.get("suspended", False),
         "privacy_accepted_at": doc.get("privacy_accepted_at"),
+        "mfa_enabled": doc.get("mfa_enabled", False),
+        "module_overrides": doc.get("module_overrides", {}),
+        "report_favorites": doc.get("report_favorites", []),
         "created_at": doc.get("created_at", ""),
     }
 
@@ -233,6 +238,93 @@ async def auth_login(payload: LoginIn, request: Request):
     if user.get("suspended"):
         raise HTTPException(status_code=403, detail="Compte suspendu. Contactez votre superadministrateur.")
     await db.login_attempts.delete_one({"identifier": identifier})
+    if user.get("mfa_enabled"):
+        mfa_token = jwt.encode({"sub": user["id"],
+                                "exp": datetime.now(timezone.utc) + timedelta(minutes=5), "type": "mfa"},
+                               get_jwt_secret(), algorithm=JWT_ALGORITHM)
+        return {"mfa_required": True, "mfa_token": mfa_token}
+    suspicious = await is_new_ip_login(user["id"], client_ip(request))
+    await record_login_event(user, "CONNEXION", request, flagged_new_ip=suspicious)
+    if suspicious:
+        asyncio.create_task(alert_suspicious_login(user, client_ip(request), request))
+    return {"access_token": create_access_token(user), "user": user_public(user)}
+
+
+class MfaCodeIn(BaseModel):
+    code: str
+
+
+class MfaVerifyIn(BaseModel):
+    mfa_token: str
+    code: str
+
+
+def _totp_valid(secret: str, code: str) -> bool:
+    try:
+        return pyotp.TOTP(secret).verify(code.strip().replace(" ", ""), valid_window=1)
+    except Exception:
+        return False
+
+
+@api_router.post("/auth/mfa/setup")
+async def mfa_setup(user: dict = Depends(get_current_user)):
+    secret = pyotp.random_base32()
+    uri = pyotp.totp.TOTP(secret).provisioning_uri(name=user["email"], issuer_name="Arrière Plan")
+    img = qrcode.make(uri)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    qr_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+    enc = get_fernet().encrypt(secret.encode("utf-8")).decode("utf-8")
+    await db.users.update_one({"id": user["id"]}, {"$set": {"mfa_secret_pending": enc}})
+    return {"secret": secret, "otpauth_uri": uri, "qr_base64": qr_b64}
+
+
+@api_router.post("/auth/mfa/enable")
+async def mfa_enable(payload: MfaCodeIn, user: dict = Depends(get_current_user)):
+    enc = user.get("mfa_secret_pending")
+    if not enc:
+        raise HTTPException(status_code=400, detail="Aucune configuration MFA en cours — relancez l'activation.")
+    secret = get_fernet().decrypt(enc.encode("utf-8")).decode("utf-8")
+    if not _totp_valid(secret, payload.code):
+        raise HTTPException(status_code=400, detail="Code invalide — vérifiez votre application d'authentification.")
+    await db.users.update_one({"id": user["id"]}, {
+        "$set": {"mfa_enabled": True, "mfa_secret": enc}, "$unset": {"mfa_secret_pending": ""}})
+    await log_audit(user["email"], user["role"], "MFA_ACTIVEE", "utilisateur", user["id"],
+                    "Vérification en 2 étapes activée", user.get("pharmacy_id") or "")
+    return {"ok": True, "mfa_enabled": True}
+
+
+@api_router.post("/auth/mfa/disable")
+async def mfa_disable(payload: MfaCodeIn, user: dict = Depends(get_current_user)):
+    enc = user.get("mfa_secret")
+    if not user.get("mfa_enabled") or not enc:
+        raise HTTPException(status_code=400, detail="La vérification en 2 étapes n'est pas activée.")
+    secret = get_fernet().decrypt(enc.encode("utf-8")).decode("utf-8")
+    if not _totp_valid(secret, payload.code):
+        raise HTTPException(status_code=400, detail="Code invalide.")
+    await db.users.update_one({"id": user["id"]}, {
+        "$set": {"mfa_enabled": False}, "$unset": {"mfa_secret": "", "mfa_secret_pending": ""}})
+    await log_audit(user["email"], user["role"], "MFA_DESACTIVEE", "utilisateur", user["id"],
+                    "Vérification en 2 étapes désactivée", user.get("pharmacy_id") or "")
+    return {"ok": True, "mfa_enabled": False}
+
+
+@api_router.post("/auth/mfa/verify")
+async def mfa_verify(payload: MfaVerifyIn, request: Request):
+    try:
+        decoded = jwt.decode(payload.mfa_token, get_jwt_secret(), algorithms=[JWT_ALGORITHM])
+        if decoded.get("type") != "mfa":
+            raise HTTPException(status_code=401, detail="Jeton invalide.")
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Délai expiré — reconnectez-vous.")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Jeton invalide.")
+    user = await db.users.find_one({"id": decoded["sub"]}, {"_id": 0})
+    if not user or not user.get("mfa_enabled") or not user.get("mfa_secret"):
+        raise HTTPException(status_code=401, detail="Utilisateur introuvable.")
+    secret = get_fernet().decrypt(user["mfa_secret"].encode("utf-8")).decode("utf-8")
+    if not _totp_valid(secret, payload.code):
+        raise HTTPException(status_code=401, detail="Code invalide — réessayez.")
     suspicious = await is_new_ip_login(user["id"], client_ip(request))
     await record_login_event(user, "CONNEXION", request, flagged_new_ip=suspicious)
     if suspicious:
@@ -1653,6 +1745,7 @@ class ProfileIn(BaseModel):
     department: Optional[str] = None
     hourly_rate: Optional[float] = None
     birth_date: Optional[str] = None
+    custom_values: Optional[dict] = None
 
 
 def sanitize_profile(doc: dict) -> dict:
@@ -1733,6 +1826,11 @@ async def update_profile(employee_id: str, payload: ProfileIn, user: dict = Depe
             avail[d] = {"available": bool(day.get("available", True)),
                         "start": str(day.get("start", "08:00")), "end": str(day.get("end", "21:00"))}
         patch["availability"] = avail
+    if "custom_values" in patch:
+        if user["role"] not in ("admin", "manager", "superadmin"):
+            patch.pop("custom_values")
+        else:
+            patch["custom_values"] = {str(k)[:60]: str(v)[:200] for k, v in list((patch["custom_values"] or {}).items())[:30]}
     patch["updated_at"] = datetime.now(timezone.utc).isoformat()
     patch["updated_by"] = user["email"]
     await db.employee_profiles.update_one({"id": doc["id"]}, {"$set": patch})
@@ -2313,6 +2411,7 @@ class ScheduleSettingsIn(BaseModel):
     branch_budgets: list | None = None
     priorities: dict | None = None
     priority_sets: list | None = None
+    auto_break: dict | None = None
 
 
 def _sanitize_traffic(raw: dict) -> dict:
@@ -2333,7 +2432,8 @@ async def get_schedule_settings(user: dict = Depends(get_current_user)):
             "dept_budgets": (doc or {}).get("dept_budgets", {}),
             "branch_budgets": (doc or {}).get("branch_budgets", []),
             "priorities": (doc or {}).get("priorities", {}),
-            "priority_sets": (doc or {}).get("priority_sets", [])}
+            "priority_sets": (doc or {}).get("priority_sets", []),
+            "auto_break": (doc or {}).get("auto_break", {"enabled": False, "threshold_hours": 6, "minutes": 30, "paid": False})}
 
 
 @api_router.put("/schedule/settings")
@@ -2411,6 +2511,16 @@ async def set_schedule_settings(payload: ScheduleSettingsIn, principal: dict = D
             sets.append({"id": str(ps.get("id") or uuid.uuid4()), "name": name[:60],
                          "priorities": _sanitize_priorities(ps.get("priorities") or {})})
         update["priority_sets"] = sets
+    if payload.auto_break is not None:
+        ab = payload.auto_break
+        try:
+            update["auto_break"] = {
+                "enabled": bool(ab.get("enabled")),
+                "threshold_hours": max(1.0, min(16.0, float(ab.get("threshold_hours") or 6))),
+                "minutes": max(5, min(120, int(float(ab.get("minutes") or 30)))),
+                "paid": bool(ab.get("paid"))}
+        except (TypeError, ValueError, AttributeError):
+            raise HTTPException(status_code=400, detail="Réglage de pauses automatiques invalide.")
     await db.schedule_settings.update_one({"pharmacy_id": pid}, {"$set": update}, upsert=True)
     saved = await db.schedule_settings.find_one({"pharmacy_id": pid}, {"_id": 0})
     periods_note = f", {len(update['traffic_periods'])} période(s)" if "traffic_periods" in update else ""
@@ -2421,7 +2531,8 @@ async def set_schedule_settings(payload: ScheduleSettingsIn, principal: dict = D
             "dept_budgets": saved.get("dept_budgets", {}),
             "branch_budgets": saved.get("branch_budgets", []),
             "priorities": saved.get("priorities", {}),
-            "priority_sets": saved.get("priority_sets", [])}
+            "priority_sets": saved.get("priority_sets", []),
+            "auto_break": saved.get("auto_break", {"enabled": False, "threshold_hours": 6, "minutes": 30, "paid": False})}
 
 
 # ==================== Quarts (calendrier synchronisé multi-appareils) ====================
@@ -2439,6 +2550,7 @@ class ShiftIn(BaseModel):
     branch_id: str = ""
     station: str = ""
     notes: str = ""
+    training: bool = False
 
 
 class ShiftPatchIn(BaseModel):
@@ -2453,6 +2565,7 @@ class ShiftPatchIn(BaseModel):
     branch_id: Optional[str] = None
     station: Optional[str] = None
     notes: Optional[str] = None
+    training: Optional[bool] = None
 
 
 class ShiftsBulkIn(BaseModel):
@@ -2478,6 +2591,7 @@ def _shift_doc(s: ShiftIn, pid: str) -> dict:
             "resource_ids": [str(r) for r in (s.resource_ids or [])][:20],
             "ai_generated": bool(s.ai_generated), "proposal_id": s.proposal_id or "",
             "branch_id": s.branch_id or "", "station": (s.station or "")[:80], "notes": (s.notes or "")[:500],
+            "training": bool(s.training),
             "updated_at": datetime.now(timezone.utc).isoformat()}
 
 
@@ -3418,6 +3532,7 @@ class OpenShiftIn(BaseModel):
     branch_id: str = ""
     positions: list = []
     note: str = ""
+    mode: str = "premier_arrive"
 
 
 class OpenShiftClaimIn(BaseModel):
@@ -3434,13 +3549,16 @@ async def create_open_shift(payload: OpenShiftIn, principal: dict = Depends(get_
            "department": payload.department if payload.department in DEPARTMENTS_BE else "Général",
            "branch_id": payload.branch_id or "", "positions": [str(p)[:60] for p in payload.positions][:12],
            "note": (payload.note or "")[:300], "status": "open",
+           "mode": payload.mode if payload.mode in ("premier_arrive", "anciennete") else "premier_arrive",
+           "applicants": [],
            "claimed_by": None, "claimed_by_name": None, "claimed_at": None,
            "created_by": principal["email"], "created_at": datetime.now(timezone.utc).isoformat()}
     await db.open_shifts.insert_one({**doc})
     pos_txt = f" — réservé : {', '.join(doc['positions'])}" if doc["positions"] else ""
+    mode_txt = "Priorité à l'ancienneté — postulez !" if doc["mode"] == "anciennete" else "Premier arrivé, premier servi !"
     await db.notifications.insert_one({
         "id": str(uuid.uuid4()), "pharmacy_id": pid, "target_roles": ["employee"],
-        "title": "Nouveau quart à combler", "detail": f"{payload.date} de {payload.start} à {payload.end} ({doc['department']}){pos_txt}. Premier arrivé, premier servi !",
+        "title": "Nouveau quart à combler", "detail": f"{payload.date} de {payload.start} à {payload.end} ({doc['department']}){pos_txt}. {mode_txt}",
         "module": "scheduling", "icon": "schedule", "tone": "sky",
         "created_at": datetime.now(timezone.utc).isoformat()})
     await log_audit(principal["email"], principal["role"], "QUART_OUVERT_PUBLIE", "quart_ouvert", doc["id"],
@@ -3461,8 +3579,36 @@ async def list_open_shifts(user: dict = Depends(get_current_user)):
             continue
         if not is_admin and d["status"] == "claimed" and d.get("claimed_by") != user.get("employee_id"):
             continue
+        if not is_admin:
+            applicants = d.pop("applicants", None) or []
+            d["applied"] = any(a.get("employee_id") == user.get("employee_id") for a in applicants)
+            d["applicant_count"] = len(applicants)
         out.append(d)
     return out
+
+
+async def _assign_open_shift(doc: dict, pid: str, emp_id: str, name: str, position: str, by: str) -> dict:
+    claimed = await db.open_shifts.find_one_and_update(
+        {"id": doc["id"], "pharmacy_id": pid, "status": "open"},
+        {"$set": {"status": "claimed", "claimed_by": emp_id, "claimed_by_name": name,
+                  "claimed_position": position or "",
+                  "claimed_at": datetime.now(timezone.utc).isoformat()}},
+        projection={"_id": 0})
+    if not claimed:
+        raise HTTPException(status_code=409, detail="Trop tard — ce quart vient d'être attribué.")
+    shift_doc = {"id": str(uuid.uuid4()), "pharmacy_id": pid, "employee_id": emp_id,
+                 "date": doc["date"], "start": doc["start"], "end": doc["end"],
+                 "department": doc["department"], "resource_ids": [], "ai_generated": False,
+                 "proposal_id": "", "branch_id": doc.get("branch_id") or "",
+                 "notes": "Quart ouvert réclamé", "updated_at": datetime.now(timezone.utc).isoformat()}
+    await db.shifts.insert_one({**shift_doc})
+    await _mark_shifts_ready(pid)
+    await _notify_shift_change(pid, emp_id, "Quart confirmé",
+                               f"Le quart du {doc['date']} de {doc['start']} à {doc['end']} ({doc['department']}) est à vous.",
+                               "emerald", module="scheduling")
+    await log_audit(by, "system", "QUART_OUVERT_RECLAME", "quart_ouvert", doc["id"],
+                    f"{name} obtient le quart du {doc['date']} {doc['start']}-{doc['end']}", pid)
+    return shift_doc
 
 
 @api_router.post("/open-shifts/{os_id}/claim")
@@ -3482,29 +3628,51 @@ async def claim_open_shift(os_id: str, payload: OpenShiftClaimIn, user: dict = D
     if leave:
         raise HTTPException(status_code=400, detail="Vous êtes en congé approuvé ce jour-là.")
     name = payload.employee_name or user.get("name") or user["email"]
-    claimed = await db.open_shifts.find_one_and_update(
-        {"id": os_id, "pharmacy_id": pid, "status": "open"},
-        {"$set": {"status": "claimed", "claimed_by": emp_id, "claimed_by_name": name,
-                  "claimed_position": payload.position or "",
-                  "claimed_at": datetime.now(timezone.utc).isoformat()}},
-        projection={"_id": 0})
-    if not claimed:
-        raise HTTPException(status_code=409, detail="Trop tard — ce quart vient d'être réclamé par un collègue.")
-    shift_doc = {"id": str(uuid.uuid4()), "pharmacy_id": pid, "employee_id": emp_id,
-                 "date": doc["date"], "start": doc["start"], "end": doc["end"],
-                 "department": doc["department"], "resource_ids": [], "ai_generated": False,
-                 "proposal_id": "", "branch_id": doc.get("branch_id") or "",
-                 "notes": "Quart ouvert réclamé", "updated_at": datetime.now(timezone.utc).isoformat()}
-    await db.shifts.insert_one({**shift_doc})
-    await _mark_shifts_ready(pid)
+    if doc.get("mode") == "anciennete":
+        if doc["status"] != "open":
+            raise HTTPException(status_code=409, detail="Ce quart a déjà été attribué.")
+        if any(a.get("employee_id") == emp_id for a in doc.get("applicants") or []):
+            return {"ok": True, "applied": True, "already": True}
+        prof = await db.employee_profiles.find_one({"pharmacy_id": pid, "employee_id": emp_id},
+                                                   {"_id": 0, "hire_date": 1}) or {}
+        applicant = {"employee_id": emp_id, "name": name, "position": payload.position or "",
+                     "hire_date": prof.get("hire_date") or "",
+                     "applied_at": datetime.now(timezone.utc).isoformat()}
+        await db.open_shifts.update_one({"id": os_id, "pharmacy_id": pid, "status": "open"},
+                                        {"$push": {"applicants": applicant}})
+        await _notify_admins(pid, "Nouvelle candidature — quart par ancienneté",
+                             f"{name} postule pour le quart du {doc['date']} de {doc['start']} à {doc['end']} ({doc['department']}).",
+                             module="scheduling", tone="sky")
+        await log_audit(user["email"], user["role"], "QUART_OUVERT_CANDIDATURE", "quart_ouvert", os_id,
+                        f"{name} a postulé (mode ancienneté)", pid)
+        return {"ok": True, "applied": True}
+    shift_doc = await _assign_open_shift(doc, pid, emp_id, name, payload.position or "", user["email"])
     await _notify_admins(pid, "Quart ouvert réclamé",
                          f"{name} a pris le quart du {doc['date']} de {doc['start']} à {doc['end']} ({doc['department']}).",
                          module="scheduling", tone="emerald")
-    await _notify_shift_change(pid, emp_id, "Quart confirmé",
-                               f"Le quart du {doc['date']} de {doc['start']} à {doc['end']} ({doc['department']}) est à vous.",
-                               "emerald", module="scheduling")
-    await log_audit(user["email"], user["role"], "QUART_OUVERT_RECLAME", "quart_ouvert", os_id,
-                    f"{name} a réclamé le quart du {doc['date']} {doc['start']}-{doc['end']}", pid)
+    return {"ok": True, "shift": shift_doc}
+
+
+class OpenShiftAwardIn(BaseModel):
+    employee_id: str
+
+
+@api_router.post("/open-shifts/{os_id}/award")
+async def award_open_shift(os_id: str, payload: OpenShiftAwardIn, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    doc = await db.open_shifts.find_one({"id": os_id, "pharmacy_id": pid}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Quart introuvable.")
+    applicant = next((a for a in doc.get("applicants") or [] if a.get("employee_id") == payload.employee_id), None)
+    if not applicant:
+        raise HTTPException(status_code=400, detail="Cet employé n'a pas postulé pour ce quart.")
+    shift_doc = await _assign_open_shift(doc, pid, applicant["employee_id"], applicant["name"],
+                                         applicant.get("position") or "", principal["email"])
+    for a in doc.get("applicants") or []:
+        if a["employee_id"] != applicant["employee_id"]:
+            await _notify_shift_change(pid, a["employee_id"], "Quart attribué à un(e) collègue",
+                                       f"Le quart du {doc['date']} de {doc['start']} à {doc['end']} a été attribué selon l'ancienneté.",
+                                       "amber", module="scheduling")
     return {"ok": True, "shift": shift_doc}
 
 
@@ -5674,6 +5842,14 @@ async def send_morning_digest(date_str: str = "", only_pharmacy: str = "") -> in
         names = {p["employee_id"]: (p.get("employee_name") or "").strip() for p in profiles}
         day_shifts = sorted(data["shifts"], key=lambda x: (x.get("start") or "", x.get("end") or ""))
         lines = [f"☀️ Bonjour l'équipe ! Programme du {_fr_date_label(today)} :"]
+        try:
+            weather_days = await get_weather_forecast(pid)
+            wtoday = next((w for w in weather_days if w["date"] == today), None)
+            if wtoday:
+                lines.append(f"{wtoday['icon']} Météo : {wtoday['label']}, {wtoday['tmax']}° / {wtoday['tmin']}°"
+                             + (f" · pluie {wtoday['precip']} %" if wtoday["precip"] >= 30 else ""))
+        except Exception:
+            pass
         if day_shifts:
             lines.append(f"\n👥 Quarts ({len(day_shifts)}) :")
             for s in day_shifts[:15]:
@@ -6852,8 +7028,648 @@ async def startup_tasks():
     scheduler.add_job(shift_reminder_job, CronTrigger(hour=18, minute=0))
     scheduler.add_job(birthday_wishes_job, CronTrigger(hour=7, minute=5))
     scheduler.add_job(morning_digest_job, CronTrigger(hour=6, minute=45))
+    scheduler.add_job(scheduled_reports_job, CronTrigger(hour=6, minute=0))
     scheduler.add_job(leave_carryover_job, CronTrigger(month=1, day=1, hour=0, minute=45))
     scheduler.start()
+
+
+# ---------------------- Météo quotidienne (Open-Meteo, sans clé) ----------------------
+
+WEATHER_CODES = {
+    0: ("☀️", "ensoleillé"), 1: ("🌤️", "plutôt ensoleillé"), 2: ("⛅", "partiellement nuageux"), 3: ("☁️", "nuageux"),
+    45: ("🌫️", "brouillard"), 48: ("🌫️", "brouillard givrant"), 51: ("🌦️", "bruine légère"), 53: ("🌦️", "bruine"),
+    55: ("🌧️", "bruine forte"), 56: ("🌧️", "bruine verglaçante"), 57: ("🌧️", "bruine verglaçante"),
+    61: ("🌧️", "pluie légère"), 63: ("🌧️", "pluie"), 65: ("🌧️", "pluie forte"), 66: ("🌧️", "pluie verglaçante"),
+    67: ("🌧️", "pluie verglaçante"), 71: ("🌨️", "neige légère"), 73: ("🌨️", "neige"), 75: ("❄️", "neige forte"),
+    77: ("❄️", "grésil"), 80: ("🌦️", "averses"), 81: ("🌧️", "averses"), 82: ("⛈️", "fortes averses"),
+    85: ("🌨️", "averses de neige"), 86: ("🌨️", "averses de neige"), 95: ("⛈️", "orage"),
+    96: ("⛈️", "orage avec grêle"), 99: ("⛈️", "orage avec grêle")}
+
+
+async def get_weather_forecast(pid: str) -> list:
+    today = datetime.now(timezone.utc).astimezone(MONTREAL_TZ).date().isoformat()
+    cached = await db.weather_cache.find_one({"pharmacy_id": pid, "fetched_date": today}, {"_id": 0})
+    if cached:
+        return cached.get("days") or []
+    settings = await db.pharmacy_settings.find_one({"pharmacy_id": pid}, {"_id": 0}) or {}
+    address = settings.get("address") or DEFAULT_PHARMACY_ADDRESS
+    parts = [p.strip() for p in address.split(",") if p.strip()]
+    city = parts[1] if len(parts) >= 2 else (parts[0] if parts else "Montréal")
+    lat, lon = 45.5019, -73.5674
+    try:
+        geo = await asyncio.to_thread(requests.get, "https://geocoding-api.open-meteo.com/v1/search",
+                                      params={"name": city, "count": 1, "language": "fr"}, timeout=8)
+        results = (geo.json().get("results") or [])
+        if results:
+            lat, lon = results[0]["latitude"], results[0]["longitude"]
+    except Exception as exc:
+        logger.warning(f"Géocodage météo échoué ({city}) : {exc}")
+    try:
+        fc = await asyncio.to_thread(requests.get, "https://api.open-meteo.com/v1/forecast", params={
+            "latitude": lat, "longitude": lon,
+            "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max",
+            "timezone": "America/Montreal", "forecast_days": 7}, timeout=8)
+        daily = fc.json().get("daily") or {}
+        dates = daily.get("time") or []
+        codes = daily.get("weather_code") or []
+        tmaxs = daily.get("temperature_2m_max") or []
+        tmins = daily.get("temperature_2m_min") or []
+        precips = daily.get("precipitation_probability_max") or []
+        days = []
+        for i, d in enumerate(dates):
+            icon, label = WEATHER_CODES.get(int(codes[i] if i < len(codes) else 0), ("🌡️", ""))
+            days.append({"date": d, "icon": icon, "label": label,
+                         "tmax": round(float(tmaxs[i])) if i < len(tmaxs) else 0,
+                         "tmin": round(float(tmins[i])) if i < len(tmins) else 0,
+                         "precip": int(precips[i] or 0) if i < len(precips) else 0})
+        if days:
+            await db.weather_cache.update_one(
+                {"pharmacy_id": pid},
+                {"$set": {"pharmacy_id": pid, "fetched_date": today, "city": city, "days": days}}, upsert=True)
+        return days
+    except Exception as exc:
+        logger.warning(f"Météo indisponible : {exc}")
+        return []
+
+
+@api_router.get("/weather")
+async def get_weather(user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    return {"days": await get_weather_forecast(pid)}
+
+
+# ==================== RH avancé : SST, champs personnalisés, documents, banque d'heures, annonces, signatures ====================
+
+class SstIncidentIn(BaseModel):
+    date: str
+    incident_type: str = "incident"
+    location: str = ""
+    description: str
+    severity: str = "mineure"
+    witness: str = ""
+
+
+class SstPatchIn(BaseModel):
+    status: Optional[str] = None
+    corrective_actions: Optional[str] = None
+
+
+@api_router.get("/sst/incidents")
+async def list_sst_incidents(user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    q: dict = {"pharmacy_id": pid}
+    if user["role"] == "employee":
+        q["employee_id"] = user.get("employee_id") or "__none__"
+    return await db.sst_incidents.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
+
+
+@api_router.post("/sst/incidents")
+async def create_sst_incident(payload: SstIncidentIn, user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    if payload.incident_type not in ("accident", "incident", "premiers_soins", "quasi_accident"):
+        raise HTTPException(status_code=400, detail="Type de déclaration invalide.")
+    if payload.severity not in ("mineure", "moderee", "majeure"):
+        raise HTTPException(status_code=400, detail="Gravité invalide.")
+    if not (payload.description or "").strip():
+        raise HTTPException(status_code=400, detail="La description est requise.")
+    doc = {"id": str(uuid.uuid4()), "pharmacy_id": pid,
+           "employee_id": user.get("employee_id") or "", "employee_name": user.get("name") or user["email"],
+           "date": payload.date, "incident_type": payload.incident_type,
+           "location": (payload.location or "")[:120], "description": payload.description.strip()[:2000],
+           "severity": payload.severity, "witness": (payload.witness or "")[:120],
+           "status": "ouvert", "corrective_actions": "",
+           "created_by": user["email"], "created_at": datetime.now(timezone.utc).isoformat()}
+    await db.sst_incidents.insert_one({**doc})
+    type_labels = {"accident": "Accident de travail", "incident": "Incident", "premiers_soins": "Premiers soins", "quasi_accident": "Quasi-accident"}
+    await _notify_admins(pid, "Déclaration santé & sécurité",
+                         f"{doc['employee_name']} : {type_labels[payload.incident_type]} ({payload.severity}) le {payload.date}.",
+                         module="sst", tone="amber")
+    await log_audit(user["email"], user["role"], "SST_DECLARATION", "sst", doc["id"],
+                    f"{type_labels[payload.incident_type]} — gravité {payload.severity}", pid)
+    return doc
+
+
+@api_router.patch("/sst/incidents/{sst_id}")
+async def patch_sst_incident(sst_id: str, payload: SstPatchIn, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    update: dict = {}
+    if payload.status is not None:
+        if payload.status not in ("ouvert", "en_analyse", "clos"):
+            raise HTTPException(status_code=400, detail="Statut invalide.")
+        update["status"] = payload.status
+    if payload.corrective_actions is not None:
+        update["corrective_actions"] = payload.corrective_actions[:2000]
+    if not update:
+        raise HTTPException(status_code=400, detail="Aucun changement fourni.")
+    doc = await db.sst_incidents.find_one_and_update(
+        {"id": sst_id, "pharmacy_id": pid}, {"$set": update},
+        projection={"_id": 0}, return_document=ReturnDocument.AFTER)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Déclaration introuvable.")
+    if doc.get("employee_id") and payload.status:
+        labels = {"ouvert": "rouverte", "en_analyse": "en cours d'analyse", "clos": "close"}
+        await _notify_shift_change(pid, doc["employee_id"], "Suivi de votre déclaration SST",
+                                   f"Votre déclaration du {doc['date']} est maintenant {labels.get(payload.status, payload.status)}.",
+                                   "sky", module="sst")
+    return doc
+
+
+class CustomFieldsIn(BaseModel):
+    fields: list
+
+
+@api_router.get("/hr/custom-fields")
+async def get_custom_fields(user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    doc = await db.hr_custom_fields.find_one({"pharmacy_id": pid}, {"_id": 0})
+    return {"fields": (doc or {}).get("fields", [])}
+
+
+@api_router.put("/hr/custom-fields")
+async def set_custom_fields(payload: CustomFieldsIn, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    fields = []
+    for f in payload.fields[:12]:
+        if not isinstance(f, dict):
+            continue
+        label = str(f.get("label") or "").strip()[:60]
+        if not label:
+            continue
+        ftype = f.get("type") if f.get("type") in ("texte", "date", "choix") else "texte"
+        fields.append({"id": f.get("id") or str(uuid.uuid4()), "label": label, "type": ftype,
+                       "options": [str(o)[:40] for o in (f.get("options") or []) if str(o).strip()][:10]})
+    await db.hr_custom_fields.update_one({"pharmacy_id": pid},
+                                         {"$set": {"pharmacy_id": pid, "fields": fields}}, upsert=True)
+    await log_audit(principal["email"], principal["role"], "CHAMPS_RH_MODIFIES", "rh", pid,
+                    f"{len(fields)} champ(s) RH personnalisé(s) défini(s)", pid)
+    return {"fields": fields}
+
+
+class DocRequestIn(BaseModel):
+    doc_type: str
+    note: str = ""
+
+
+class DocRequestPatchIn(BaseModel):
+    status: str
+    reply_note: str = ""
+
+
+@api_router.get("/document-requests")
+async def list_document_requests(user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    q: dict = {"pharmacy_id": pid}
+    if user["role"] == "employee":
+        q["employee_id"] = user.get("employee_id") or "__none__"
+    return await db.document_requests.find(q, {"_id": 0}).sort("created_at", -1).to_list(300)
+
+
+@api_router.post("/document-requests")
+async def create_document_request(payload: DocRequestIn, user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    if not user.get("employee_id"):
+        raise HTTPException(status_code=400, detail="Aucun dossier employé associé à votre compte.")
+    doc = {"id": str(uuid.uuid4()), "pharmacy_id": pid,
+           "employee_id": user["employee_id"], "employee_name": user.get("name") or user["email"],
+           "doc_type": (payload.doc_type or "Attestation d'emploi")[:80], "note": (payload.note or "")[:500],
+           "status": "en_attente", "reply_note": "",
+           "created_at": datetime.now(timezone.utc).isoformat()}
+    await db.document_requests.insert_one({**doc})
+    await _notify_admins(pid, "Demande de document RH",
+                         f"{doc['employee_name']} demande : {doc['doc_type']}.", module="documents", tone="sky")
+    return doc
+
+
+@api_router.patch("/document-requests/{req_id}")
+async def patch_document_request(req_id: str, payload: DocRequestPatchIn, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    if payload.status not in ("en_attente", "en_traitement", "fournie", "refusee"):
+        raise HTTPException(status_code=400, detail="Statut invalide.")
+    doc = await db.document_requests.find_one_and_update(
+        {"id": req_id, "pharmacy_id": pid},
+        {"$set": {"status": payload.status, "reply_note": (payload.reply_note or "")[:500]}},
+        projection={"_id": 0}, return_document=ReturnDocument.AFTER)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Demande introuvable.")
+    labels = {"en_traitement": "est en traitement", "fournie": "est prête — voyez votre gestionnaire", "refusee": "a été refusée", "en_attente": "est en attente"}
+    await _notify_shift_change(pid, doc["employee_id"], "Votre demande de document",
+                               f"Votre demande « {doc['doc_type']} » {labels[payload.status]}."
+                               + (f" Note : {payload.reply_note}" if payload.reply_note else ""),
+                               "emerald" if payload.status == "fournie" else "sky", module="documents")
+    return doc
+
+
+class TimeBankIn(BaseModel):
+    employee_id: str
+    hours: float
+    reason: str = ""
+
+
+@api_router.get("/time-bank")
+async def get_time_bank(user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    if user["role"] == "employee":
+        eid = user.get("employee_id") or "__none__"
+        entries = await db.time_bank_entries.find({"pharmacy_id": pid, "employee_id": eid}, {"_id": 0}).sort("created_at", -1).to_list(100)
+        return {"balance": round(sum(e["hours"] for e in entries), 2), "entries": entries}
+    entries = await db.time_bank_entries.find({"pharmacy_id": pid}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    balances: dict = {}
+    for e in entries:
+        b = balances.setdefault(e["employee_id"], {"employee_id": e["employee_id"], "name": e.get("employee_name") or e["employee_id"], "balance": 0.0})
+        b["balance"] = round(b["balance"] + e["hours"], 2)
+    return {"balances": sorted(balances.values(), key=lambda x: x["name"]), "entries": entries[:50]}
+
+
+@api_router.post("/time-bank")
+async def add_time_bank_entry(payload: TimeBankIn, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    if not (-100 <= payload.hours <= 100) or payload.hours == 0:
+        raise HTTPException(status_code=400, detail="Heures invalides (entre −100 et 100, non nulles).")
+    prof = await db.employee_profiles.find_one({"pharmacy_id": pid, "employee_id": payload.employee_id},
+                                               {"_id": 0, "employee_name": 1})
+    doc = {"id": str(uuid.uuid4()), "pharmacy_id": pid, "employee_id": payload.employee_id,
+           "employee_name": (prof or {}).get("employee_name") or payload.employee_id,
+           "hours": round(payload.hours, 2), "reason": (payload.reason or "")[:200],
+           "created_by": principal["email"], "created_at": datetime.now(timezone.utc).isoformat()}
+    await db.time_bank_entries.insert_one({**doc})
+    verb = "créditées à" if payload.hours > 0 else "débitées de"
+    await _notify_shift_change(pid, payload.employee_id, "Banque d'heures mise à jour",
+                               f"{abs(payload.hours)} h {verb} votre banque d'heures{f' — {payload.reason}' if payload.reason else ''}.",
+                               "emerald" if payload.hours > 0 else "amber", module="timebank")
+    await log_audit(principal["email"], principal["role"], "BANQUE_HEURES", "banque_heures", doc["id"],
+                    f"{doc['employee_name']} : {payload.hours:+.2f} h ({payload.reason or 'sans motif'})", pid)
+    return doc
+
+
+class AnnouncementIn(BaseModel):
+    title: str
+    body: str = ""
+    pinned: bool = False
+
+
+@api_router.get("/announcements")
+async def list_announcements(user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    docs = await db.announcements.find({"pharmacy_id": pid}, {"_id": 0}).sort("created_at", -1).to_list(30)
+    return sorted(docs, key=lambda d: (not d.get("pinned"), ), reverse=False)
+
+
+@api_router.post("/announcements")
+async def create_announcement(payload: AnnouncementIn, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    if not (payload.title or "").strip():
+        raise HTTPException(status_code=400, detail="Le titre est requis.")
+    doc = {"id": str(uuid.uuid4()), "pharmacy_id": pid, "title": payload.title.strip()[:120],
+           "body": (payload.body or "").strip()[:2000], "pinned": bool(payload.pinned),
+           "author_name": principal.get("name") or principal["email"], "likes": [],
+           "created_at": datetime.now(timezone.utc).isoformat()}
+    await db.announcements.insert_one({**doc})
+    await db.notifications.insert_one({
+        "id": str(uuid.uuid4()), "pharmacy_id": pid, "target_roles": ["employee"],
+        "title": "Nouvelle annonce", "detail": doc["title"], "module": "dashboard", "tone": "sky",
+        "read_by": [], "created_at": datetime.now(timezone.utc).isoformat()})
+    await log_audit(principal["email"], principal["role"], "ANNONCE_PUBLIEE", "annonce", doc["id"], doc["title"], pid)
+    return doc
+
+
+@api_router.delete("/announcements/{ann_id}")
+async def delete_announcement(ann_id: str, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    res = await db.announcements.delete_one({"id": ann_id, "pharmacy_id": pid})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Annonce introuvable.")
+    return {"ok": True}
+
+
+@api_router.post("/announcements/{ann_id}/like")
+async def like_announcement(ann_id: str, user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    key = user.get("employee_id") or user["email"]
+    doc = await db.announcements.find_one({"id": ann_id, "pharmacy_id": pid}, {"_id": 0, "likes": 1})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Annonce introuvable.")
+    op = "$pull" if key in (doc.get("likes") or []) else "$addToSet"
+    await db.announcements.update_one({"id": ann_id, "pharmacy_id": pid}, {op: {"likes": key}})
+    return {"ok": True, "liked": op == "$addToSet"}
+
+
+class ContractSignIn(BaseModel):
+    contract_id: str
+    contract_label: str = ""
+    signature: str
+    employee_id: str = ""
+
+
+@api_router.get("/contracts/signatures")
+async def list_contract_signatures(user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    q: dict = {"pharmacy_id": pid}
+    if user["role"] == "employee":
+        q["employee_id"] = user.get("employee_id") or "__none__"
+    return await db.contract_signatures.find(q, {"_id": 0}).to_list(500)
+
+
+@api_router.post("/contracts/sign")
+async def sign_contract(payload: ContractSignIn, user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    if not payload.signature.startswith("data:image/") or len(payload.signature) > 200_000:
+        raise HTTPException(status_code=400, detail="Signature invalide.")
+    if user["role"] == "employee":
+        eid = user.get("employee_id") or ""
+        if payload.employee_id and payload.employee_id != eid:
+            raise HTTPException(status_code=403, detail="Vous ne pouvez signer que vos propres contrats.")
+    else:
+        eid = payload.employee_id or ""
+    if not eid:
+        raise HTTPException(status_code=400, detail="Employé requis.")
+    doc = {"id": str(uuid.uuid4()), "pharmacy_id": pid, "contract_id": payload.contract_id,
+           "contract_label": (payload.contract_label or "")[:120], "employee_id": eid,
+           "signed_by": user.get("name") or user["email"], "signature": payload.signature,
+           "signed_at": datetime.now(timezone.utc).isoformat()}
+    await db.contract_signatures.update_one({"pharmacy_id": pid, "contract_id": payload.contract_id},
+                                            {"$set": doc}, upsert=True)
+    await _notify_admins(pid, "Contrat signé électroniquement",
+                         f"{doc['signed_by']} a signé « {doc['contract_label'] or payload.contract_id} ».",
+                         module="contracts", tone="emerald")
+    await log_audit(user["email"], user["role"], "CONTRAT_SIGNE", "contrat", payload.contract_id,
+                    f"Signature électronique par {doc['signed_by']}", pid)
+    return {"ok": True, "signed_at": doc["signed_at"]}
+
+
+# ==================== Rôles personnalisables, Rapports, API développeurs & POS ====================
+
+ALL_MODULE_KEYS = {"dashboard", "tasks", "myspace", "messages", "team", "employees", "licenses", "scheduling",
+                   "recruitment", "payroll", "replacements", "vacations", "performance", "onboarding", "contracts",
+                   "benefits", "faq", "training", "deliveries", "resources", "sst", "reports"}
+
+
+class ModuleOverridesIn(BaseModel):
+    module_overrides: dict
+
+
+@api_router.get("/users/by-employee/{employee_id}")
+async def get_user_by_employee(employee_id: str, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    target = await db.users.find_one({"pharmacy_id": pid, "employee_id": employee_id}, {"_id": 0})
+    if not target:
+        return {"found": False}
+    return {"found": True, "email": target["email"], "role": target["role"],
+            "module_overrides": target.get("module_overrides", {})}
+
+
+@api_router.put("/users/by-employee/{employee_id}/modules")
+async def set_module_overrides(employee_id: str, payload: ModuleOverridesIn, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    target = await db.users.find_one({"pharmacy_id": pid, "employee_id": employee_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="Aucun compte utilisateur lié à cet employé.")
+    overrides = {k: bool(v) for k, v in (payload.module_overrides or {}).items() if k in ALL_MODULE_KEYS}
+    await db.users.update_one({"id": target["id"]}, {"$set": {"module_overrides": overrides}})
+    await log_audit(principal["email"], principal["role"], "ACCES_MODULES_PERSONNALISES", "utilisateur", target["id"],
+                    f"Accès aux modules personnalisé pour {target['email']} ({len(overrides)} règle(s))", pid)
+    return {"module_overrides": overrides}
+
+
+REPORT_CATALOG = [
+    {"id": "planifie_vs_travaille", "title": "Temps planifié vs travaillé",
+     "desc": "Heures à l'horaire et heures pointées des 7 derniers jours, par employé."},
+    {"id": "taches_semaine", "title": "Tâches de la semaine",
+     "desc": "Tâches faites et restantes de la semaine, par quart."},
+    {"id": "conges_soldes", "title": "Congés et demandes",
+     "desc": "Demandes en attente et congés approuvés à venir."},
+    {"id": "banque_heures", "title": "Banque d'heures",
+     "desc": "Soldes de la banque d'heures par employé."},
+]
+
+
+async def build_report_html(pid: str, report_id: str) -> tuple[str, str]:
+    now_mtl = datetime.now(timezone.utc).astimezone(MONTREAL_TZ)
+    today = now_mtl.date()
+    week_ago = (today - timedelta(days=7)).isoformat()
+    rows = ""
+    if report_id == "planifie_vs_travaille":
+        shifts = await db.shifts.find({"pharmacy_id": pid, "date": {"$gte": week_ago, "$lte": today.isoformat()}}, {"_id": 0}).to_list(5000)
+        punches = await db.punches.find({"pharmacy_id": pid, "date": {"$gte": week_ago}, "punch_out": {"$ne": None}}, {"_id": 0}).to_list(5000)
+        profiles = await db.employee_profiles.find({"pharmacy_id": pid}, {"_id": 0, "employee_id": 1, "employee_name": 1}).to_list(1000)
+        names = {p["employee_id"]: p.get("employee_name") or p["employee_id"] for p in profiles}
+        planned: dict = {}
+        for s in shifts:
+            try:
+                h = (int(s["end"][:2]) * 60 + int(s["end"][3:5]) - int(s["start"][:2]) * 60 - int(s["start"][3:5])) / 60
+            except (ValueError, KeyError):
+                h = 0
+            planned[s["employee_id"]] = planned.get(s["employee_id"], 0) + max(0, h)
+        worked: dict = {}
+        for p in punches:
+            try:
+                d = (datetime.fromisoformat(p["punch_out"]) - datetime.fromisoformat(p["punch_in"])).total_seconds() / 3600
+            except (ValueError, TypeError):
+                d = 0
+            worked[p["employee_id"]] = worked.get(p["employee_id"], 0) + max(0, d)
+        for eid in sorted(set(planned) | set(worked), key=lambda e: names.get(e, e)):
+            rows += (f"<tr><td style='padding:6px 12px'>{names.get(eid, eid)}</td>"
+                     f"<td style='padding:6px 12px;text-align:right'>{planned.get(eid, 0):.1f} h</td>"
+                     f"<td style='padding:6px 12px;text-align:right'>{worked.get(eid, 0):.1f} h</td></tr>")
+        table = ("<table style='border-collapse:collapse;background:#f8fafc;border-radius:8px;width:100%'>"
+                 "<tr><th style='padding:6px 12px;text-align:left'>Employé</th><th style='padding:6px 12px;text-align:right'>Planifié</th>"
+                 "<th style='padding:6px 12px;text-align:right'>Travaillé (punch)</th></tr>" + (rows or "<tr><td style='padding:6px 12px'>Aucune donnée.</td></tr>") + "</table>")
+        return ("Rapport — Temps planifié vs travaillé", table)
+    if report_id == "taches_semaine":
+        monday = (today - timedelta(days=today.weekday())).isoformat()
+        tasks = await db.shift_tasks.find({"pharmacy_id": pid, "date": {"$gte": monday, "$lte": today.isoformat()}}, {"_id": 0}).to_list(2000)
+        done = [t for t in tasks if t.get("done")]
+        todo = [t for t in tasks if not t.get("done")]
+        rows = "".join(f"<tr><td style='padding:6px 12px'>{t['date']}</td><td style='padding:6px 12px'>{t.get('shift','')}</td>"
+                       f"<td style='padding:6px 12px'>{t['title']}</td><td style='padding:6px 12px'>{'✅ Faite' if t.get('done') else '⏳ À faire'}</td></tr>"
+                       for t in sorted(tasks, key=lambda x: (x['date'], x.get('shift', ''))))
+        table = (f"<p><b>{len(done)}</b> faites · <b>{len(todo)}</b> restantes</p>"
+                 "<table style='border-collapse:collapse;background:#f8fafc;border-radius:8px;width:100%'>"
+                 "<tr><th style='padding:6px 12px;text-align:left'>Date</th><th style='padding:6px 12px;text-align:left'>Quart</th>"
+                 "<th style='padding:6px 12px;text-align:left'>Tâche</th><th style='padding:6px 12px;text-align:left'>Statut</th></tr>"
+                 + (rows or "<tr><td style='padding:6px 12px'>Aucune tâche cette semaine.</td></tr>") + "</table>")
+        return ("Rapport — Tâches de la semaine", table)
+    if report_id == "conges_soldes":
+        pending = await db.leave_requests.find({"pharmacy_id": pid, "status": "En attente"}, {"_id": 0}).to_list(500)
+        upcoming = await db.leave_requests.find({"pharmacy_id": pid, "status": "Approuvée",
+                                                 "end_date": {"$gte": today.isoformat()}}, {"_id": 0}).to_list(500)
+        rows = "".join(f"<tr><td style='padding:6px 12px'>{r.get('employee_name','')}</td><td style='padding:6px 12px'>{r.get('leave_type','')}</td>"
+                       f"<td style='padding:6px 12px'>{r.get('start_date','')} → {r.get('end_date','')}</td><td style='padding:6px 12px'>{r.get('status','')}</td></tr>"
+                       for r in pending + upcoming)
+        table = (f"<p><b>{len(pending)}</b> demande(s) en attente · <b>{len(upcoming)}</b> congé(s) approuvé(s) à venir</p>"
+                 "<table style='border-collapse:collapse;background:#f8fafc;border-radius:8px;width:100%'>"
+                 "<tr><th style='padding:6px 12px;text-align:left'>Employé</th><th style='padding:6px 12px;text-align:left'>Type</th>"
+                 "<th style='padding:6px 12px;text-align:left'>Dates</th><th style='padding:6px 12px;text-align:left'>Statut</th></tr>"
+                 + (rows or "<tr><td style='padding:6px 12px'>Rien à signaler.</td></tr>") + "</table>")
+        return ("Rapport — Congés et demandes", table)
+    if report_id == "banque_heures":
+        entries = await db.time_bank_entries.find({"pharmacy_id": pid}, {"_id": 0}).to_list(2000)
+        balances: dict = {}
+        for e in entries:
+            b = balances.setdefault(e["employee_id"], {"name": e.get("employee_name") or e["employee_id"], "balance": 0.0})
+            b["balance"] = round(b["balance"] + e["hours"], 2)
+        rows = "".join(f"<tr><td style='padding:6px 12px'>{b['name']}</td>"
+                       f"<td style='padding:6px 12px;text-align:right'>{b['balance']:+.2f} h</td></tr>"
+                       for b in sorted(balances.values(), key=lambda x: x["name"]))
+        table = ("<table style='border-collapse:collapse;background:#f8fafc;border-radius:8px;width:100%'>"
+                 "<tr><th style='padding:6px 12px;text-align:left'>Employé</th><th style='padding:6px 12px;text-align:right'>Solde</th></tr>"
+                 + (rows or "<tr><td style='padding:6px 12px'>Aucune heure en banque.</td></tr>") + "</table>")
+        return ("Rapport — Banque d'heures", table)
+    raise HTTPException(status_code=404, detail="Rapport inconnu.")
+
+
+async def send_report_email(pid: str, report_id: str, recipients: list) -> bool:
+    if not os.environ.get("RESEND_API_KEY", "") or not recipients:
+        return False
+    subject, table = await build_report_html(pid, report_id)
+    when = datetime.now(timezone.utc).astimezone(MONTREAL_TZ).strftime("%Y-%m-%d %H:%M")
+    html = ("<div style='font-family:Arial,sans-serif;max-width:640px;margin:0 auto;color:#0f172a'>"
+            f"<h2 style='color:#047857'>{subject}</h2>{table}"
+            f"<p style='font-size:12px;color:#94a3b8;margin-top:16px'>Généré le {when} (Montréal) — Arrière Plan</p></div>")
+    try:
+        await asyncio.to_thread(resend.Emails.send, {
+            "from": await get_sender(), "to": recipients, "subject": f"{subject} — Arrière Plan", "html": html})
+        return True
+    except Exception as e:
+        logger.warning(f"Envoi du rapport {report_id} échoué : {e}")
+        return False
+
+
+@api_router.get("/reports")
+async def list_reports(principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    user = await db.users.find_one({"email": principal["email"]}, {"_id": 0, "report_favorites": 1})
+    schedules = await db.report_schedules.find({"pharmacy_id": pid}, {"_id": 0}).to_list(20)
+    return {"catalog": REPORT_CATALOG,
+            "favorites": (user or {}).get("report_favorites", []),
+            "schedules": {s["report_id"]: s["frequency"] for s in schedules if s.get("frequency") != "off"}}
+
+
+@api_router.post("/reports/{report_id}/favorite")
+async def toggle_report_favorite(report_id: str, principal: dict = Depends(get_principal)):
+    if report_id not in {r["id"] for r in REPORT_CATALOG}:
+        raise HTTPException(status_code=404, detail="Rapport inconnu.")
+    user = await db.users.find_one({"email": principal["email"]}, {"_id": 0, "report_favorites": 1})
+    favs = (user or {}).get("report_favorites", [])
+    op = "$pull" if report_id in favs else "$addToSet"
+    await db.users.update_one({"email": principal["email"]}, {op: {"report_favorites": report_id}})
+    return {"favorite": op == "$addToSet"}
+
+
+class ReportScheduleIn(BaseModel):
+    frequency: str
+
+
+@api_router.put("/reports/{report_id}/schedule")
+async def set_report_schedule(report_id: str, payload: ReportScheduleIn, principal: dict = Depends(get_principal)):
+    if report_id not in {r["id"] for r in REPORT_CATALOG}:
+        raise HTTPException(status_code=404, detail="Rapport inconnu.")
+    if payload.frequency not in ("hebdo", "mensuel", "off"):
+        raise HTTPException(status_code=400, detail="Fréquence invalide (hebdo, mensuel ou off).")
+    pid = principal["pharmacy_id"] or "ph1"
+    await db.report_schedules.update_one(
+        {"pharmacy_id": pid, "report_id": report_id},
+        {"$set": {"pharmacy_id": pid, "report_id": report_id, "frequency": payload.frequency,
+                  "updated_by": principal["email"], "updated_at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True)
+    return {"report_id": report_id, "frequency": payload.frequency}
+
+
+@api_router.post("/reports/{report_id}/send")
+async def send_report_now(report_id: str, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    ok = await send_report_email(pid, report_id, [principal["email"]])
+    if not ok:
+        raise HTTPException(status_code=502, detail="Envoi impossible — vérifiez la configuration courriel (Resend).")
+    return {"ok": True, "sent_to": principal["email"]}
+
+
+async def scheduled_reports_job():
+    now_mtl = datetime.now(timezone.utc).astimezone(MONTREAL_TZ)
+    is_monday = now_mtl.weekday() == 0
+    is_first = now_mtl.day == 1
+    schedules = await db.report_schedules.find({"frequency": {"$in": ["hebdo", "mensuel"]}}, {"_id": 0}).to_list(200)
+    sent = 0
+    for s in schedules:
+        if (s["frequency"] == "hebdo" and not is_monday) or (s["frequency"] == "mensuel" and not is_first):
+            continue
+        admins = await db.users.find({"pharmacy_id": s["pharmacy_id"], "role": {"$in": ["admin", "manager"]},
+                                      "suspended": {"$ne": True}}, {"_id": 0, "email": 1}).to_list(20)
+        if await send_report_email(s["pharmacy_id"], s["report_id"], [a["email"] for a in admins]):
+            sent += 1
+    if sent:
+        logger.info(f"Rapports programmés envoyés : {sent}")
+
+
+class ApiKeyIn(BaseModel):
+    label: str = "Intégration POS"
+
+
+@api_router.get("/dev/keys")
+async def list_api_keys(principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    return await db.api_keys.find({"pharmacy_id": pid},
+                                  {"_id": 0, "key_hash": 0}).sort("created_at", -1).to_list(20)
+
+
+@api_router.post("/dev/keys")
+async def create_api_key(payload: ApiKeyIn, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    count = await db.api_keys.count_documents({"pharmacy_id": pid})
+    if count >= 5:
+        raise HTTPException(status_code=400, detail="Maximum 5 clés API par pharmacie.")
+    raw = f"apk_{secrets.token_urlsafe(32)}"
+    doc = {"id": str(uuid.uuid4()), "pharmacy_id": pid, "label": (payload.label or "Intégration")[:60],
+           "prefix": raw[:12], "key_hash": hashlib.sha256(raw.encode()).hexdigest(),
+           "last_used_at": None, "created_by": principal["email"],
+           "created_at": datetime.now(timezone.utc).isoformat()}
+    await db.api_keys.insert_one({**doc})
+    await log_audit(principal["email"], principal["role"], "CLE_API_CREEE", "api", doc["id"], doc["label"], pid)
+    doc.pop("key_hash")
+    return {**doc, "key": raw}
+
+
+@api_router.delete("/dev/keys/{key_id}")
+async def delete_api_key(key_id: str, principal: dict = Depends(get_principal)):
+    pid = principal["pharmacy_id"] or "ph1"
+    res = await db.api_keys.delete_one({"id": key_id, "pharmacy_id": pid})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Clé introuvable.")
+    await log_audit(principal["email"], principal["role"], "CLE_API_REVOQUEE", "api", key_id, "", pid)
+    return {"ok": True}
+
+
+async def pharmacy_from_api_key(request: Request) -> str:
+    raw = request.headers.get("X-API-Key", "").strip()
+    if not raw:
+        raise HTTPException(status_code=401, detail="En-tête X-API-Key requis.")
+    doc = await db.api_keys.find_one({"key_hash": hashlib.sha256(raw.encode()).hexdigest()}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=401, detail="Clé API invalide ou révoquée.")
+    await db.api_keys.update_one({"id": doc["id"]},
+                                 {"$set": {"last_used_at": datetime.now(timezone.utc).isoformat()}})
+    return doc["pharmacy_id"]
+
+
+class PosTrafficIn(BaseModel):
+    traffic: dict
+
+
+@api_router.post("/integrations/pos/traffic")
+async def pos_traffic_webhook(payload: PosTrafficIn, request: Request):
+    pid = await pharmacy_from_api_key(request)
+    try:
+        traffic = _sanitize_traffic(payload.traffic)
+    except (ValueError, TypeError, AttributeError):
+        raise HTTPException(status_code=400, detail="Format d'achalandage invalide.")
+    existing = await db.schedule_settings.find_one({"pharmacy_id": pid}, {"_id": 0, "traffic": 1}) or {}
+    merged = {**(existing.get("traffic") or {}), **traffic}
+    await db.schedule_settings.update_one({"pharmacy_id": pid},
+                                          {"$set": {"pharmacy_id": pid, "traffic": merged,
+                                                    "updated_by": "api", "updated_at": datetime.now(timezone.utc).isoformat()}},
+                                          upsert=True)
+    await log_audit("api", "api", "ACHALANDAGE_POS", "horaire", pid,
+                    f"Achalandage mis à jour via l'API POS ({len(traffic)} jour(s))", pid)
+    return {"ok": True, "days_updated": len(traffic)}
 
 
 # ==================== Demandes de démo (public) ====================

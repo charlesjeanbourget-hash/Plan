@@ -6,7 +6,8 @@ import { ModuleHeader, StatCard, StatusBadge, CollapsibleSection } from '@/compo
 import { HonorRoll } from '@/components/HonorRoll';
 import { ExpiringDocsBanner } from '@/components/ExpiringDocsBanner';
 import { BudgetHistoryChart } from '@/components/BudgetHistoryChart';
-import { Users, CalendarClock, Briefcase, TreePalm, BadgeAlert, TrendingUp, Trophy, ClipboardList } from 'lucide-react';
+import { Users, CalendarClock, Briefcase, TreePalm, BadgeAlert, TrendingUp, Trophy, ClipboardList, Newspaper } from 'lucide-react';
+import { AnnouncementsFeed } from '@/components/AnnouncementsFeed';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -70,6 +71,10 @@ export default function DashboardModule(): JSX.Element {
         <StatCard label="Demandes de congé" value={String(pendingLeaves)} icon={TreePalm} hint="En attente d'approbation" />
         <StatCard label="Offres actives" value={String(activeOffers)} icon={Briefcase} hint={`${state.candidates.length} candidatures reçues`} />
       </div>
+
+      <CollapsibleSection id="dash-news" title="Fil d'actualités" icon={Newspaper} defaultOpen className="mb-4">
+        <AnnouncementsFeed />
+      </CollapsibleSection>
 
       {isAdmin && (
         <CollapsibleSection id="dash-budget" title="Historique budgétaire" icon={TrendingUp} className="mb-4">

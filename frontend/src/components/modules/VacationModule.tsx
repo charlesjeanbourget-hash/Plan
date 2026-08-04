@@ -9,7 +9,8 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, Check, X, ChevronLeft, ChevronRight, TreePalm, Lock, History, Wallet, Trash2, RefreshCcw, FileDown } from 'lucide-react';
+import { Plus, Check, X, ChevronLeft, ChevronRight, TreePalm, Lock, History, Wallet, Trash2, RefreshCcw, FileDown, Hourglass } from 'lucide-react';
+import { TimeBankPanel } from '@/components/TimeBankPanel';
 import { downloadLeaveSummary } from '@/lib/leavePdf';
 import { toast } from 'sonner';
 
@@ -428,6 +429,12 @@ export default function VacationModule(): JSX.Element {
             </table>
           </div>
         </div>
+        </CollapsibleSection>
+      )}
+
+      {isAdmin && (
+        <CollapsibleSection id="vac-timebank" title="Banque d'heures (reprise de temps)" icon={Hourglass} className="mb-8">
+          <TimeBankPanel />
         </CollapsibleSection>
       )}
 

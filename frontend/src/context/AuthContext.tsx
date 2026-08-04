@@ -14,6 +14,8 @@ interface BackendUser {
   employee_id: string | null;
   is_temporary_password: boolean;
   privacy_accepted_at?: string | null;
+  mfa_enabled?: boolean;
+  module_overrides?: Record<string, boolean>;
 }
 
 interface StoredAuth {
@@ -30,6 +32,8 @@ const mapUser = (u: BackendUser): User => ({
   employeeId: u.employee_id ?? undefined,
   isTemporaryPassword: u.is_temporary_password,
   privacyAcceptedAt: u.privacy_accepted_at ?? null,
+  mfaEnabled: u.mfa_enabled ?? false,
+  moduleOverrides: u.module_overrides ?? {},
 });
 
 export const formatApiError = (detail: unknown): string => {
@@ -46,7 +50,8 @@ export const formatApiError = (detail: unknown): string => {
 interface AuthContextValue {
   currentUser: User | null;
   token: string | null;
-  login: (email: string, password: string) => Promise<string | null>;
+  login: (email: string, password: string) => Promise<{ error: string | null; mfaToken?: string }>;
+  verifyMfa: (mfaToken: string, code: string) => Promise<string | null>;
   logout: () => void;
   changePassword: (currentPassword: string, newPassword: string) => Promise<string | null>;
   acceptPrivacy: () => Promise<void>;
@@ -83,11 +88,30 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       });
   }, []);
 
-  const login = async (email: string, password: string): Promise<string | null> => {
+  const login = async (email: string, password: string): Promise<{ error: string | null; mfaToken?: string }> => {
     try {
-      const res = await axios.post<{ access_token: string; user: BackendUser }>(`${API}/auth/login`, {
+      const res = await axios.post<{ access_token?: string; user?: BackendUser; mfa_required?: boolean; mfa_token?: string }>(`${API}/auth/login`, {
         email,
         password,
+      });
+      if (res.data.mfa_required && res.data.mfa_token) {
+        return { error: null, mfaToken: res.data.mfa_token };
+      }
+      setAuth({ token: res.data.access_token as string, user: mapUser(res.data.user as BackendUser) });
+      return { error: null };
+    } catch (err) {
+      if (axios.isAxiosError(err) && err.response) {
+        return { error: formatApiError((err.response.data as { detail?: unknown }).detail) };
+      }
+      return { error: 'Connexion au serveur impossible.' };
+    }
+  };
+
+  const verifyMfa = async (mfaToken: string, code: string): Promise<string | null> => {
+    try {
+      const res = await axios.post<{ access_token: string; user: BackendUser }>(`${API}/auth/mfa/verify`, {
+        mfa_token: mfaToken,
+        code,
       });
       setAuth({ token: res.data.access_token, user: mapUser(res.data.user) });
       return null;
@@ -132,7 +156,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   return (
     <AuthContext.Provider
-      value={{ currentUser: auth?.user ?? null, token: auth?.token ?? null, login, logout, changePassword, acceptPrivacy }}
+      value={{ currentUser: auth?.user ?? null, token: auth?.token ?? null, login, verifyMfa, logout, changePassword, acceptPrivacy }}
     >
       {children}
     </AuthContext.Provider>

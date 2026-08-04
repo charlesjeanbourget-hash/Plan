@@ -21,6 +21,8 @@ export type ModuleKey =
   | 'benefits'
   | 'faq'
   | 'training'
+  | 'sst'
+  | 'reports'
   | 'deliveries'
   | 'resources'
   | 'superadmin';
@@ -34,6 +36,8 @@ export interface User {
   pharmacyId?: string;
   isTemporaryPassword?: boolean;
   privacyAcceptedAt?: string | null;
+  mfaEnabled?: boolean;
+  moduleOverrides?: Record<string, boolean>;
 }
 
 export type Position =
@@ -93,6 +97,7 @@ export interface Shift {
   department?: string;
   branchId?: string;
   station?: string;
+  training?: boolean;
 }
 
 export interface WorkStation {

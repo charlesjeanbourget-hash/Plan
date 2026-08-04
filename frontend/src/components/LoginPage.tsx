@@ -15,19 +15,39 @@ interface Props {
 }
 
 export default function LoginPage({ onNavigate, onSuccess }: Props): JSX.Element {
-  const { login } = useAuth();
+  const { login, verifyMfa } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [forgotOpen, setForgotOpen] = useState(false);
+  const [mfaToken, setMfaToken] = useState<string | null>(null);
+  const [mfaCode, setMfaCode] = useState('');
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
     setLoading(true);
     setError('');
-    const err = await login(email.trim(), password.trim());
+    const res = await login(email.trim(), password.trim());
+    setLoading(false);
+    if (res.error) {
+      setError(res.error);
+    } else if (res.mfaToken) {
+      setMfaToken(res.mfaToken);
+      setMfaCode('');
+    } else {
+      toast.success('Connexion réussie. Bienvenue !');
+      onSuccess();
+    }
+  };
+
+  const handleMfa = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
+    e.preventDefault();
+    if (!mfaToken) return;
+    setLoading(true);
+    setError('');
+    const err = await verifyMfa(mfaToken, mfaCode.trim());
     setLoading(false);
     if (err) {
       setError(err);
@@ -53,7 +73,41 @@ export default function LoginPage({ onNavigate, onSuccess }: Props): JSX.Element
             <BrandLogo />
           </div>
           <h1 className="font-heading text-2xl font-bold text-slate-900 mb-1">Espace Employés & Gestion</h1>
-          <p className="text-sm text-slate-500 mb-8">Connectez-vous à votre compte.</p>
+          <p className="text-sm text-slate-500 mb-8">{mfaToken ? 'Vérification en 2 étapes' : 'Connectez-vous à votre compte.'}</p>
+          {mfaToken ? (
+            <form onSubmit={(e) => void handleMfa(e)} className="space-y-5" data-testid="mfa-form">
+              <div className="space-y-2">
+                <Label htmlFor="mfa-code">Code de votre application d'authentification</Label>
+                <Input
+                  id="mfa-code"
+                  data-testid="mfa-code-input"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={6}
+                  value={mfaCode}
+                  onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, ''))}
+                  placeholder="123 456"
+                  className="text-center text-xl tracking-[0.4em] font-bold"
+                  autoFocus
+                  required
+                />
+              </div>
+              {error && (
+                <p data-testid="mfa-error-message" className="text-sm text-red-600">{error}</p>
+              )}
+              <Button data-testid="mfa-submit-button" type="submit" disabled={loading || mfaCode.length !== 6} className="w-full rounded-full bg-emerald-600 hover:bg-emerald-700">
+                {loading ? 'Vérification…' : 'Vérifier le code'}
+              </Button>
+              <button
+                type="button"
+                data-testid="mfa-back-button"
+                onClick={() => { setMfaToken(null); setError(''); }}
+                className="block w-full text-center text-sm text-slate-500 hover:text-emerald-700 transition-colors"
+              >
+                Revenir à la connexion
+              </button>
+            </form>
+          ) : (
           <form onSubmit={(e) => void handleSubmit(e)} className="space-y-5">
             <div className="space-y-2">
               <Label htmlFor="email">Courriel</Label>
@@ -98,6 +152,8 @@ export default function LoginPage({ onNavigate, onSuccess }: Props): JSX.Element
               {loading ? 'Connexion…' : 'Se connecter'}
             </Button>
           </form>
+          )}
+          {!mfaToken && (
           <button
             type="button"
             data-testid="forgot-password-button"
@@ -106,6 +162,7 @@ export default function LoginPage({ onNavigate, onSuccess }: Props): JSX.Element
           >
             Mot de passe ou identifiant oublié ?
           </button>
+          )}
         </div>
       </div>
       <ForgotPasswordDialog

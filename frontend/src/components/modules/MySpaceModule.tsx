@@ -10,7 +10,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { CalendarClock, Download, TreePalm, ArrowLeftRight, Plus, ShieldCheck } from 'lucide-react';
+import { CalendarClock, Download, TreePalm, ArrowLeftRight, Plus, ShieldCheck, FileText, FileQuestion, CheckCircle2 } from 'lucide-react';
+import { SignaturePad } from '@/components/SignaturePad';
+import { MyDocRequests } from '@/components/DocumentRequests';
 import { downloadPayStub } from '@/lib/paystub';
 import { MyPunchCard } from '@/components/MyPunchCard';
 import { NurseDayPanel } from '@/components/NurseDayPanel';
@@ -56,6 +58,43 @@ export default function MySpaceModule(): JSX.Element {
   };
 
   const [leaveOpen, setLeaveOpen] = useState(false);
+  const [timeBank, setTimeBank] = useState<number | null>(null);
+  const [signatures, setSignatures] = useState<Record<string, { signed_at: string }>>({});
+  const [signTarget, setSignTarget] = useState<{ id: string; label: string } | null>(null);
+  const [signSaving, setSignSaving] = useState(false);
+
+  useEffect(() => {
+    if (!token) return;
+    axios.get<{ balance?: number }>(`${API}/time-bank`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => setTimeBank(r.data.balance ?? 0))
+      .catch(() => undefined);
+    axios.get<{ contract_id: string; signed_at: string }[]>(`${API}/contracts/signatures`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => {
+        const m: Record<string, { signed_at: string }> = {};
+        r.data.forEach((s) => { m[s.contract_id] = { signed_at: s.signed_at }; });
+        setSignatures(m);
+      })
+      .catch(() => undefined);
+  }, [token]);
+
+  const myContracts = state.contracts.filter((c) => me && c.employeeId === me.id);
+  const unsignedCount = myContracts.filter((c) => !c.signed && !signatures[c.id]).length;
+
+  const signContract = async (dataUrl: string): Promise<void> => {
+    if (!signTarget) return;
+    setSignSaving(true);
+    try {
+      await axios.post(`${API}/contracts/sign`, { contract_id: signTarget.id, contract_label: signTarget.label, signature: dataUrl },
+        { headers: { Authorization: `Bearer ${token ?? ''}` } });
+      toast.success('Contrat signé électroniquement — merci !');
+      setSignatures({ ...signatures, [signTarget.id]: { signed_at: new Date().toISOString() } });
+      setSignTarget(null);
+    } catch {
+      toast.error('Signature impossible.');
+    } finally {
+      setSignSaving(false);
+    }
+  };
   const [leaveType, setLeaveType] = useState<LeaveType>('Vacances');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -248,7 +287,12 @@ export default function MySpaceModule(): JSX.Element {
 
         <CollapsibleSection id="myspace-leaves-section" title="Mes congés" icon={TreePalm} badge={myLeaves.length > 0 ? String(myLeaves.length) : undefined} className="lg:col-span-2">
         <div className="bg-white rounded-xl border border-slate-200 p-7" data-testid="myspace-leaves">
-          <div className="flex items-center justify-end mb-5">
+          <div className="flex items-center justify-between mb-5">
+            <p data-testid="my-timebank-balance" className="text-xs font-semibold text-slate-500">
+              {timeBank !== null && timeBank !== 0 && (
+                <>Banque d'heures : <span className={timeBank < 0 ? 'text-red-700' : 'text-emerald-700'}>{timeBank > 0 ? '+' : ''}{timeBank} h</span></>
+              )}
+            </p>
             <Button data-testid="myspace-add-leave-button" size="sm" className="rounded-full bg-emerald-600 hover:bg-emerald-700 text-xs" onClick={() => setLeaveOpen(true)}>
               <Plus className="w-3.5 h-3.5 mr-1" /> Nouvelle demande
             </Button>
@@ -267,6 +311,53 @@ export default function MySpaceModule(): JSX.Element {
           </div>
         </div>
         </CollapsibleSection>
+
+        <CollapsibleSection id="myspace-docs-section" title="Mes documents RH" icon={FileQuestion} className="lg:col-span-2">
+          <MyDocRequests />
+        </CollapsibleSection>
+
+        <CollapsibleSection
+          id="myspace-contracts-section"
+          title="Mes contrats"
+          icon={FileText}
+          badge={unsignedCount > 0 ? `${unsignedCount} à signer` : undefined}
+          badgeTone="amber"
+          defaultOpen={unsignedCount > 0}
+          className="lg:col-span-2"
+        >
+          <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-3" data-testid="myspace-contracts">
+            {myContracts.length === 0 && <p className="text-sm text-slate-500">Aucun contrat à votre dossier.</p>}
+            {myContracts.map((c) => {
+              const sig = signatures[c.id];
+              return (
+                <div key={c.id} data-testid={`my-contract-${c.id}`} className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2.5">
+                  <FileText className="w-4 h-4 text-slate-400" />
+                  <p className="text-sm text-slate-700 font-semibold">{c.type}</p>
+                  <p className="text-xs text-slate-400">début {c.startDate} · {c.salary}</p>
+                  {sig || c.signed ? (
+                    <span data-testid={`my-contract-signed-${c.id}`} className="ml-auto inline-flex items-center gap-1 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5">
+                      <CheckCircle2 className="w-3 h-3" /> Signé{sig ? ` le ${sig.signed_at.slice(0, 10)}` : ''}
+                    </span>
+                  ) : (
+                    <Button data-testid={`my-contract-sign-${c.id}`} size="sm" onClick={() => setSignTarget({ id: c.id, label: `${c.type} — début ${c.startDate}` })} className="ml-auto rounded-full bg-emerald-600 hover:bg-emerald-700 text-xs h-7">
+                      Signer
+                    </Button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </CollapsibleSection>
+
+        <Dialog open={!!signTarget} onOpenChange={(v) => { if (!v) setSignTarget(null); }}>
+          <DialogContent data-testid="myspace-sign-dialog">
+            <DialogHeader>
+              <DialogTitle className="font-heading">Signature électronique</DialogTitle>
+            </DialogHeader>
+            <p className="text-sm text-slate-600">{signTarget?.label}</p>
+            <SignaturePad onSave={(d) => void signContract(d)} saving={signSaving} />
+          </DialogContent>
+        </Dialog>
 
         <MyEvaluationsPanel />
 

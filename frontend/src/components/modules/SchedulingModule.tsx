@@ -16,7 +16,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ChevronLeft, ChevronRight, ChevronDown, Plus, X, ArrowLeftRight, Check, Stethoscope, CopyPlus, LayoutTemplate, FileDown, Megaphone, Hourglass, BookOpenCheck, MapPin, Wrench, Hand, Sparkles, AlertTriangle, Layers, TreePalm, CheckCircle2, Circle, Wallet, FlaskConical, SlidersHorizontal } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, Plus, X, ArrowLeftRight, Check, Stethoscope, CopyPlus, LayoutTemplate, FileDown, Megaphone, Hourglass, BookOpenCheck, MapPin, Wrench, Hand, Sparkles, AlertTriangle, Layers, TreePalm, CheckCircle2, Circle, Wallet, FlaskConical, SlidersHorizontal, GraduationCap, Coffee } from 'lucide-react';
 import { ScheduleProposals } from '@/components/ScheduleProposals';
 import { AppointmentDialog } from '@/components/AppointmentDialog';
 import { DuplicateWeekDialog } from '@/components/DuplicateWeekDialog';
@@ -102,6 +102,26 @@ export default function SchedulingModule(): JSX.Element {
   const [selectedResources, setSelectedResources] = useState<string[]>([]);
   const [dragShiftId, setDragShiftId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const [weather, setWeather] = useState<Record<string, { icon: string; label: string; tmax: number; tmin: number; precip: number }>>({});
+  const [autoBreak, setAutoBreak] = useState<{ enabled: boolean; threshold_hours: number; minutes: number; paid: boolean }>({ enabled: false, threshold_hours: 6, minutes: 30, paid: false });
+  const [breaksOpen, setBreaksOpen] = useState(false);
+  const [savingBreaks, setSavingBreaks] = useState(false);
+  const [shiftTraining, setShiftTraining] = useState(false);
+  const [dayAnchor, setDayAnchor] = useState(iso(new Date()));
+
+  useEffect(() => {
+    if (!token) return;
+    axios.get<{ days: { date: string; icon: string; label: string; tmax: number; tmin: number; precip: number }[] }>(`${API}/weather`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => {
+        const m: Record<string, { icon: string; label: string; tmax: number; tmin: number; precip: number }> = {};
+        r.data.days.forEach((d) => { m[d.date] = d; });
+        setWeather(m);
+      })
+      .catch(() => undefined);
+    axios.get<{ auto_break?: { enabled: boolean; threshold_hours: number; minutes: number; paid: boolean } }>(`${API}/schedule/settings`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => { if (r.data.auto_break) setAutoBreak(r.data.auto_break); })
+      .catch(() => undefined);
+  }, [token]);
 
   useEffect(() => {
     if (!isAdmin || !token) return;
@@ -156,7 +176,35 @@ export default function SchedulingModule(): JSX.Element {
 
   const visibleShifts = state.shifts.filter((s) => deptFilter === 'all' || (s.department || 'Général') === deptFilter);
 
-  const [viewMode, setViewMode] = useState<'week' | 'month'>('week');
+  const [viewMode, setViewMode] = useState<'day' | 'week' | 'month'>('week');
+
+  const netHours = (s: Shift): number => {
+    const h = hoursBetween(s.startTime, s.endTime);
+    if (autoBreak.enabled && !autoBreak.paid && h >= autoBreak.threshold_hours) return Math.max(0, h - autoBreak.minutes / 60);
+    return h;
+  };
+  const breakApplies = (s: Shift): boolean =>
+    autoBreak.enabled && hoursBetween(s.startTime, s.endTime) >= autoBreak.threshold_hours;
+
+  const saveAutoBreak = async (): Promise<void> => {
+    setSavingBreaks(true);
+    try {
+      const cur = await axios.get<{ weekly_budget: number; traffic: Record<string, Record<string, number>> }>(`${API}/schedule/settings`, { headers: { Authorization: `Bearer ${token ?? ''}` } });
+      await axios.put(`${API}/schedule/settings`, {
+        weekly_budget: cur.data.weekly_budget ?? 0,
+        traffic: cur.data.traffic ?? {},
+        auto_break: autoBreak,
+      }, { headers: { Authorization: `Bearer ${token ?? ''}` } });
+      toast.success(autoBreak.enabled
+        ? `Pauses automatiques activées : ${autoBreak.minutes} min ${autoBreak.paid ? 'payées' : 'déduites'} dès ${autoBreak.threshold_hours} h de quart.`
+        : 'Pauses automatiques désactivées.');
+      setBreaksOpen(false);
+    } catch {
+      toast.error('Enregistrement impossible.');
+    } finally {
+      setSavingBreaks(false);
+    }
+  };
   const [monthAnchor, setMonthAnchor] = useState(() => {
     const t = new Date();
     return new Date(t.getFullYear(), t.getMonth(), 1);
@@ -318,10 +366,11 @@ export default function SchedulingModule(): JSX.Element {
       toast.error('Cet employé est en congé approuvé ce jour-là. Confirmez pour enregistrer quand même.');
       return;
     }
-    addShift({ employeeId, date, startTime, endTime, resourceIds: selectedResources, department, branchId: shiftBranch || undefined, station: shiftStation || undefined });
-    toast.success(`Quart de travail ajouté au calendrier « ${department} »${shiftStation ? ` — poste ${shiftStation}` : ''}.`);
+    addShift({ employeeId, date, startTime, endTime, resourceIds: selectedResources, department, branchId: shiftBranch || undefined, station: shiftStation || undefined, training: shiftTraining || undefined });
+    toast.success(`Quart ${shiftTraining ? 'de formation ' : ''}ajouté au calendrier « ${department} »${shiftStation ? ` — poste ${shiftStation}` : ''}.`);
     setSelectedResources([]);
     setLeaveOverride(false);
+    setShiftTraining(false);
     setDialogOpen(false);
   };
 
@@ -459,6 +508,9 @@ export default function SchedulingModule(): JSX.Element {
                     <DropdownMenuItem data-testid="copy-dept-button" onClick={() => setCopyDeptOpen(true)}>
                       <Layers className="w-4 h-4 mr-2 text-bronze-600" /> Copier entre départements
                     </DropdownMenuItem>
+                    <DropdownMenuItem data-testid="auto-breaks-button" onClick={() => setBreaksOpen(true)}>
+                      <Coffee className="w-4 h-4 mr-2 text-slate-500" /> Pauses automatiques
+                    </DropdownMenuItem>
                     <DropdownMenuItem data-testid="schedule-pdf-button" onClick={exportPdf}>
                       <FileDown className="w-4 h-4 mr-2 text-slate-500" /> Exporter en PDF
                     </DropdownMenuItem>
@@ -557,6 +609,13 @@ export default function SchedulingModule(): JSX.Element {
       <div className="flex flex-wrap items-center gap-3 mb-6">
         <div className="inline-flex rounded-full border border-slate-200 bg-white p-0.5 shadow-sm" data-testid="view-mode-toggle">
           <button
+            data-testid="view-day-button"
+            onClick={() => setViewMode('day')}
+            className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-colors ${viewMode === 'day' ? 'bg-emerald-600 text-white' : 'text-slate-500 hover:text-slate-800'}`}
+          >
+            Jour
+          </button>
+          <button
             data-testid="view-week-button"
             onClick={() => setViewMode('week')}
             className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-colors ${viewMode === 'week' ? 'bg-emerald-600 text-white' : 'text-slate-500 hover:text-slate-800'}`}
@@ -571,6 +630,25 @@ export default function SchedulingModule(): JSX.Element {
             Mois
           </button>
         </div>
+        {viewMode === 'day' && (
+          <>
+            <Button data-testid="day-prev-button" variant="outline" size="icon" className="rounded-full" onClick={() => { const d = new Date(`${dayAnchor}T12:00:00`); d.setDate(d.getDate() - 1); setDayAnchor(iso(d)); }}>
+              <ChevronLeft className="w-4 h-4" />
+            </Button>
+            <p className="text-sm font-semibold text-slate-700 capitalize" data-testid="day-range-label">
+              {new Date(`${dayAnchor}T12:00:00`).toLocaleDateString('fr-CA', { weekday: 'long', day: 'numeric', month: 'long' })}
+              {weather[dayAnchor] && <span className="ml-2 text-slate-400 font-normal normal-case">{weather[dayAnchor].icon} {weather[dayAnchor].tmax}°</span>}
+            </p>
+            <Button data-testid="day-next-button" variant="outline" size="icon" className="rounded-full" onClick={() => { const d = new Date(`${dayAnchor}T12:00:00`); d.setDate(d.getDate() + 1); setDayAnchor(iso(d)); }}>
+              <ChevronRight className="w-4 h-4" />
+            </Button>
+            {dayAnchor !== iso(new Date()) && (
+              <button data-testid="day-today-button" onClick={() => setDayAnchor(iso(new Date()))} className="text-sm text-emerald-700 font-semibold hover:underline">
+                Aujourd'hui
+              </button>
+            )}
+          </>
+        )}
         {viewMode === 'week' ? (
           <>
             <Button data-testid="week-prev-button" variant="outline" size="icon" className="rounded-full" onClick={() => setWeekOffset(weekOffset - 1)}>
@@ -588,7 +666,7 @@ export default function SchedulingModule(): JSX.Element {
               </button>
             )}
           </>
-        ) : (
+        ) : viewMode === 'month' ? (
           <>
             <Button data-testid="month-prev-button" variant="outline" size="icon" className="rounded-full" onClick={() => setMonthAnchor(new Date(monthAnchor.getFullYear(), monthAnchor.getMonth() - 1, 1))}>
               <ChevronLeft className="w-4 h-4" />
@@ -605,7 +683,7 @@ export default function SchedulingModule(): JSX.Element {
               </button>
             )}
           </>
-        )}
+        ) : null}
         {isAdmin && (
           <span data-testid="dnd-hint" className="hidden lg:inline-flex items-center gap-1.5 text-xs text-slate-400">
             <Hand className="w-3.5 h-3.5" /> Glissez-déposez ou cliquez un quart puis sa nouvelle case · <kbd className="px-1 py-0.5 rounded border border-slate-300 bg-slate-50 text-[10px] font-semibold text-slate-600">Alt</kbd>+glisser pour dupliquer
@@ -719,6 +797,11 @@ export default function SchedulingModule(): JSX.Element {
                 <th key={d} className={`px-3 py-3 border-b border-r border-slate-200 text-center ${d === today ? 'bg-emerald-600 text-white' : 'text-slate-700'}`}>
                   <span className="block text-sm font-bold font-heading">{FULL_DAYS[i]}</span>
                   <span className={`block text-[11px] font-normal mt-0.5 ${d === today ? 'text-emerald-100' : 'text-slate-400'}`}>{dayDate(d)}</span>
+                  {weather[d] && (
+                    <span data-testid={`weather-day-${d}`} title={`${weather[d].label}, ${weather[d].tmax}° / ${weather[d].tmin}°${weather[d].precip >= 30 ? ` · pluie ${weather[d].precip} %` : ''}`} className={`block text-[10px] font-normal mt-0.5 cursor-default ${d === today ? 'text-emerald-100' : 'text-slate-400'}`}>
+                      {weather[d].icon} {weather[d].tmax}°
+                    </span>
+                  )}
                   {isAdmin && (gapByDate[d] ?? 0) > 0 && (
                     <span data-testid={`understaffed-badge-${d}`} title="Effectif insuffisant — pensez à un remplaçant d'agence" className={`inline-block mt-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold ${d === today ? 'bg-white text-red-600' : 'bg-red-100 text-red-700'}`}>
                       −{gapByDate[d]}
@@ -733,7 +816,7 @@ export default function SchedulingModule(): JSX.Element {
             {state.employees.filter(inBranch).filter((e) => deptFilter === 'all' || visibleShifts.some((s) => s.employeeId === e.id && s.date >= days[0] && s.date <= days[6])).map((emp) => {
               const rowHours = visibleShifts
                 .filter((s) => s.employeeId === emp.id && s.date >= days[0] && s.date <= days[6])
-                .reduce((sum, s) => sum + hoursBetween(s.startTime, s.endTime), 0);
+                .reduce((sum, s) => sum + netHours(s), 0);
               const rate = rates[emp.id] ?? 0;
               return (
               <tr key={emp.id}>
@@ -801,9 +884,15 @@ export default function SchedulingModule(): JSX.Element {
                                 <Sparkles className="w-2 h-2" /> IA
                               </span>
                             )}
+                            {s.training && (
+                              <span data-testid={`training-shift-badge-${s.id}`} className="inline-flex items-center gap-0.5 rounded-full bg-amber-500 text-white text-[8px] font-bold px-1.5 py-px shrink-0" title="Quart de formation">
+                                <GraduationCap className="w-2.5 h-2.5" /> Formation
+                              </span>
+                            )}
                           </div>
                           <p className="text-[10px] text-slate-500 mt-0.5">
-                            {fmtHours(hoursBetween(s.startTime, s.endTime))}
+                            {fmtHours(netHours(s))}
+                            {breakApplies(s) && !autoBreak.paid && <span data-testid={`shift-break-hint-${s.id}`} title={`Pause de ${autoBreak.minutes} min déduite automatiquement`} className="ml-1 text-slate-400">☕</span>}
                             {s.station && (
                               <span data-testid={`shift-station-${s.id}`} className="ml-1.5 inline-flex items-center rounded bg-emerald-50 border border-emerald-200 text-emerald-700 px-1 py-px text-[9px] font-semibold">{s.station}</span>
                             )}
@@ -841,6 +930,8 @@ export default function SchedulingModule(): JSX.Element {
                           <p className="text-[10px] text-slate-300">
                             {(s.department && s.department !== 'Général') ? s.department : 'Général'}{s.station ? ` — poste : ${s.station}` : ''}
                           </p>
+                          {s.training && <p className="text-[10px] font-bold text-amber-300 mt-0.5">🎓 Quart de formation</p>}
+                          {breakApplies(s) && <p className="text-[10px] text-slate-300 mt-0.5">☕ Pause de {autoBreak.minutes} min {autoBreak.paid ? 'payée' : 'déduite'} (quart ≥ {autoBreak.threshold_hours} h)</p>}
                           {conflict && <p className="text-[10px] font-bold text-red-300 mt-1">{conflict}</p>}
                           {chipTasks.length > 0 ? (
                             <div className="mt-1.5 pt-1.5 border-t border-slate-700">
@@ -950,7 +1041,7 @@ export default function SchedulingModule(): JSX.Element {
                 const filteredIds = new Set(state.employees.filter(inBranch).map((e) => e.id));
                 const dh = visibleShifts
                   .filter((s) => s.date === d && filteredIds.has(s.employeeId))
-                  .reduce((sum, s) => sum + hoursBetween(s.startTime, s.endTime), 0)
+                  .reduce((sum, s) => sum + netHours(s), 0)
                   + weekAgencySlots.filter((s) => s.date === d).reduce((sum, s) => sum + hoursBetween(s.start, s.end), 0);
                 return (
                   <td key={d} data-testid={`day-total-${d}`} className="px-3 py-3 border-r border-slate-200 text-center text-xs font-bold text-slate-700">
@@ -965,7 +1056,7 @@ export default function SchedulingModule(): JSX.Element {
                 filtered.forEach((e) => {
                   const h = visibleShifts
                     .filter((s) => s.employeeId === e.id && s.date >= days[0] && s.date <= days[6])
-                    .reduce((sum, s) => sum + hoursBetween(s.startTime, s.endTime), 0);
+                    .reduce((sum, s) => sum + netHours(s), 0);
                   gh += h;
                   gc += h * (rates[e.id] ?? 0);
                 });
@@ -993,7 +1084,7 @@ export default function SchedulingModule(): JSX.Element {
         const byDept = new Map<string, { hours: number; cost: number }>();
         weekShifts.forEach((s) => {
           const dept = s.department ?? 'Général';
-          const h = hoursBetween(s.startTime, s.endTime);
+          const h = netHours(s);
           const cur = byDept.get(dept) ?? { hours: 0, cost: 0 };
           cur.hours += h;
           cur.cost += h * (rates[s.employeeId] ?? 0);
@@ -1024,6 +1115,68 @@ export default function SchedulingModule(): JSX.Element {
                 );
               })}
             </div>
+          </div>
+        );
+      })()}
+
+      {viewMode === 'day' && (() => {
+        const toMin = (t: string): number => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+        const H0 = 6 * 60;
+        const H1 = 23 * 60;
+        const pct = (m: number): number => Math.min(100, Math.max(0, ((m - H0) / (H1 - H0)) * 100));
+        const dayRows = state.employees.filter(inBranch)
+          .map((e) => ({ emp: e, dayShifts: visibleShifts.filter((s) => s.employeeId === e.id && s.date === dayAnchor).sort((a, b) => a.startTime.localeCompare(b.startTime)) }))
+          .filter((r) => r.dayShifts.length > 0);
+        const hourTicks = Array.from({ length: (H1 - H0) / 120 + 1 }, (_, i) => H0 / 60 + i * 2);
+        return (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden" data-testid="day-view">
+            <div className="flex border-b border-slate-200 bg-slate-50/80">
+              <div className="w-44 sm:w-48 shrink-0 px-5 py-3 text-[11px] uppercase tracking-[0.18em] text-slate-400 font-semibold border-r border-slate-200">Employé</div>
+              <div className="relative flex-1 h-9">
+                {hourTicks.map((h) => (
+                  <span key={h} className="absolute top-1/2 -translate-y-1/2 text-[10px] text-slate-400 font-semibold" style={{ left: `${pct(h * 60)}%` }}>{h} h</span>
+                ))}
+              </div>
+            </div>
+            {dayRows.length === 0 && (
+              <p className="p-10 text-center text-sm text-slate-500" data-testid="day-view-empty">
+                Aucun quart planifié ce jour-là{isAdmin ? ' — utilisez « Nouveau quart » pour en ajouter un.' : '.'}
+              </p>
+            )}
+            {dayRows.map(({ emp, dayShifts }) => (
+              <div key={emp.id} className="flex border-b border-slate-100 last:border-b-0" data-testid={`day-row-${emp.id}`}>
+                <div className="w-44 sm:w-48 shrink-0 px-5 py-3 border-r border-slate-200 flex items-center gap-2.5 min-w-0">
+                  <div className={`w-8 h-8 rounded-full ${emp.avatarColor} flex items-center justify-center text-white text-[10px] font-bold shrink-0`}>
+                    {emp.firstName[0]}{emp.lastName[0]}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-slate-800 truncate">{emp.firstName} {emp.lastName}</p>
+                    <p className="text-[10px] text-slate-500 truncate">{emp.position}</p>
+                  </div>
+                </div>
+                <div className="relative flex-1 h-14">
+                  {hourTicks.map((h) => (<span key={h} className="absolute inset-y-0 border-l border-slate-100" style={{ left: `${pct(h * 60)}%` }} />))}
+                  {dayShifts.map((s) => {
+                    const part = dayPart(s.startTime);
+                    const left = pct(toMin(s.startTime));
+                    const width = Math.max(4, pct(toMin(s.endTime)) - left);
+                    return (
+                      <div
+                        key={s.id}
+                        data-testid={`day-shift-${s.id}`}
+                        className={`absolute top-2 bottom-2 rounded-lg border border-slate-200/80 ${part.bg} shadow-sm px-2 py-1 overflow-hidden`}
+                        style={{ left: `${left}%`, width: `${width}%` }}
+                        title={`${s.startTime}–${s.endTime} · ${fmtHours(netHours(s))}${s.station ? ` · poste ${s.station}` : ''}${s.training ? ' · Quart de formation' : ''}${breakApplies(s) ? ` · pause ${autoBreak.minutes} min` : ''}`}
+                      >
+                        <span className={`absolute inset-y-0 left-0 w-1 ${part.bar}`} />
+                        <p className="text-[10px] font-bold text-slate-900 whitespace-nowrap">{s.startTime}–{s.endTime}{s.training ? ' 🎓' : ''}</p>
+                        <p className="text-[9px] text-slate-500 truncate">{s.station || ((s.department && s.department !== 'Général') ? s.department : '')}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
         );
       })()}
@@ -1200,6 +1353,11 @@ export default function SchedulingModule(): JSX.Element {
                 <Input data-testid="shift-end-input" type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} required />
               </div>
             </div>
+            <label data-testid="shift-training-toggle" className="flex items-center gap-2.5 text-sm text-slate-700 cursor-pointer rounded-lg border border-slate-200 px-3 py-2.5 hover:bg-amber-50/50">
+              <input type="checkbox" checked={shiftTraining} onChange={(e) => setShiftTraining(e.target.checked)} className="accent-amber-500 w-4 h-4" />
+              <GraduationCap className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>Quart de formation <span className="text-slate-400 text-xs">(identifié 🎓 à l'horaire)</span></span>
+            </label>
             {(state.resources ?? []).length > 0 && (
               <div className="space-y-2">
                 <Label>Ressources — lieu de travail, équipement (optionnel)</Label>
@@ -1236,6 +1394,44 @@ export default function SchedulingModule(): JSX.Element {
               {dialogLeaveConflict && leaveOverride ? 'Enregistrer quand même' : 'Ajouter le quart'}
             </Button>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={breaksOpen} onOpenChange={setBreaksOpen}>
+        <DialogContent data-testid="auto-breaks-dialog" className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-heading inline-flex items-center gap-2"><Coffee className="w-4 h-4 text-bronze-600" /> Pauses automatiques</DialogTitle>
+            <DialogDescription>Une pause est appliquée automatiquement aux quarts qui atteignent la durée choisie.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <label className="flex items-center gap-2.5 text-sm text-slate-700 cursor-pointer rounded-lg border border-slate-200 px-3 py-2.5">
+              <input data-testid="auto-breaks-enabled" type="checkbox" checked={autoBreak.enabled} onChange={(e) => setAutoBreak({ ...autoBreak, enabled: e.target.checked })} className="accent-emerald-600 w-4 h-4" />
+              <span className="font-semibold">Activer les pauses automatiques</span>
+            </label>
+            {autoBreak.enabled && (
+              <>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Dès (heures de quart)</Label>
+                    <Input data-testid="auto-breaks-threshold" type="number" min={1} max={16} step={0.5} value={autoBreak.threshold_hours}
+                      onChange={(e) => setAutoBreak({ ...autoBreak, threshold_hours: Number(e.target.value) })} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Durée de la pause (min)</Label>
+                    <Input data-testid="auto-breaks-minutes" type="number" min={5} max={120} step={5} value={autoBreak.minutes}
+                      onChange={(e) => setAutoBreak({ ...autoBreak, minutes: Number(e.target.value) })} />
+                  </div>
+                </div>
+                <label className="flex items-center gap-2.5 text-sm text-slate-700 cursor-pointer rounded-lg border border-slate-200 px-3 py-2.5">
+                  <input data-testid="auto-breaks-paid" type="checkbox" checked={autoBreak.paid} onChange={(e) => setAutoBreak({ ...autoBreak, paid: e.target.checked })} className="accent-emerald-600 w-4 h-4" />
+                  <span>Pause payée <span className="text-slate-400 text-xs">(sinon déduite des heures affichées)</span></span>
+                </label>
+              </>
+            )}
+            <Button data-testid="auto-breaks-save" onClick={() => void saveAutoBreak()} disabled={savingBreaks} className="w-full rounded-full bg-emerald-600 hover:bg-emerald-700">
+              {savingBreaks ? 'Enregistrement…' : 'Enregistrer'}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

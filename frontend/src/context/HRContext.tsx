@@ -36,6 +36,7 @@ interface ServerShift {
   branch_id?: string;
   station?: string;
   notes?: string;
+  training?: boolean;
 }
 
 const shiftFromServer = (d: ServerShift): Shift => ({
@@ -51,6 +52,7 @@ const shiftFromServer = (d: ServerShift): Shift => ({
   notes: d.notes || undefined,
   branchId: d.branch_id || undefined,
   station: d.station || undefined,
+  training: d.training || undefined,
 });
 
 const shiftToServer = (s: Shift, branchId: string): Record<string, unknown> => ({
@@ -66,6 +68,7 @@ const shiftToServer = (s: Shift, branchId: string): Record<string, unknown> => (
   branch_id: s.branchId || branchId,
   station: s.station ?? '',
   notes: s.notes ?? '',
+  training: s.training ?? false,
 });
 
 interface HRContextValue {
@@ -264,6 +267,7 @@ export const HRProvider = ({ children }: { children: ReactNode }) => {
         if (patch.aiGenerated !== undefined) body.ai_generated = patch.aiGenerated;
         if (patch.proposalId !== undefined) body.proposal_id = patch.proposalId;
         if (patch.notes !== undefined) body.notes = patch.notes;
+        if (patch.training !== undefined) body.training = patch.training;
         if (Object.keys(body).length > 0) {
           void axios.put(`${API}/shifts/${id}`, body, { headers: authHeaders() }).catch(() => undefined);
         }

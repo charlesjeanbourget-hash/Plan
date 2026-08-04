@@ -2,13 +2,15 @@ import { useState, FormEvent } from 'react';
 import { consumeNavPayload } from '@/lib/nav';
 import { useHR } from '@/context/HRContext';
 import { Position, POSITIONS, Employee } from '@/types';
-import { ModuleHeader, StatusBadge, EmptyState } from '@/components/modules/shared';
+import { ModuleHeader, StatusBadge, EmptyState, CollapsibleSection } from '@/components/modules/shared';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, Mail, Phone, MapPin, Trash2, Hash, UserX, Pencil, FileSpreadsheet } from 'lucide-react';
+import { Plus, Mail, Phone, MapPin, Trash2, Hash, UserX, Pencil, FileSpreadsheet, ListPlus, KeySquare } from 'lucide-react';
+import { CustomFieldsPanel } from '@/components/CustomFieldsPanel';
+import { ModuleAccessPanel } from '@/components/ModuleAccessPanel';
 import { ProfileEditor } from '@/components/ProfileEditor';
 import { SalaryHistory } from '@/components/SalaryHistory';
 import { PayrollNumbersDialog } from '@/components/PayrollNumbersDialog';
@@ -269,6 +271,20 @@ export default function EmployeeDossier(): JSX.Element {
           {selected && (
             <div className="lg:col-span-3">
               <SalaryHistory employeeId={selected.id} currentRate={selected.hourlyRate} />
+            </div>
+          )}
+          {selected && (
+            <div className="lg:col-span-3">
+              <CollapsibleSection id="dossier-module-access" title="Accès aux modules (rôles personnalisés)" icon={KeySquare}>
+                <ModuleAccessPanel employeeId={selected.id} />
+              </CollapsibleSection>
+            </div>
+          )}
+          {selected && (
+            <div className="lg:col-span-3">
+              <CollapsibleSection id="dossier-custom-fields" title="Champs RH personnalisés" icon={ListPlus}>
+                <CustomFieldsPanel employeeId={selected.id} />
+              </CollapsibleSection>
             </div>
           )}
           {selected && (

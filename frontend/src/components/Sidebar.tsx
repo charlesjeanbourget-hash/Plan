@@ -1,5 +1,6 @@
 import { useState, useEffect, FormEvent } from 'react';
 import { ModuleKey } from '@/types';
+import { MfaSettings } from '@/components/MfaSettings';
 import { useAuth } from '@/context/AuthContext';
 import { BrandLogo } from '@/components/BrandLogo';
 import { InstallAppButton } from '@/components/InstallAppButton';
@@ -12,7 +13,7 @@ import { toast } from 'sonner';
 import {
   LayoutDashboard, Users, CalendarClock, Briefcase, Wallet, RefreshCw, TreePalm,
   TrendingUp, ClipboardCheck, FileText, HeartHandshake, HelpCircle, ShieldCheck,
-  LogOut, Menu, X, LucideIcon, BadgeCheck, UserRound, KeyRound, Eye, EyeOff, GraduationCap, ListChecks, Truck, MessagesSquare, Boxes, PartyPopper, Glasses,
+  LogOut, Menu, X, LucideIcon, BadgeCheck, UserRound, KeyRound, Eye, EyeOff, GraduationCap, ListChecks, Truck, MessagesSquare, Boxes, PartyPopper, Glasses, HeartPulse, BarChart3,
 } from 'lucide-react';
 
 interface Props {
@@ -40,18 +41,20 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'deliveries', label: 'Livraisons', icon: Truck },
   { key: 'recruitment', label: 'Recrutement', icon: Briefcase },
   { key: 'payroll', label: 'Paie', icon: Wallet },
+  { key: 'reports', label: 'Rapports & API', icon: BarChart3 },
   { key: 'replacements', label: 'Remplacements', icon: RefreshCw },
   { key: 'vacations', label: 'Vacances', icon: TreePalm },
   { key: 'performance', label: 'Performance', icon: TrendingUp },
   { key: 'onboarding', label: 'Onboarding', icon: ClipboardCheck },
   { key: 'training', label: 'Formations', icon: GraduationCap },
   { key: 'contracts', label: 'Contrats', icon: FileText },
+  { key: 'sst', label: 'Santé & sécurité', icon: HeartPulse },
   { key: 'benefits', label: 'Avantages sociaux', icon: HeartHandshake },
   { key: 'faq', label: 'FAQ', icon: HelpCircle },
   { key: 'superadmin', label: 'Superadmin', icon: ShieldCheck },
 ];
 
-const EMPLOYEE_MODULES: ModuleKey[] = ['dashboard', 'myspace', 'messages', 'team', 'scheduling', 'tasks', 'deliveries', 'vacations', 'training', 'benefits', 'faq'];
+const EMPLOYEE_MODULES: ModuleKey[] = ['dashboard', 'myspace', 'messages', 'team', 'scheduling', 'tasks', 'deliveries', 'vacations', 'training', 'sst', 'benefits', 'faq'];
 
 const SIMPLE_MODULES: ModuleKey[] = ['dashboard', 'myspace', 'messages', 'scheduling', 'tasks', 'vacations', 'employees', 'payroll', 'faq'];
 
@@ -89,8 +92,10 @@ export default function Sidebar({ active, onSelect, onLogout }: Props): JSX.Elem
   };
 
   const items = NAV_ITEMS.filter((item) => {
+    const overrides = currentUser?.moduleOverrides ?? {};
+    if (overrides[item.key] === false) return false;
     if (simpleMode && !SIMPLE_MODULES.includes(item.key)) return false;
-    if (currentUser?.role === 'employee') return EMPLOYEE_MODULES.includes(item.key);
+    if (currentUser?.role === 'employee') return overrides[item.key] === true || EMPLOYEE_MODULES.includes(item.key);
     if (item.key === 'myspace') return false;
     if (item.key === 'superadmin') return currentUser?.role === 'superadmin';
     return true;
@@ -216,6 +221,7 @@ export default function Sidebar({ active, onSelect, onLogout }: Props): JSX.Elem
               Modifier le mot de passe
             </Button>
           </form>
+          <MfaSettings />
         </DialogContent>
       </Dialog>
     </>
