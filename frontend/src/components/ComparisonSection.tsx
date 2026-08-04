@@ -2,6 +2,7 @@ import logo from '@/assets/logo-arriere-plan.png';
 import {
   CheckCircle2, XCircle, MinusCircle, Sparkles, Pill, ShieldCheck, GraduationCap,
   RefreshCw, Truck, Wallet, Fingerprint, MessagesSquare, PartyPopper, ArrowRight, Trophy, LucideIcon,
+  CloudSun, HeartPulse, FileSignature, Megaphone, PiggyBank, KeyRound, BarChart3, UserCog, Award, BellRing,
 } from 'lucide-react';
 
 type Verdict = 'yes' | 'no' | 'partial';
@@ -14,18 +15,56 @@ interface Row {
   agendrix: Verdict;
 }
 
-const ROWS: Row[] = [
-  { icon: Pill, label: 'Conçu exclusivement pour les pharmacies', detail: 'Laboratoire, plancher, livraisons, licences professionnelles — rien à adapter.', ap: 'yes', agendrix: 'no' },
-  { icon: Sparkles, label: 'Horaires générés par IA', detail: 'Budgets, priorités, achalandage, disponibilités et congés respectés automatiquement.', ap: 'yes', agendrix: 'no' },
-  { icon: ShieldCheck, label: 'Conformité Loi 25 intégrée', detail: 'Journal d\'audit, droit à l\'oubli, certificats chiffrés, suivi des licences.', ap: 'yes', agendrix: 'partial' },
-  { icon: GraduationCap, label: 'Formations générées par IA + examens', detail: 'Déposez un PDF : parcours de formation et examen créés en quelques secondes.', ap: 'yes', agendrix: 'no' },
-  { icon: RefreshCw, label: 'Remplacements automatisés par agences', detail: 'Courriels aux agences, offres comparées, choix en un clic.', ap: 'yes', agendrix: 'no' },
-  { icon: Truck, label: 'Livraisons et tournées optimisées', detail: 'Itinéraire calculé, preuves de livraison, suivi du livreur.', ap: 'yes', agendrix: 'no' },
-  { icon: Fingerprint, label: 'Punch par NIP, pauses et arrondis', detail: 'Borne tablette, géolocalisation, règles d\'arrondi configurables.', ap: 'yes', agendrix: 'yes' },
-  { icon: Wallet, label: 'Paie : exports Employeur D, Nethris, ADP', detail: 'Heures réelles punchées transformées en fichiers prêts pour votre logiciel de paie.', ap: 'yes', agendrix: 'partial' },
-  { icon: MessagesSquare, label: 'Messagerie d\'équipe et annonces épinglées', detail: 'Conversations d\'équipe, directes et gestionnaires, avec pièces jointes.', ap: 'yes', agendrix: 'yes' },
-  { icon: PartyPopper, label: 'Sondages éclair, kudos et quarts à réclamer', detail: 'Engagement d\'équipe et quarts ouverts « premier arrivé, premier servi ».', ap: 'yes', agendrix: 'partial' },
+interface Group {
+  title: string;
+  rows: Row[];
+}
+
+const GROUPS: Group[] = [
+  {
+    title: 'Exclusivités pharmacie',
+    rows: [
+      { icon: Pill, label: 'Conçu exclusivement pour les pharmacies', detail: 'Laboratoire, plancher, livraisons, licences professionnelles — rien à adapter.', ap: 'yes', agendrix: 'no' },
+      { icon: Sparkles, label: 'Horaires générés par IA', detail: 'Budgets, priorités, achalandage, disponibilités et congés respectés automatiquement.', ap: 'yes', agendrix: 'no' },
+      { icon: GraduationCap, label: 'Formations générées par IA + examens', detail: 'Déposez un PDF : parcours de formation et examen créés en quelques secondes.', ap: 'yes', agendrix: 'no' },
+      { icon: RefreshCw, label: 'Remplacements automatisés par agences', detail: 'Courriels aux agences, offres comparées, choix en un clic.', ap: 'yes', agendrix: 'no' },
+      { icon: Truck, label: 'Livraisons et tournées optimisées', detail: 'Itinéraire calculé, preuves de livraison, suivi du livreur.', ap: 'yes', agendrix: 'no' },
+    ],
+  },
+  {
+    title: 'Horaires & temps',
+    rows: [
+      { icon: Fingerprint, label: 'Punch par NIP, pauses et arrondis', detail: 'Borne tablette, géolocalisation, règles d\'arrondi configurables.', ap: 'yes', agendrix: 'yes' },
+      { icon: CloudSun, label: 'Météo intégrée à l\'horaire', detail: 'Prévisions affichées directement sur la grille pour anticiper l\'achalandage.', ap: 'yes', agendrix: 'no' },
+      { icon: Award, label: 'Quarts ouverts par ancienneté + formation', detail: 'Attribution équitable des quarts ouverts et quarts de formation jumelés.', ap: 'yes', agendrix: 'yes' },
+      { icon: PiggyBank, label: 'Banques de temps', detail: 'Heures supplémentaires accumulées et reprises, suivies employé par employé.', ap: 'yes', agendrix: 'yes' },
+      { icon: BellRing, label: 'Rappels de quarts et résumé matinal', detail: 'Rappels automatiques avant chaque quart et résumé de la journée envoyé à l\'équipe.', ap: 'yes', agendrix: 'partial' },
+    ],
+  },
+  {
+    title: 'RH & documents',
+    rows: [
+      { icon: HeartPulse, label: 'Santé & sécurité au travail (SST)', detail: 'Déclaration d\'incidents, suivi CNESST et mesures correctives intégrées.', ap: 'yes', agendrix: 'no' },
+      { icon: FileSignature, label: 'Demandes de documents et signatures', detail: 'Collecte de documents et signatures électroniques directement dans l\'app.', ap: 'yes', agendrix: 'yes' },
+      { icon: UserCog, label: 'Champs RH personnalisés', detail: 'Ajoutez vos propres champs aux dossiers employés (taille d\'uniforme, allergies, etc.).', ap: 'yes', agendrix: 'yes' },
+      { icon: Megaphone, label: 'Fil d\'annonces avec confirmations de lecture', detail: 'Annonces épinglées, réactions et suivi de qui a lu quoi.', ap: 'yes', agendrix: 'yes' },
+      { icon: Wallet, label: 'Paie : exports Employeur D, Nethris, ADP', detail: 'Heures réelles punchées transformées en fichiers prêts pour votre logiciel de paie.', ap: 'yes', agendrix: 'partial' },
+      { icon: PartyPopper, label: 'Sondages éclair, kudos et quarts à réclamer', detail: 'Engagement d\'équipe et quarts ouverts « premier arrivé, premier servi ».', ap: 'yes', agendrix: 'partial' },
+      { icon: MessagesSquare, label: 'Messagerie d\'équipe et annonces épinglées', detail: 'Conversations d\'équipe, directes et gestionnaires, avec pièces jointes.', ap: 'yes', agendrix: 'yes' },
+    ],
+  },
+  {
+    title: 'Sécurité & administration',
+    rows: [
+      { icon: KeyRound, label: 'Authentification à deux facteurs (MFA)', detail: 'Codes TOTP compatibles Google Authenticator pour protéger chaque compte.', ap: 'yes', agendrix: 'yes' },
+      { icon: ShieldCheck, label: 'Conformité Loi 25 intégrée', detail: 'Journal d\'audit, droit à l\'oubli, certificats chiffrés, suivi des licences.', ap: 'yes', agendrix: 'partial' },
+      { icon: BarChart3, label: 'Rapports, API et webhooks POS', detail: 'Rapports exportables, API ouverte et connexion à votre caisse pour croiser ventes et heures.', ap: 'yes', agendrix: 'partial' },
+      { icon: UserCog, label: 'Rôles personnalisés par module', detail: 'Contrôlez précisément quels modules chaque rôle peut voir et modifier.', ap: 'yes', agendrix: 'yes' },
+    ],
+  },
 ];
+
+const ALL_ROWS: Row[] = GROUPS.flatMap((g) => g.rows);
 
 const VERDICT_UI: Record<Verdict, { icon: LucideIcon; cls: string; label: string }> = {
   yes: { icon: CheckCircle2, cls: 'text-emerald-600', label: 'Inclus' },
@@ -49,8 +88,9 @@ const scrollToDemo = (): void => {
 };
 
 export const ComparisonSection = (): JSX.Element => {
-  const apScore = ROWS.filter((r) => r.ap === 'yes').length;
-  const agScore = ROWS.filter((r) => r.agendrix === 'yes').length;
+  const apScore = ALL_ROWS.filter((r) => r.ap === 'yes').length;
+  const agScore = ALL_ROWS.filter((r) => r.agendrix === 'yes').length;
+  let rowIndex = -1;
   return (
     <section className="bg-slate-900 relative overflow-hidden" data-testid="comparison-section" id="sec-comparaison">
       <div className="absolute -top-32 -right-32 w-96 h-96 rounded-full bg-emerald-600/10 blur-3xl" />
@@ -64,8 +104,8 @@ export const ComparisonSection = (): JSX.Element => {
             Arrière Plan <span className="text-slate-500 font-bold">vs</span> Agendrix
           </h2>
           <p className="mt-4 text-slate-400 text-sm sm:text-base max-w-2xl mx-auto">
-            Agendrix est un excellent outil généraliste. Arrière Plan est le seul SIRH pensé de A à Z
-            pour le quotidien d'une pharmacie québécoise.
+            Tout ce qu'Agendrix fait, Arrière Plan le fait aussi — plus tout ce qu'une pharmacie
+            québécoise attend vraiment de son SIRH.
           </p>
         </div>
 
@@ -84,37 +124,51 @@ export const ComparisonSection = (): JSX.Element => {
             </div>
           </div>
 
-          {ROWS.map((r, i) => (
-            <div
-              key={r.label}
-              data-testid={`comparison-row-${i}`}
-              className="grid grid-cols-[1fr,88px,88px] sm:grid-cols-[1fr,150px,150px] items-center border-b border-slate-100 last:border-0 hover:bg-slate-50/60 transition-colors"
-            >
-              <div className="px-4 sm:px-7 py-3.5 flex items-start gap-3 min-w-0">
-                <span className="w-8 h-8 rounded-lg bg-slate-100 text-slate-600 flex items-center justify-center shrink-0 mt-0.5">
-                  <r.icon className="w-4 h-4" />
-                </span>
-                <div className="min-w-0">
-                  <p className="text-sm font-bold text-slate-800">{r.label}</p>
-                  <p className="hidden md:block text-xs text-slate-500 mt-0.5">{r.detail}</p>
-                </div>
+          {GROUPS.map((group) => (
+            <div key={group.title}>
+              <div
+                data-testid={`comparison-group-${group.title}`}
+                className="px-4 sm:px-7 py-2.5 bg-slate-900/[0.03] border-b border-slate-100 text-[10px] sm:text-[11px] uppercase tracking-[0.2em] text-emerald-700 font-extrabold"
+              >
+                {group.title}
               </div>
-              <div className="py-3.5 flex justify-center bg-emerald-50/60 border-x border-emerald-100 self-stretch items-center">
-                <VerdictCell v={r.ap} testId={`comparison-ap-${i}`} />
-              </div>
-              <div className="py-3.5 flex justify-center">
-                <VerdictCell v={r.agendrix} testId={`comparison-agendrix-${i}`} />
-              </div>
+              {group.rows.map((r) => {
+                rowIndex += 1;
+                const i = rowIndex;
+                return (
+                  <div
+                    key={r.label}
+                    data-testid={`comparison-row-${i}`}
+                    className="grid grid-cols-[1fr,88px,88px] sm:grid-cols-[1fr,150px,150px] items-center border-b border-slate-100 last:border-0 hover:bg-slate-50/60 transition-colors"
+                  >
+                    <div className="px-4 sm:px-7 py-3.5 flex items-start gap-3 min-w-0">
+                      <span className="w-8 h-8 rounded-lg bg-slate-100 text-slate-600 flex items-center justify-center shrink-0 mt-0.5">
+                        <r.icon className="w-4 h-4" />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-slate-800">{r.label}</p>
+                        <p className="hidden md:block text-xs text-slate-500 mt-0.5">{r.detail}</p>
+                      </div>
+                    </div>
+                    <div className="py-3.5 flex justify-center bg-emerald-50/60 border-x border-emerald-100 self-stretch items-center">
+                      <VerdictCell v={r.ap} testId={`comparison-ap-${i}`} />
+                    </div>
+                    <div className="py-3.5 flex justify-center">
+                      <VerdictCell v={r.agendrix} testId={`comparison-agendrix-${i}`} />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           ))}
 
           <div className="grid grid-cols-[1fr,88px,88px] sm:grid-cols-[1fr,150px,150px] items-center bg-slate-50/80 border-t-2 border-slate-100">
             <div className="px-4 sm:px-7 py-4 text-xs font-bold uppercase tracking-[0.15em] text-slate-500">Score</div>
             <div className="py-4 text-center bg-emerald-600 self-stretch flex items-center justify-center">
-              <span data-testid="comparison-score-ap" className="font-heading text-lg font-extrabold text-white">{apScore}/{ROWS.length}</span>
+              <span data-testid="comparison-score-ap" className="font-heading text-lg font-extrabold text-white">{apScore}/{ALL_ROWS.length}</span>
             </div>
             <div className="py-4 text-center">
-              <span data-testid="comparison-score-agendrix" className="font-heading text-lg font-extrabold text-slate-400">{agScore}/{ROWS.length}</span>
+              <span data-testid="comparison-score-agendrix" className="font-heading text-lg font-extrabold text-slate-400">{agScore}/{ALL_ROWS.length}</span>
             </div>
           </div>
         </div>

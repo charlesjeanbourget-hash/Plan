@@ -482,6 +482,9 @@ Question utilisateur : « l'IA prend-elle en considération les remplaçants d'a
 14. **API développeurs + POS**: db.api_keys (max 5, sha256, préfixe visible, clé montrée une seule fois), GET/POST/DELETE /dev/keys, webhook public POST /api/integrations/pos/traffic (X-API-Key) alimentant schedule_settings.traffic (_sanitize_traffic), doc curl + import CSV achalandage (jour;matin;après-midi;soir) dans ReportsModule.
 15. **Rôles personnalisables**: users.module_overrides {module: bool}; GET/PUT /users/by-employee/{eid}(/modules); ModuleAccessPanel (dossier employé, section dossier-module-access, cycle défaut→accordé→retiré); Sidebar filtre selon overrides (true=ajoute à un employé, false=retire).
 16. Correctif: sender email_settings remis à onboarding@resend.dev (gmail non vérifiable par Resend).
+## Itération landing + centre d'aide (4 août 2026) — testée par captures d'écran
+1. **Section Comparaison refondue** (`ComparisonSection.tsx`): 21 lignes groupées en 4 catégories (Exclusivités pharmacie, Horaires & temps, RH & documents, Sécurité & administration). Nouvelles lignes: météo, quarts ouverts par ancienneté + formation, banques de temps, rappels/résumé matinal, SST, documents & signatures, champs RH personnalisés, fil d'annonces, MFA, rapports/API/POS, rôles personnalisés. Score affiché: AP 21/21 vs Agendrix 9/21. testids: comparison-group-{titre}, comparison-row-{i}.
+2. **Centre d'aide avec guides de démarrage** (`FAQModule.tsx` renommé « Centre d'aide » + nouveau `StarterGuides.tsx`): onglets tab-guides/tab-faq (Tabs shadcn + nouveau `ui/tabs.d.ts` pour TS). 10 mini-guides pas-à-pas (premiers pas, punch, horaire/échanges, congés, tâches, messages/annonces, formations, documents/signatures, SST, MFA) en accordéon avec étapes numérotées (testid guide-{slug}).
+
 ### Reste au backlog
-- Centre d'aide enrichi (tutoriels par module) — FAQ + visite guidée existent déjà.
 - QuickBooks (attend clés Intuit). Domaine Resend à vérifier par l'utilisateur pour courriels multi-destinataires.

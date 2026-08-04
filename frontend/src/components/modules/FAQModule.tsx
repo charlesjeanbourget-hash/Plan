@@ -2,6 +2,8 @@ import { useState, FormEvent } from 'react';
 import { useHR } from '@/context/HRContext';
 import { useAuth } from '@/context/AuthContext';
 import { ModuleHeader } from '@/components/modules/shared';
+import { StarterGuides } from '@/components/modules/StarterGuides';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -33,8 +35,8 @@ export default function FAQModule(): JSX.Element {
   return (
     <div data-testid="faq-module">
       <ModuleHeader
-        title="FAQ"
-        subtitle="Réponses aux questions fréquentes de votre équipe."
+        title="Centre d'aide"
+        subtitle="Guides de démarrage et réponses aux questions fréquentes de votre équipe."
         action={
           isAdmin ? (
             <Button data-testid="add-faq-button" onClick={() => setDialogOpen(true)} className="rounded-full bg-emerald-600 hover:bg-emerald-700">
@@ -43,23 +45,34 @@ export default function FAQModule(): JSX.Element {
           ) : undefined
         }
       />
-      <div className="max-w-3xl space-y-10">
-        {categories.map((cat) => (
-          <div key={cat}>
-            <p className="text-xs uppercase tracking-[0.2em] text-emerald-700 font-bold mb-4">{cat}</p>
-            <Accordion type="single" collapsible className="bg-white rounded-xl border border-slate-200 px-6">
-              {state.faqItems.filter((f) => f.category === cat).map((f) => (
-                <AccordionItem key={f.id} value={f.id}>
-                  <AccordionTrigger data-testid={`faq-question-${f.id}`} className="text-left font-semibold text-slate-800 text-sm hover:text-emerald-700">
-                    {f.question}
-                  </AccordionTrigger>
-                  <AccordionContent className="text-sm text-slate-600">{f.answer}</AccordionContent>
-                </AccordionItem>
-              ))}
-            </Accordion>
+      <Tabs defaultValue="guides">
+        <TabsList className="mb-6">
+          <TabsTrigger data-testid="tab-guides" value="guides">Guides de démarrage</TabsTrigger>
+          <TabsTrigger data-testid="tab-faq" value="faq">Questions fréquentes</TabsTrigger>
+        </TabsList>
+        <TabsContent value="guides">
+          <StarterGuides />
+        </TabsContent>
+        <TabsContent value="faq">
+          <div className="max-w-3xl space-y-10">
+            {categories.map((cat) => (
+              <div key={cat}>
+                <p className="text-xs uppercase tracking-[0.2em] text-emerald-700 font-bold mb-4">{cat}</p>
+                <Accordion type="single" collapsible className="bg-white rounded-xl border border-slate-200 px-6">
+                  {state.faqItems.filter((f) => f.category === cat).map((f) => (
+                    <AccordionItem key={f.id} value={f.id}>
+                      <AccordionTrigger data-testid={`faq-question-${f.id}`} className="text-left font-semibold text-slate-800 text-sm hover:text-emerald-700">
+                        {f.question}
+                      </AccordionTrigger>
+                      <AccordionContent className="text-sm text-slate-600">{f.answer}</AccordionContent>
+                    </AccordionItem>
+                  ))}
+                </Accordion>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </TabsContent>
+      </Tabs>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent data-testid="add-faq-dialog">
