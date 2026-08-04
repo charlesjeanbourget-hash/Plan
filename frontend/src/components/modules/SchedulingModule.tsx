@@ -2,9 +2,12 @@ import { useState, useEffect, useCallback, FormEvent } from 'react';
 import axios from 'axios';
 import { useHR } from '@/context/HRContext';
 import { useAuth } from '@/context/AuthContext';
-import { ReplacementRequestDoc, Appointment, Shift, Employee, WorkStation, RushPeriod } from '@/types';
+import { ReplacementRequestDoc, Appointment, Shift, Employee, WorkStation, RushPeriod, ShiftTask } from '@/types';
 import { WorkStationsPanel } from '@/components/WorkStationsPanel';
 import { WorkStationsDialog } from '@/components/WorkStationsDialog';
+import { Tooltip, TooltipTrigger, TooltipContent as TooltipContentBase, TooltipProvider } from '@/components/ui/tooltip';
+
+const TooltipContent = TooltipContentBase as React.ComponentType<React.PropsWithChildren<{ side?: string; className?: string; 'data-testid'?: string }>>;
 import { isQualified } from '@/lib/qualif';
 import { ModuleHeader } from '@/components/modules/shared';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
@@ -12,7 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ChevronLeft, ChevronRight, Plus, X, ArrowLeftRight, Check, Stethoscope, CopyPlus, LayoutTemplate, FileDown, Megaphone, Hourglass, BookOpenCheck, MapPin, Wrench, Hand, Sparkles, AlertTriangle, Layers, TreePalm } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, X, ArrowLeftRight, Check, Stethoscope, CopyPlus, LayoutTemplate, FileDown, Megaphone, Hourglass, BookOpenCheck, MapPin, Wrench, Hand, Sparkles, AlertTriangle, Layers, TreePalm, CheckCircle2, Circle } from 'lucide-react';
 import { ScheduleProposals } from '@/components/ScheduleProposals';
 import { AppointmentDialog } from '@/components/AppointmentDialog';
 import { DuplicateWeekDialog } from '@/components/DuplicateWeekDialog';
@@ -215,6 +218,15 @@ export default function SchedulingModule(): JSX.Element {
   });
   const today = iso(new Date());
 
+  const SHIFT_WINDOWS: Record<string, [string, string]> = { 'Matin': ['06:00', '12:00'], 'Après-midi': ['12:00', '17:00'], 'Soir': ['17:00', '23:59'] };
+  const tasksForShift = (s: Shift, empId: string): ShiftTask[] => {
+    const windows = Object.entries(SHIFT_WINDOWS)
+      .filter(([, [ws, we]]) => s.startTime < we && s.endTime > ws)
+      .map(([name]) => name);
+    return weekTasks.filter((t) => t.date === s.date && windows.includes(t.shift)
+      && (!t.assignee_employee_id || t.assignee_employee_id === empId));
+  };
+
   const weekAgencySlots = replacements.flatMap((q) => q.slots
     .filter((s) => s.date >= days[0] && s.date <= days[6])
     .map((s) => ({ ...s, candidate: q.chosen_offer?.candidate_name ?? '', agency: q.chosen_offer?.agency_name ?? '', role: q.role, rate: q.chosen_offer?.hourly_rate ?? 0 })));
@@ -235,7 +247,7 @@ export default function SchedulingModule(): JSX.Element {
 
   const [traffic, setTraffic] = useState<Record<string, Record<string, number>>>({});
   const [trafficPeriods, setTrafficPeriods] = useState<{ start_md: string; end_md: string; traffic: Record<string, Record<string, number>> }[]>([]);
-  const [weekTasks, setWeekTasks] = useState<{ date: string; shift: string; done: boolean }[]>([]);
+  const [weekTasks, setWeekTasks] = useState<ShiftTask[]>([]);
 
   useEffect(() => {
     if (!isAdmin || !token) return;
@@ -245,12 +257,12 @@ export default function SchedulingModule(): JSX.Element {
   }, [isAdmin, token]);
 
   useEffect(() => {
-    if (!isAdmin || !token) return;
-    axios.get<{ date: string; shift: string; done: boolean }[]>(`${API}/tasks?start=${days[0]}&end=${days[6]}`, { headers: { Authorization: `Bearer ${token}` } })
+    if (!token) return;
+    axios.get<ShiftTask[]>(`${API}/tasks?start=${days[0]}&end=${days[6]}`, { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => setWeekTasks(r.data))
       .catch(() => setWeekTasks([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAdmin, token, days[0], days[6]]);
+  }, [token, days[0], days[6]]);
 
   const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
   const STAFF_BLOCKS = [
@@ -416,6 +428,7 @@ export default function SchedulingModule(): JSX.Element {
   };
 
   return (
+    <TooltipProvider delayDuration={200}>
     <div data-testid="scheduling-module">
       <ModuleHeader
         title="Horaires"
@@ -733,15 +746,17 @@ export default function SchedulingModule(): JSX.Element {
                       {shifts.map((s) => {
                         const part = dayPart(s.startTime);
                         const conflict = conflictOf(s);
+                        const chipTasks = tasksForShift(s, emp.id);
+                        const chipDone = chipTasks.filter((t) => t.done).length;
                         return (
+                        <Tooltip key={s.id}>
+                        <TooltipTrigger asChild>
                         <div
-                          key={s.id}
                           data-testid={`shift-chip-${s.id}`}
                           draggable={isAdmin}
                           onDragStart={(e) => { setDragShiftId(s.id); e.dataTransfer.effectAllowed = 'copyMove'; }}
                           onDragEnd={() => { setDragShiftId(null); setDropTarget(null); }}
                           onClick={(e) => { e.stopPropagation(); selectForMove(s, emp.id, d); }}
-                          title={conflict ?? (isAdmin ? 'Cliquez pour sélectionner, puis cliquez sur la case de destination' : undefined)}
                           className={`group relative overflow-hidden rounded-lg border ${conflict ? 'border-red-300' : 'border-slate-200/80'} ${part.bg} pl-3.5 pr-2 py-2 shadow-sm transition-shadow hover:shadow-md ${isAdmin ? 'cursor-grab active:cursor-grabbing' : ''} ${dragShiftId === s.id ? 'opacity-40' : ''} ${moveShiftId === s.id ? 'ring-2 ring-bronze-500 shadow-md' : conflict ? 'ring-2 ring-red-400' : ''}`}
                         >
                           <span className={`absolute inset-y-0 left-0 w-1.5 ${conflict ? 'bg-red-500' : part.bar}`} />
@@ -789,6 +804,36 @@ export default function SchedulingModule(): JSX.Element {
                             </button>
                           )}
                         </div>
+                        </TooltipTrigger>
+                        <TooltipContent side="right" className="max-w-xs bg-slate-900 text-white border-slate-700" data-testid={`shift-tooltip-${s.id}`}>
+                          <p className="text-xs font-bold">{emp.firstName} {emp.lastName} · {s.startTime}–{s.endTime}</p>
+                          <p className="text-[10px] text-slate-300">
+                            {(s.department && s.department !== 'Général') ? s.department : 'Général'}{s.station ? ` — poste : ${s.station}` : ''}
+                          </p>
+                          {conflict && <p className="text-[10px] font-bold text-red-300 mt-1">{conflict}</p>}
+                          {chipTasks.length > 0 ? (
+                            <div className="mt-1.5 pt-1.5 border-t border-slate-700">
+                              <p className="text-[10px] font-bold text-emerald-300 mb-1">Tâches du quart — {chipDone}/{chipTasks.length} faites</p>
+                              <ul className="space-y-0.5">
+                                {chipTasks.slice(0, 8).map((t) => (
+                                  <li key={t.id} className="text-[10px] flex items-start gap-1.5">
+                                    {t.done
+                                      ? <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0 mt-px" />
+                                      : <Circle className="w-3 h-3 text-amber-400 shrink-0 mt-px" />}
+                                    <span className={t.done ? 'line-through text-slate-400' : 'text-slate-100'}>
+                                      {t.title}{!t.assignee_employee_id ? ' (équipe)' : ''}
+                                    </span>
+                                  </li>
+                                ))}
+                                {chipTasks.length > 8 && <li className="text-[10px] text-slate-400">… et {chipTasks.length - 8} autre(s)</li>}
+                              </ul>
+                            </div>
+                          ) : (
+                            <p className="text-[10px] text-slate-400 mt-1">Aucune tâche attitrée à ce quart.</p>
+                          )}
+                          {isAdmin && <p className="text-[9px] text-slate-500 mt-1.5">Cliquer : déplacer · Glisser : déplacer/copier (Alt)</p>}
+                        </TooltipContent>
+                        </Tooltip>
                         );
                       })}
                       {appts.map((a) => (
@@ -1163,5 +1208,6 @@ export default function SchedulingModule(): JSX.Element {
         </DialogContent>
       </Dialog>
     </div>
+    </TooltipProvider>
   );
 }

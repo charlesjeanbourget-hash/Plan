@@ -15,7 +15,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { TASK_CATALOG } from '@/lib/taskCatalog';
-import { Plus, ChevronLeft, ChevronRight, Trash2, CopyPlus, Sunrise, Sun, Moon, Repeat, LayoutTemplate, BarChart3, CalendarDays, AlertTriangle, LucideIcon } from 'lucide-react';
+import { Plus, ChevronLeft, ChevronRight, Trash2, CopyPlus, Sunrise, Sun, Moon, Repeat, LayoutTemplate, BarChart3, CalendarDays, AlertTriangle, CheckCircle2, Circle, ClipboardList, LucideIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { consumeNavPayload } from '@/lib/nav';
 
@@ -290,6 +290,60 @@ export default function TasksModule(): JSX.Element {
           </span>
         </div>
       </div>
+
+      {isAdmin && tasks.length > 0 && (() => {
+        const todo = tasks.filter((t) => !t.done);
+        const doneList = tasks.filter((t) => t.done);
+        const dayLbl = (d: string): string => new Date(`${d}T00:00:00`).toLocaleDateString('fr-CA', { weekday: 'short', day: '2-digit', month: '2-digit' });
+        const row = (t: ShiftTask, isDone: boolean): JSX.Element => (
+          <div key={t.id} className={`flex items-center gap-2.5 rounded-lg border px-3 py-1.5 ${isDone ? 'border-emerald-100 bg-emerald-50/50' : 'border-amber-100 bg-amber-50/50'}`}>
+            <button
+              data-testid={`summary-toggle-${t.id}`}
+              onClick={() => void toggle(t)}
+              className={`shrink-0 transition-colors ${isDone ? 'text-emerald-600 hover:text-amber-500' : 'text-amber-500 hover:text-emerald-600'}`}
+              aria-label={isDone ? 'Remettre à faire' : 'Marquer comme faite'}
+            >
+              {isDone ? <CheckCircle2 className="w-4 h-4" /> : <Circle className="w-4 h-4" />}
+            </button>
+            <div className="min-w-0 flex-1">
+              <p className={`text-xs font-semibold truncate ${isDone ? 'text-slate-500 line-through' : 'text-slate-800'}`}>{t.title}</p>
+              <p className="text-[10px] text-slate-500">{dayLbl(t.date)} · {t.shift}{t.assignee_name ? ` · ${t.assignee_name}` : ' · équipe'}</p>
+            </div>
+          </div>
+        );
+        return (
+          <div data-testid="week-tasks-summary" className="bg-white rounded-xl border border-slate-200 p-5 mb-6">
+            <div className="flex flex-wrap items-center gap-3 mb-4">
+              <h3 className="font-heading font-bold text-slate-900 text-sm inline-flex items-center gap-2">
+                <ClipboardList className="w-4 h-4 text-emerald-600" /> Suivi de la semaine — fait vs à faire
+              </h3>
+              {todo.length === 0 ? (
+                <span data-testid="week-alldone-badge" className="inline-flex rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2.5 py-0.5">Toutes les tâches de la semaine sont faites</span>
+              ) : (
+                <span data-testid="week-todo-badge" className="inline-flex rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold px-2.5 py-0.5">{todo.length} à faire · {doneList.length} faites</span>
+              )}
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              <div>
+                <p className="text-[10px] uppercase tracking-[0.15em] font-bold text-amber-700 mb-2">Reste à faire ({todo.length})</p>
+                <div data-testid="week-todo-list" className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                  {todo.length === 0
+                    ? <p className="text-xs text-slate-400">Rien à faire — tout est coché.</p>
+                    : todo.map((t) => row(t, false))}
+                </div>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-[0.15em] font-bold text-emerald-700 mb-2">Faites ({doneList.length})</p>
+                <div data-testid="week-done-list" className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                  {doneList.length === 0
+                    ? <p className="text-xs text-slate-400">Aucune tâche cochée pour l'instant.</p>
+                    : doneList.map((t) => row(t, true))}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
         {days.map((d, i) => {
