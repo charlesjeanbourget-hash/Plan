@@ -443,3 +443,16 @@ Question utilisateur : « l'IA prend-elle en considération les remplaçants d'a
 2. **Page Tâches — panneau admin « Suivi de la semaine — fait vs à faire »** (week-tasks-summary, admin/manager) : badge « N à faire · M faites » (ou « toutes faites »), deux colonnes scrollables Reste à faire (ambre, ○ cliquable pour cocher) / Faites (vert, ✓ cliquable pour décocher), chaque ligne = titre + jour · quart · assigné/équipe. data-testid week-todo-list / week-done-list / summary-toggle-{id}.
 3. PIÈGE CONFIRMÉ : les search_replace PARALLÈLES sur un MÊME fichier frontend créent des courses (édits perdus) — toujours séquentiels sur un même fichier.
 - Démo en place : quart demo-hover-1 (Julie, mer. 05/08, Robot) + 2 tâches (frigo vaccins, rotation périmés) ; quart doublon « Accueil » supprimé.
+
+## Itération 54 (4 août 2026) — Rappels tâches vérifiés + Épuration des pages internes (sections repliables) — testée iteration_40.json 100%
+1. **Rappels « Tâches restantes » VALIDÉS** (backend, écrit à l'itération précédente) : POST /api/tasks/reminders/run(?shift=&date=) + crons 12h/17h/21h30. Corrigé : anti-doublon des notifications in-app (recherche pharmacy_id+target_employee_id+title+created_at>=today avant _notify_shift_change). Anti-doublon chat déjà en place (kind=task_reminder+reminder_date+reminder_shift). 1er appel sent>0, 2e appel sent=0. ⚠ RESEND_API_KEY INVALIDE côté Resend → courriels échouent « API key is invalid » (logué proprement, non bloquant) — l'utilisateur devra fournir une clé Resend valide pour réactiver TOUS les courriels (rappels, mots de passe oubliés, rapports).
+2. **CollapsibleSection** (shared.tsx) : composant réutilisable — barre avec icône+titre+badge (tons slate/amber/emerald) + bouton Développer/Réduire (chevron), persistance localStorage `ap-section-{id}`, testids section-toggle-{id}/section-content-{id}/section-badge-{id}.
+3. **Pages épurées** :
+   - Horaires : 5 sections repliées par défaut (sched-proposals, sched-budget, sched-swaps [auto-ouverte+badge si en attente], sched-open-shifts, sched-stations) ; entête réduit de 7 à 4 boutons via menu déroulant « Outils » (schedule-tools-menu : Modèles, Dupliquer, Copier départements, PDF, Accusés — testids conservés sur les items).
+   - Tâches : synthèse « Suivi de la semaine » repliée (tasks-week-summary) avec badge « X à faire · Y faites ».
+   - Tableau de bord : dash-budget/dash-honor/dash-tasks repliés, dash-upcoming ouvert.
+   - Vacances : vac-balances replié ; vac-requests badge + auto-ouvert si demandes en attente ; calendrier toujours visible.
+   - Équipe : team-polls/team-kudos repliables (ouverts par défaut, badges de compte).
+   - Mon espace : myspace-payroll-section/myspace-leaves-section/myspace-profile-section repliés ; punch + prochains quarts visibles.
+   - Superadmin : sa-overview ouvert ; sa-security/demos/incidents/logins/users/partners/branches repliés ; tableau pharmacies visible.
+4. NOTE compte : charlesjeanbourget@gmail.com → 401 avec le mot de passe documenté (probablement changé par l'utilisateur ; seed idempotent ne l'écrase pas). Superadmin de test fonctionnel : jeffmenard78@hotmail.com.
