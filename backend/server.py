@@ -7526,8 +7526,9 @@ async def send_report_email(pid: str, report_id: str, recipients: list) -> bool:
             f"<h2 style='color:#047857'>{subject}</h2>{table}"
             f"<p style='font-size:12px;color:#94a3b8;margin-top:16px'>Généré le {when} (Montréal) — Arrière Plan</p></div>")
     try:
-        await asyncio.to_thread(resend.Emails.send, {
-            "from": await get_sender(), "to": recipients, "subject": f"{subject} — Arrière Plan", "html": html})
+        await asyncio.wait_for(asyncio.to_thread(resend.Emails.send, {
+            "from": await get_sender(), "to": recipients, "subject": f"{subject} — Arrière Plan", "html": html}),
+            timeout=12)
         return True
     except Exception as e:
         logger.warning(f"Envoi du rapport {report_id} échoué : {e}")
@@ -7579,7 +7580,7 @@ async def send_report_now(report_id: str, principal: dict = Depends(get_principa
     pid = principal["pharmacy_id"] or "ph1"
     ok = await send_report_email(pid, report_id, [principal["email"]])
     if not ok:
-        raise HTTPException(status_code=502, detail="Envoi impossible — vérifiez la configuration courriel (Resend).")
+        raise HTTPException(status_code=400, detail="Envoi impossible — le courriel expéditeur/destinataire n'est pas autorisé par Resend (vérifiez votre domaine sur resend.com/domains).")
     return {"ok": True, "sent_to": principal["email"]}
 
 
