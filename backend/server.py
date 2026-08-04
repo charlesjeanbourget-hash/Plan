@@ -5215,38 +5215,79 @@ def unfinished_tasks_html(shift: str, date_str: str, tasks: list) -> str:
         "</div>")
 
 
+TASK_WINDOWS = {"Matin": ("06:00", "12:00"), "Après-midi": ("12:00", "17:00"), "Soir": ("17:00", "23:59")}
+
+
 async def send_shift_task_reminders(shift: str, date_str: str = "") -> int:
-    api_key = os.environ.get("RESEND_API_KEY", "")
-    if not api_key:
-        logger.warning("Rappels tâches non faites : RESEND_API_KEY manquante, envoi ignoré.")
-        return 0
     today = date_str or datetime.now(timezone.utc).astimezone(MONTREAL_TZ).date().isoformat()
     pending = await db.shift_tasks.find({"date": today, "shift": shift, "done": False}, {"_id": 0}).to_list(500)
     if not pending:
         return 0
-    resend.api_key = api_key
-    sender = await get_sender()
     by_pharmacy: dict = {}
     for t in pending:
         by_pharmacy.setdefault(t["pharmacy_id"], []).append(t)
-    sent = 0
+    ws, we = TASK_WINDOWS.get(shift, ("00:00", "23:59"))
+    api_key = os.environ.get("RESEND_API_KEY", "")
+    if api_key:
+        resend.api_key = api_key
+    sender = await get_sender() if api_key else ""
+    actions = 0
     for pid, tasks in by_pharmacy.items():
-        admins = await db.users.find({"role": {"$in": ["admin", "manager"]}, "pharmacy_id": pid}, {"_id": 0}).to_list(50)
-        html = unfinished_tasks_html(shift, today, tasks)
-        for a in admins:
-            if not a.get("email"):
+        on_duty = await db.shifts.find({"pharmacy_id": pid, "date": today, "start": {"$lt": we}, "end": {"$gt": ws}},
+                                       {"_id": 0, "employee_id": 1}).to_list(500)
+        team_ids = {s["employee_id"] for s in on_duty}
+        unassigned_titles = [t["title"] for t in tasks if not t.get("assignee_employee_id")]
+        assignee_ids = {t["assignee_employee_id"] for t in tasks if t.get("assignee_employee_id")}
+        for eid in assignee_ids | team_ids:
+            mine = [t["title"] for t in tasks if t.get("assignee_employee_id") == eid]
+            team = unassigned_titles if eid in team_ids else []
+            titles = mine + [f"{x} (équipe)" for x in team]
+            if not titles:
                 continue
-            try:
-                await asyncio.to_thread(resend.Emails.send, {
-                    "from": sender, "to": [a["email"]],
-                    "subject": f"{len(tasks)} tâche(s) non faite(s) — quart {shift} du {today}",
-                    "html": html})
-                sent += 1
-            except Exception as exc:
-                logger.error(f"Rappel tâches ({shift}) vers {a['email']} échoué : {exc}")
+            listing = " · ".join(titles[:5]) + (f" (+{len(titles) - 5} autre(s))" if len(titles) > 5 else "")
+            await _notify_shift_change(pid, eid, f"Tâches à terminer — quart {shift}",
+                                       f"Il reste à faire : {listing}", "amber", module="tasks")
+            actions += 1
+        convo = await db.conversations.find_one({"pharmacy_id": pid, "type": "equipe"}, {"_id": 0},
+                                                sort=[("created_at", 1)])
+        if convo:
+            dup = await db.chat_messages.find_one({"conversation_id": convo["id"], "kind": "task_reminder",
+                                                   "reminder_date": today, "reminder_shift": shift})
+            if not dup:
+                now = datetime.now(timezone.utc).isoformat()
+                titles = [t["title"] for t in tasks]
+                body = (f"⏰ Fin du quart {shift} — {len(tasks)} tâche(s) restent à faire : "
+                        + ", ".join(titles[:6]) + (f" (+{len(titles) - 6} autre(s))" if len(titles) > 6 else "")
+                        + ". Un coup de main avant de partir ?")
+                await db.chat_messages.insert_one({
+                    "id": str(uuid.uuid4()), "conversation_id": convo["id"], "pharmacy_id": pid,
+                    "sender_email": "systeme@arriereplan.app", "sender_name": "Arrière Plan",
+                    "sender_role": "system", "kind": "task_reminder",
+                    "reminder_date": today, "reminder_shift": shift,
+                    "body": body, "attachment": None, "created_at": now})
+                await db.conversations.update_one({"id": convo["id"]}, {"$set": {
+                    "last_message": body[:80], "last_sender": "Arrière Plan", "last_message_at": now}})
+                actions += 1
+        emails_sent = 0
+        if api_key:
+            admins = await db.users.find({"role": {"$in": ["admin", "manager"]}, "pharmacy_id": pid}, {"_id": 0}).to_list(50)
+            html = unfinished_tasks_html(shift, today, tasks)
+            for a in admins:
+                if not a.get("email"):
+                    continue
+                try:
+                    await asyncio.to_thread(resend.Emails.send, {
+                        "from": sender, "to": [a["email"]],
+                        "subject": f"{len(tasks)} tâche(s) non faite(s) — quart {shift} du {today}",
+                        "html": html})
+                    emails_sent += 1
+                except Exception as exc:
+                    logger.error(f"Rappel tâches ({shift}) vers {a['email']} échoué : {exc}")
+        actions += emails_sent
         await log_audit("système", "system", "RAPPEL_TACHES_QUART", "tâche", today,
-                        f"Quart {shift} : {len(tasks)} tâche(s) non complétée(s), {sent} courriel(s) envoyé(s)", pid)
-    return sent
+                        f"Quart {shift} : {len(tasks)} tâche(s) non complétée(s) — rappels équipe envoyés "
+                        f"(notifications + chat, {emails_sent} courriel(s))", pid)
+    return actions
 
 
 @api_router.post("/tasks/reminders/run")
@@ -5263,7 +5304,7 @@ async def run_task_reminders(shift: str = Query(""), date: str = Query(""), prin
 
 async def shift_task_reminders_job(shift: str):
     sent = await send_shift_task_reminders(shift)
-    logger.info(f"Rappels tâches non faites ({shift}) : {sent} courriel(s) envoyé(s)")
+    logger.info(f"Rappels tâches non faites ({shift}) : {sent} rappel(s) envoyés (notifications, chat, courriels)")
 
 
 # ---------------------- Rapport hebdomadaire des tâches (gestionnaires) ----------------------

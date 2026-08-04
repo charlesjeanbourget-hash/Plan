@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { MessagesSquare, Plus, Send, Trash2, Users, ShieldCheck, UserRound, Pin, PinOff, Paperclip, FileText, Download, X, Cake, PartyPopper } from 'lucide-react';
+import { MessagesSquare, Plus, Send, Trash2, Users, ShieldCheck, UserRound, Pin, PinOff, Paperclip, FileText, Download, X, Cake, PartyPopper, ClipboardList } from 'lucide-react';
 import { toast } from 'sonner';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -408,12 +408,13 @@ export default function MessagesModule(): JSX.Element {
                   <p data-testid="thread-empty" className="text-sm text-slate-400 text-center py-10">Aucun message — écrivez le premier !</p>
                 )}
                 {messages.map((m) => {
-                  if (m.kind === 'birthday') {
+                  if (m.kind === 'birthday' || m.kind === 'task_reminder') {
+                    const festive = m.kind === 'birthday';
                     return (
-                      <div key={m.id} data-testid={`birthday-message-${m.id}`} className="flex justify-center">
-                        <div className="max-w-[85%] rounded-2xl border border-bronze-200 bg-gradient-to-r from-emerald-50 via-bronze-50 to-emerald-50 px-5 py-3.5 text-center shadow-sm">
-                          <p className="text-[11px] font-bold text-bronze-700 inline-flex items-center gap-1.5 mb-1">
-                            <Cake className="w-3.5 h-3.5" /> Arrière Plan · message automatique
+                      <div key={m.id} data-testid={`${festive ? 'birthday' : 'task-reminder'}-message-${m.id}`} className="flex justify-center">
+                        <div className={`max-w-[85%] rounded-2xl border px-5 py-3.5 text-center shadow-sm ${festive ? 'border-bronze-200 bg-gradient-to-r from-emerald-50 via-bronze-50 to-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
+                          <p className={`text-[11px] font-bold inline-flex items-center gap-1.5 mb-1 ${festive ? 'text-bronze-700' : 'text-amber-700'}`}>
+                            {festive ? <Cake className="w-3.5 h-3.5" /> : <ClipboardList className="w-3.5 h-3.5" />} Arrière Plan · message automatique
                           </p>
                           <p className="text-sm text-slate-800 whitespace-pre-wrap">{m.body}</p>
                           <p className="text-[10px] text-slate-400 mt-1">{timeLabel(m.created_at)}</p>
