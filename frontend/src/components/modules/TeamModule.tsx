@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { useHR } from '@/context/HRContext';
 import { useAuth } from '@/context/AuthContext';
-import { ModuleHeader } from '@/components/modules/shared';
+import { ModuleHeader, CollapsibleSection } from '@/components/modules/shared';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -194,11 +194,9 @@ export default function TeamModule(): JSX.Element {
         }
       />
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 items-start">
+        <CollapsibleSection id="team-polls" title="Sondages éclair" icon={BarChart3} badge={polls.length > 0 ? String(polls.length) : undefined} defaultOpen>
         <section data-testid="polls-panel">
-          <h3 className="font-heading font-bold text-slate-900 text-lg mb-4 inline-flex items-center gap-2">
-            <BarChart3 className="w-4 h-4 text-bronze-600" /> Sondages éclair
-          </h3>
           {polls.length === 0 && (
             <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-10 text-center text-sm text-slate-500" data-testid="polls-empty">
               Aucun sondage pour le moment.{isAdmin ? ' Lancez-en un — deux choix suffisent !' : ''}
@@ -266,11 +264,10 @@ export default function TeamModule(): JSX.Element {
             })}
           </div>
         </section>
+        </CollapsibleSection>
 
+        <CollapsibleSection id="team-kudos" title="Mur de reconnaissance" icon={PartyPopper} badge={kudos.length > 0 ? String(kudos.length) : undefined} defaultOpen>
         <section data-testid="kudos-panel">
-          <h3 className="font-heading font-bold text-slate-900 text-lg mb-4 inline-flex items-center gap-2">
-            <PartyPopper className="w-4 h-4 text-bronze-600" /> Mur de reconnaissance
-          </h3>
           {kudos.length === 0 && (
             <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-10 text-center text-sm text-slate-500" data-testid="kudos-empty">
               Le mur est vide — soyez la première personne à féliciter un(e) collègue !
@@ -316,6 +313,7 @@ export default function TeamModule(): JSX.Element {
             })}
           </div>
         </section>
+        </CollapsibleSection>
       </div>
 
       <Dialog open={pollOpen} onOpenChange={setPollOpen}>

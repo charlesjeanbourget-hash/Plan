@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, FormEvent } from 'react';
 import axios from 'axios';
 import { useHR } from '@/context/HRContext';
 import { useAuth } from '@/context/AuthContext';
-import { ModuleHeader, StatusBadge, EmptyState } from '@/components/modules/shared';
+import { ModuleHeader, StatusBadge, EmptyState, CollapsibleSection } from '@/components/modules/shared';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -384,12 +384,8 @@ export default function VacationModule(): JSX.Element {
       </div>
 
       {isAdmin && (
-        <div data-testid="admin-balances-panel" className="bg-white rounded-xl border border-slate-200 p-6 mb-8">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="font-heading text-base font-bold text-slate-900 inline-flex items-center gap-2">
-              <Wallet className="w-4 h-4 text-bronze-600" /> Soldes de congés par employé ({new Date().getFullYear()})
-            </h2>
-          </div>
+        <CollapsibleSection id="vac-balances" title={`Soldes de congés par employé (${new Date().getFullYear()})`} icon={Wallet} className="mb-8">
+        <div data-testid="admin-balances-panel" className="bg-white rounded-xl border border-slate-200 p-6">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -432,9 +428,20 @@ export default function VacationModule(): JSX.Element {
             </table>
           </div>
         </div>
+        </CollapsibleSection>
       )}
 
-      <h2 className="font-heading text-base font-bold text-slate-900 mb-4">{isAdmin ? 'Toutes les demandes' : 'Mes demandes'}</h2>
+      <CollapsibleSection
+        id="vac-requests"
+        title={isAdmin ? 'Toutes les demandes' : 'Mes demandes'}
+        icon={TreePalm}
+        badge={visibleRequests.some((l) => l.status === 'En attente')
+          ? `${visibleRequests.filter((l) => l.status === 'En attente').length} en attente`
+          : (visibleRequests.length > 0 ? `${visibleRequests.length} au total` : undefined)}
+        badgeTone={visibleRequests.some((l) => l.status === 'En attente') ? 'amber' : 'slate'}
+        defaultOpen={visibleRequests.some((l) => l.status === 'En attente')}
+        className="mb-8"
+      >
       {visibleRequests.length === 0 ? (
         <EmptyState text="Aucune demande de congé." />
       ) : (
@@ -497,6 +504,7 @@ export default function VacationModule(): JSX.Element {
           })}
         </div>
       )}
+      </CollapsibleSection>
 
       <Dialog open={dialogOpen} onOpenChange={(v) => { setDialogOpen(v); if (!v) { setSelStart(''); setSelEnd(''); } }}>
         <DialogContent data-testid="add-leave-dialog">

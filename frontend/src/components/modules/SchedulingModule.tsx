@@ -9,13 +9,14 @@ import { Tooltip, TooltipTrigger, TooltipContent as TooltipContentBase, TooltipP
 
 const TooltipContent = TooltipContentBase as React.ComponentType<React.PropsWithChildren<{ side?: string; className?: string; 'data-testid'?: string }>>;
 import { isQualified } from '@/lib/qualif';
-import { ModuleHeader } from '@/components/modules/shared';
+import { ModuleHeader, CollapsibleSection } from '@/components/modules/shared';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ChevronLeft, ChevronRight, Plus, X, ArrowLeftRight, Check, Stethoscope, CopyPlus, LayoutTemplate, FileDown, Megaphone, Hourglass, BookOpenCheck, MapPin, Wrench, Hand, Sparkles, AlertTriangle, Layers, TreePalm, CheckCircle2, Circle } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, Plus, X, ArrowLeftRight, Check, Stethoscope, CopyPlus, LayoutTemplate, FileDown, Megaphone, Hourglass, BookOpenCheck, MapPin, Wrench, Hand, Sparkles, AlertTriangle, Layers, TreePalm, CheckCircle2, Circle, Wallet, FlaskConical, SlidersHorizontal } from 'lucide-react';
 import { ScheduleProposals } from '@/components/ScheduleProposals';
 import { AppointmentDialog } from '@/components/AppointmentDialog';
 import { DuplicateWeekDialog } from '@/components/DuplicateWeekDialog';
@@ -442,23 +443,32 @@ export default function SchedulingModule(): JSX.Element {
             )}
             {isAdmin && (
               <>
-                <Button data-testid="week-templates-button" variant="outline" onClick={() => setTplOpen(true)} className="rounded-full border-bronze-300 text-bronze-800 hover:bg-bronze-50">
-                  <LayoutTemplate className="w-4 h-4 mr-1" /> Modèles
-                </Button>
-                <Button data-testid="duplicate-week-button" variant="outline" onClick={() => setDupOpen(true)} className="rounded-full border-bronze-300 text-bronze-800 hover:bg-bronze-50">
-                  <CopyPlus className="w-4 h-4 mr-1" /> Dupliquer la semaine
-                </Button>
-                <Button data-testid="copy-dept-button" variant="outline" onClick={() => setCopyDeptOpen(true)} className="rounded-full border-bronze-300 text-bronze-800 hover:bg-bronze-50">
-                  <Layers className="w-4 h-4 mr-1" /> Copier entre départements
-                </Button>
-                <Button data-testid="schedule-pdf-button" variant="outline" onClick={exportPdf} className="rounded-full">
-                  <FileDown className="w-4 h-4 mr-1" /> PDF
-                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button data-testid="schedule-tools-menu" variant="outline" className="rounded-full border-bronze-300 text-bronze-800 hover:bg-bronze-50">
+                      <SlidersHorizontal className="w-4 h-4 mr-1" /> Outils <ChevronDown className="w-3.5 h-3.5 ml-1" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-64">
+                    <DropdownMenuItem data-testid="week-templates-button" onClick={() => setTplOpen(true)}>
+                      <LayoutTemplate className="w-4 h-4 mr-2 text-bronze-600" /> Modèles de semaine
+                    </DropdownMenuItem>
+                    <DropdownMenuItem data-testid="duplicate-week-button" onClick={() => setDupOpen(true)}>
+                      <CopyPlus className="w-4 h-4 mr-2 text-bronze-600" /> Dupliquer la semaine
+                    </DropdownMenuItem>
+                    <DropdownMenuItem data-testid="copy-dept-button" onClick={() => setCopyDeptOpen(true)}>
+                      <Layers className="w-4 h-4 mr-2 text-bronze-600" /> Copier entre départements
+                    </DropdownMenuItem>
+                    <DropdownMenuItem data-testid="schedule-pdf-button" onClick={exportPdf}>
+                      <FileDown className="w-4 h-4 mr-2 text-slate-500" /> Exporter en PDF
+                    </DropdownMenuItem>
+                    <DropdownMenuItem data-testid="read-receipts-button" onClick={() => setReceiptsOpen(true)}>
+                      <BookOpenCheck className="w-4 h-4 mr-2 text-slate-500" /> Accusés de réception
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
                 <Button data-testid="publish-week-button" onClick={() => void publishWeek()} disabled={publishing} className="rounded-full bg-bronze-600 hover:bg-bronze-700 text-white">
                   <Megaphone className="w-4 h-4 mr-1" /> {publishing ? 'Publication…' : 'Publier la semaine'}
-                </Button>
-                <Button data-testid="read-receipts-button" variant="outline" onClick={() => setReceiptsOpen(true)} className="rounded-full">
-                  <BookOpenCheck className="w-4 h-4 mr-1" /> Accusés
                 </Button>
                 <Button data-testid="add-shift-button" onClick={() => setDialogOpen(true)} className="rounded-full bg-emerald-600 hover:bg-emerald-700">
                   <Plus className="w-4 h-4 mr-1" /> Nouveau quart
@@ -468,13 +478,27 @@ export default function SchedulingModule(): JSX.Element {
           </div>
         }
       />
-      {isAdmin && <ScheduleProposals />}
-      {isAdmin && <BudgetActualCard />}
       {isAdmin && (
-        <div className="bg-white rounded-xl border border-slate-200 p-6 mb-6" data-testid="swap-requests-panel">
-          <h2 className="font-heading text-base font-bold text-slate-900 mb-4 inline-flex items-center gap-2">
-            <ArrowLeftRight className="w-4 h-4 text-emerald-600" /> Demandes d'échange de quarts
-          </h2>
+        <CollapsibleSection id="sched-proposals" title="Propositions d'horaires (IA)" icon={Sparkles} className="mb-4">
+          <ScheduleProposals />
+        </CollapsibleSection>
+      )}
+      {isAdmin && (
+        <CollapsibleSection id="sched-budget" title="Budget vs réel de la semaine" icon={Wallet} className="mb-4">
+          <BudgetActualCard />
+        </CollapsibleSection>
+      )}
+      {isAdmin && (
+        <CollapsibleSection
+          id="sched-swaps"
+          title="Demandes d'échange de quarts"
+          icon={ArrowLeftRight}
+          badge={pendingSwaps.length + awaitingPeerSwaps.length > 0 ? `${pendingSwaps.length + awaitingPeerSwaps.length} en attente` : undefined}
+          badgeTone="amber"
+          defaultOpen={pendingSwaps.length > 0}
+          className="mb-4"
+        >
+        <div className="bg-white rounded-xl border border-slate-200 p-6" data-testid="swap-requests-panel">
           {pendingSwaps.length === 0 && awaitingPeerSwaps.length === 0 ? (
             <p className="text-sm text-slate-500">Aucune demande d'échange en attente.</p>
           ) : (
@@ -527,6 +551,7 @@ export default function SchedulingModule(): JSX.Element {
             </div>
           )}
         </div>
+        </CollapsibleSection>
       )}
 
       <div className="flex flex-wrap items-center gap-3 mb-6">
@@ -608,18 +633,24 @@ export default function SchedulingModule(): JSX.Element {
         </div>
       </div>
 
-      {isAdmin && <OpenShiftsPanel mode="admin" />}
+      {isAdmin && (
+        <CollapsibleSection id="sched-open-shifts" title="Quarts ouverts (à réclamer)" icon={Megaphone} className="mb-4">
+          <OpenShiftsPanel mode="admin" />
+        </CollapsibleSection>
+      )}
       {!isAdmin && <OpenShiftsPanel mode="employee" />}
 
       {isAdmin && viewMode === 'week' && (
-        <WorkStationsPanel
-          stations={stations}
-          rushPeriods={rushPeriods}
-          days={days}
-          shifts={state.shifts}
-          onConfigure={() => setStationsCfgOpen(true)}
-          onAssigned={() => void refreshShifts()}
-        />
+        <CollapsibleSection id="sched-stations" title="Postes de travail — laboratoire" icon={FlaskConical} className="mb-4">
+          <WorkStationsPanel
+            stations={stations}
+            rushPeriods={rushPeriods}
+            days={days}
+            shifts={state.shifts}
+            onConfigure={() => setStationsCfgOpen(true)}
+            onAssigned={() => void refreshShifts()}
+          />
+        </CollapsibleSection>
       )}
       {isAdmin && (
         <WorkStationsDialog

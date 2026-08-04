@@ -3,7 +3,7 @@ import axios from 'axios';
 import { useHR } from '@/context/HRContext';
 import { useAuth } from '@/context/AuthContext';
 import { PharmacyPlan, OverviewAccount } from '@/types';
-import { ModuleHeader, StatCard } from '@/components/modules/shared';
+import { ModuleHeader, StatCard, CollapsibleSection } from '@/components/modules/shared';
 import { SuperadminUsers } from '@/components/modules/SuperadminUsers';
 import { SuperadminOverview } from '@/components/modules/SuperadminOverview';
 import { SuperadminPartners } from '@/components/SuperadminPartners';
@@ -17,7 +17,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { Building2, Users, ShieldCheck, Plus, RotateCcw, MapPin, Trash2 } from 'lucide-react';
+import { Building2, Users, ShieldCheck, Plus, RotateCcw, MapPin, Trash2, LayoutDashboard, MessagesSquare, AlertTriangle, KeyRound, Handshake } from 'lucide-react';
 import { toast } from 'sonner';
 
 const PLAN_STYLES: Record<PharmacyPlan, string> = {
@@ -128,19 +128,33 @@ export default function SuperadminModule(): JSX.Element {
         />
       </div>
 
-      <SuperadminOverview />
+      <CollapsibleSection id="sa-overview" title="Vue d'ensemble de la plateforme" icon={LayoutDashboard} defaultOpen className="mb-4">
+        <SuperadminOverview />
+      </CollapsibleSection>
 
-      <SuperadminSecurity />
+      <CollapsibleSection id="sa-security" title="Sécurité" icon={ShieldCheck} className="mb-4">
+        <SuperadminSecurity />
+      </CollapsibleSection>
 
-      <SuperadminDemoRequests />
+      <CollapsibleSection id="sa-demos" title="Demandes de démonstration" icon={MessagesSquare} className="mb-4">
+        <SuperadminDemoRequests />
+      </CollapsibleSection>
 
-      <SuperadminIncidents />
+      <CollapsibleSection id="sa-incidents" title="Incidents" icon={AlertTriangle} className="mb-4">
+        <SuperadminIncidents />
+      </CollapsibleSection>
 
-      <SuperadminLoginEvents />
+      <CollapsibleSection id="sa-logins" title="Journal des connexions" icon={KeyRound} className="mb-4">
+        <SuperadminLoginEvents />
+      </CollapsibleSection>
 
-      <SuperadminUsers />
+      <CollapsibleSection id="sa-users" title="Comptes utilisateurs" icon={Users} className="mb-4">
+        <SuperadminUsers />
+      </CollapsibleSection>
 
-      <SuperadminPartners />
+      <CollapsibleSection id="sa-partners" title="Partenaires" icon={Handshake} className="mb-6">
+        <SuperadminPartners />
+      </CollapsibleSection>
 
       <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
         <table className="w-full text-sm min-w-[800px]">
@@ -180,11 +194,9 @@ export default function SuperadminModule(): JSX.Element {
         </table>
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 p-7 mt-10" data-testid="branches-panel">
-        <div className="flex items-center justify-between mb-5">
-          <h2 className="font-heading text-base font-bold text-slate-900 inline-flex items-center gap-2">
-            <MapPin className="w-4 h-4 text-emerald-600" /> Succursales
-          </h2>
+      <CollapsibleSection id="sa-branches" title="Succursales" icon={MapPin} badge={state.branches.length > 0 ? String(state.branches.length) : undefined} className="mt-6">
+      <div className="bg-white rounded-xl border border-slate-200 p-7" data-testid="branches-panel">
+        <div className="flex items-center justify-end mb-5">
           <Button data-testid="add-branch-button" size="sm" onClick={() => setBranchOpen(true)} className="rounded-full bg-emerald-600 hover:bg-emerald-700 text-xs">
             <Plus className="w-3.5 h-3.5 mr-1" /> Nouvelle succursale
           </Button>
@@ -214,6 +226,7 @@ export default function SuperadminModule(): JSX.Element {
           {state.branches.length === 0 && <p className="text-sm text-slate-500">Aucune succursale.</p>}
         </div>
       </div>
+      </CollapsibleSection>
 
       <Dialog open={branchOpen} onOpenChange={setBranchOpen}>
         <DialogContent data-testid="add-branch-dialog">

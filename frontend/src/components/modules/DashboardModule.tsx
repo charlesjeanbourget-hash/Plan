@@ -2,11 +2,11 @@ import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useHR } from '@/context/HRContext';
 import { useAuth } from '@/context/AuthContext';
-import { ModuleHeader, StatCard, StatusBadge } from '@/components/modules/shared';
+import { ModuleHeader, StatCard, StatusBadge, CollapsibleSection } from '@/components/modules/shared';
 import { HonorRoll } from '@/components/HonorRoll';
 import { ExpiringDocsBanner } from '@/components/ExpiringDocsBanner';
 import { BudgetHistoryChart } from '@/components/BudgetHistoryChart';
-import { Users, CalendarClock, Briefcase, TreePalm, BadgeAlert } from 'lucide-react';
+import { Users, CalendarClock, Briefcase, TreePalm, BadgeAlert, TrendingUp, Trophy, ClipboardList } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -71,12 +71,19 @@ export default function DashboardModule(): JSX.Element {
         <StatCard label="Offres actives" value={String(activeOffers)} icon={Briefcase} hint={`${state.candidates.length} candidatures reçues`} />
       </div>
 
-      {isAdmin && <BudgetHistoryChart />}
+      {isAdmin && (
+        <CollapsibleSection id="dash-budget" title="Historique budgétaire" icon={TrendingUp} className="mb-4">
+          <BudgetHistoryChart />
+        </CollapsibleSection>
+      )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+      <CollapsibleSection id="dash-honor" title="Tableau d'honneur du mois" icon={Trophy} className="mb-4">
         <HonorRoll />
+      </CollapsibleSection>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6 items-start">
+        <CollapsibleSection id="dash-upcoming" title="Prochains quarts de travail" icon={CalendarClock} badge={upcomingShifts.length > 0 ? String(upcomingShifts.length) : undefined} defaultOpen>
         <div className="bg-white rounded-xl border border-slate-200 p-6">
-          <h2 className="font-heading text-base font-bold text-slate-900 mb-5">Prochains quarts de travail</h2>
           <div className="space-y-3">
             {upcomingShifts.map((s) => {
               const emp = getEmployee(s.employeeId);
@@ -99,9 +106,10 @@ export default function DashboardModule(): JSX.Element {
             {upcomingShifts.length === 0 && <p className="text-sm text-slate-500">Aucun quart planifié.</p>}
           </div>
         </div>
+        </CollapsibleSection>
 
+        <CollapsibleSection id="dash-tasks" title="Tâches de l'équipe" icon={ClipboardList} badge={state.tasks.length > 0 ? String(state.tasks.length) : undefined}>
         <div className="bg-white rounded-xl border border-slate-200 p-6">
-          <h2 className="font-heading text-base font-bold text-slate-900 mb-5">Tâches de l'équipe</h2>
           <div className="space-y-3">
             {state.tasks.map((t) => {
               const emp = getEmployee(t.assignedTo);
@@ -117,6 +125,7 @@ export default function DashboardModule(): JSX.Element {
             })}
           </div>
         </div>
+        </CollapsibleSection>
       </div>
     </div>
   );

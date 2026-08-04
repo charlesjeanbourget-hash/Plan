@@ -5245,7 +5245,13 @@ async def send_shift_task_reminders(shift: str, date_str: str = "") -> int:
             if not titles:
                 continue
             listing = " · ".join(titles[:5]) + (f" (+{len(titles) - 5} autre(s))" if len(titles) > 5 else "")
-            await _notify_shift_change(pid, eid, f"Tâches à terminer — quart {shift}",
+            notif_title = f"Tâches à terminer — quart {shift}"
+            already = await db.notifications.find_one({
+                "pharmacy_id": pid, "target_employee_id": eid, "title": notif_title,
+                "created_at": {"$gte": f"{today}T00:00:00"}})
+            if already:
+                continue
+            await _notify_shift_change(pid, eid, notif_title,
                                        f"Il reste à faire : {listing}", "amber", module="tasks")
             actions += 1
         convo = await db.conversations.find_one({"pharmacy_id": pid, "type": "equipe"}, {"_id": 0},

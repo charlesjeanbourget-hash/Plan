@@ -3,7 +3,7 @@ import axios from 'axios';
 import { useAuth } from '@/context/AuthContext';
 import { useHR } from '@/context/HRContext';
 import { ShiftTask } from '@/types';
-import { ModuleHeader } from '@/components/modules/shared';
+import { ModuleHeader, CollapsibleSection } from '@/components/modules/shared';
 import { TaskStatsPanel } from '@/components/TaskStatsPanel';
 import { TaskTemplatesDialog } from '@/components/TaskTemplatesDialog';
 import { TeamGoalBar } from '@/components/TeamGoalBar';
@@ -312,17 +312,15 @@ export default function TasksModule(): JSX.Element {
           </div>
         );
         return (
-          <div data-testid="week-tasks-summary" className="bg-white rounded-xl border border-slate-200 p-5 mb-6">
-            <div className="flex flex-wrap items-center gap-3 mb-4">
-              <h3 className="font-heading font-bold text-slate-900 text-sm inline-flex items-center gap-2">
-                <ClipboardList className="w-4 h-4 text-emerald-600" /> Suivi de la semaine — fait vs à faire
-              </h3>
-              {todo.length === 0 ? (
-                <span data-testid="week-alldone-badge" className="inline-flex rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2.5 py-0.5">Toutes les tâches de la semaine sont faites</span>
-              ) : (
-                <span data-testid="week-todo-badge" className="inline-flex rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold px-2.5 py-0.5">{todo.length} à faire · {doneList.length} faites</span>
-              )}
-            </div>
+          <CollapsibleSection
+            id="tasks-week-summary"
+            title="Suivi de la semaine — fait vs à faire"
+            icon={ClipboardList}
+            badge={todo.length === 0 ? 'Tout est fait ✓' : `${todo.length} à faire · ${doneList.length} faites`}
+            badgeTone={todo.length === 0 ? 'emerald' : 'amber'}
+            className="mb-6"
+          >
+          <div data-testid="week-tasks-summary" className="bg-white rounded-xl border border-slate-200 p-5">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
               <div>
                 <p className="text-[10px] uppercase tracking-[0.15em] font-bold text-amber-700 mb-2">Reste à faire ({todo.length})</p>
@@ -342,6 +340,7 @@ export default function TasksModule(): JSX.Element {
               </div>
             </div>
           </div>
+          </CollapsibleSection>
         );
       })()}
 

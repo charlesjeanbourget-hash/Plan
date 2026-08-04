@@ -4,7 +4,7 @@ import { useHR } from '@/context/HRContext';
 import { OpenShiftsPanel } from '@/components/OpenShiftsPanel';
 import { useAuth } from '@/context/AuthContext';
 import { LeaveType } from '@/types';
-import { ModuleHeader, StatusBadge } from '@/components/modules/shared';
+import { ModuleHeader, StatusBadge, CollapsibleSection } from '@/components/modules/shared';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -134,7 +134,7 @@ export default function MySpaceModule(): JSX.Element {
         }
       />
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
         <div className="lg:col-span-2">
           <OpenShiftsPanel mode="employee" />
           <MyPunchCard />
@@ -221,10 +221,8 @@ export default function MySpaceModule(): JSX.Element {
           )}
         </div>
 
+        <CollapsibleSection id="myspace-payroll-section" title="Mes relevés de paie" icon={Download} badge={myPays.length > 0 ? String(myPays.length) : undefined}>
         <div className="bg-white rounded-xl border border-slate-200 p-7" data-testid="myspace-payroll">
-          <h2 className="font-heading text-base font-bold text-slate-900 mb-5 inline-flex items-center gap-2">
-            <Download className="w-4 h-4 text-emerald-600" /> Mes relevés de paie
-          </h2>
           <div className="space-y-2.5">
             {myPays.map((p) => (
               <div key={p.id} className="flex items-center justify-between py-2 border-b border-slate-100 last:border-0">
@@ -246,12 +244,11 @@ export default function MySpaceModule(): JSX.Element {
             {myPays.length === 0 && <p className="text-sm text-slate-500">Aucun relevé disponible.</p>}
           </div>
         </div>
+        </CollapsibleSection>
 
-        <div className="bg-white rounded-xl border border-slate-200 p-7 lg:col-span-2" data-testid="myspace-leaves">
-          <div className="flex items-center justify-between mb-5">
-            <h2 className="font-heading text-base font-bold text-slate-900 inline-flex items-center gap-2">
-              <TreePalm className="w-4 h-4 text-emerald-600" /> Mes congés
-            </h2>
+        <CollapsibleSection id="myspace-leaves-section" title="Mes congés" icon={TreePalm} badge={myLeaves.length > 0 ? String(myLeaves.length) : undefined} className="lg:col-span-2">
+        <div className="bg-white rounded-xl border border-slate-200 p-7" data-testid="myspace-leaves">
+          <div className="flex items-center justify-end mb-5">
             <Button data-testid="myspace-add-leave-button" size="sm" className="rounded-full bg-emerald-600 hover:bg-emerald-700 text-xs" onClick={() => setLeaveOpen(true)}>
               <Plus className="w-3.5 h-3.5 mr-1" /> Nouvelle demande
             </Button>
@@ -269,12 +266,13 @@ export default function MySpaceModule(): JSX.Element {
             {myLeaves.length === 0 && <p className="text-sm text-slate-500">Aucune demande de congé.</p>}
           </div>
         </div>
+        </CollapsibleSection>
 
         <MyEvaluationsPanel />
 
-        <div className="lg:col-span-2">
+        <CollapsibleSection id="myspace-profile-section" title="Mon profil et mes préférences" icon={ShieldCheck} className="lg:col-span-2">
           <ProfileEditor employeeId={me.id} employeeName={`${me.firstName} ${me.lastName}`} canManageCode={false} />
-        </div>
+        </CollapsibleSection>
       </div>
 
       <Dialog open={leaveOpen} onOpenChange={setLeaveOpen}>
