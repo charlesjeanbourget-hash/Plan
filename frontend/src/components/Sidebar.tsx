@@ -189,7 +189,7 @@ export default function Sidebar({ active, onSelect, onLogout }: Props): JSX.Elem
         </div>
       )}
       <Dialog open={pwdOpen} onOpenChange={setPwdOpen}>
-        <DialogContent data-testid="password-dialog" className="max-h-[88vh] overflow-y-auto">
+        <DialogContent data-testid="password-dialog" className="max-h-[88vh] overflow-y-auto" aria-describedby={undefined}>
           <DialogHeader>
             <DialogTitle className="font-heading">Sécurité de mon compte</DialogTitle>
           </DialogHeader>

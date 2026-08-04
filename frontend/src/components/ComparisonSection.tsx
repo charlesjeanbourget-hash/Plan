@@ -2,7 +2,7 @@ import logo from '@/assets/logo-arriere-plan.png';
 import {
   CheckCircle2, XCircle, MinusCircle, Sparkles, Pill, ShieldCheck, GraduationCap,
   RefreshCw, Truck, Wallet, Fingerprint, MessagesSquare, PartyPopper, ArrowRight, Trophy, LucideIcon,
-  CloudSun, HeartPulse, FileSignature, Megaphone, PiggyBank, KeyRound, BarChart3, UserCog, Award, BellRing,
+  CloudSun, HeartPulse, FileSignature, Megaphone, PiggyBank, KeyRound, BarChart3, UserCog, Award, BellRing, CalendarSync,
 } from 'lucide-react';
 
 type Verdict = 'yes' | 'no' | 'partial';
@@ -38,6 +38,7 @@ const GROUPS: Group[] = [
       { icon: CloudSun, label: 'Météo intégrée à l\'horaire', detail: 'Prévisions affichées directement sur la grille pour anticiper l\'achalandage.', ap: 'yes', agendrix: 'no' },
       { icon: Award, label: 'Quarts ouverts par ancienneté + formation', detail: 'Attribution équitable des quarts ouverts et quarts de formation jumelés.', ap: 'yes', agendrix: 'yes' },
       { icon: PiggyBank, label: 'Banques de temps', detail: 'Heures supplémentaires accumulées et reprises, suivies employé par employé.', ap: 'yes', agendrix: 'yes' },
+      { icon: CalendarSync, label: 'Synchronisation calendrier personnel (ICS)', detail: 'Vos quarts apparaissent automatiquement dans Google, Apple ou Outlook Calendar.', ap: 'yes', agendrix: 'yes' },
       { icon: BellRing, label: 'Rappels de quarts et résumé matinal', detail: 'Rappels automatiques avant chaque quart et résumé de la journée envoyé à l\'équipe.', ap: 'yes', agendrix: 'partial' },
     ],
   },
@@ -56,7 +57,8 @@ const GROUPS: Group[] = [
   {
     title: 'Sécurité & administration',
     rows: [
-      { icon: KeyRound, label: 'Authentification à deux facteurs (MFA)', detail: 'Codes TOTP compatibles Google Authenticator pour protéger chaque compte.', ap: 'yes', agendrix: 'yes' },
+      { icon: KeyRound, label: 'MFA imposable à toute l\'équipe', detail: 'Codes TOTP (Google Authenticator) + option d\'exiger la MFA pour tous les comptes.', ap: 'yes', agendrix: 'yes' },
+      { icon: ShieldCheck, label: 'Règles de mot de passe configurables', detail: 'Longueur minimale, complexité et expiration définies par votre pharmacie.', ap: 'yes', agendrix: 'yes' },
       { icon: ShieldCheck, label: 'Conformité Loi 25 intégrée', detail: 'Journal d\'audit, droit à l\'oubli, certificats chiffrés, suivi des licences.', ap: 'yes', agendrix: 'partial' },
       { icon: BarChart3, label: 'Rapports, API et webhooks POS', detail: 'Rapports exportables, API ouverte et connexion à votre caisse pour croiser ventes et heures.', ap: 'yes', agendrix: 'partial' },
       { icon: UserCog, label: 'Rôles personnalisés par module', detail: 'Contrôlez précisément quels modules chaque rôle peut voir et modifier.', ap: 'yes', agendrix: 'yes' },

@@ -78,7 +78,7 @@ export const ForgotPasswordDialog = ({ open, onOpenChange, initialEmail, onReset
 
   return (
     <Dialog open={open} onOpenChange={(o) => { onOpenChange(o); if (!o) reset(); }}>
-      <DialogContent data-testid="forgot-password-dialog" className="sm:max-w-md">
+      <DialogContent data-testid="forgot-password-dialog" className="sm:max-w-md" aria-describedby={undefined}>
         <DialogHeader>
           <DialogTitle className="font-heading inline-flex items-center gap-2">
             <KeyRound className="w-5 h-5 text-emerald-600" /> Identifiants oubliés

@@ -50,6 +50,7 @@ const GUIDES: Guide[] = [
       'Un quart « ouvert » est disponible ? Cliquez « Réclamer » — il est attribué selon l\'ancienneté.',
       'Empêchement ? Ouvrez votre quart et proposez un échange à un collègue qualifié.',
       'Vous recevez un rappel automatique avant chaque quart et un résumé matinal dans le chat d\'équipe.',
+      'Pour voir vos quarts dans Google ou Apple Calendar : Mon espace → « Synchroniser mon calendrier » → Copier le lien.',
     ],
   },
   {
