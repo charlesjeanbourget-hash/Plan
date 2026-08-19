@@ -507,6 +507,9 @@ Question utilisateur : « l'IA prend-elle en considération les remplaçants d'a
 ## Dossier PDF sécurité/Loi 25 (19 août 2026) — testé (HTTP 200 + rendu visuel 3 pages vérifié)
 - PDF professionnel « Dossier de sécurité et de conformité » généré via reportlab (script /app/scripts/gen_security_pdf.py, régénérable). Servi statiquement : /dossier-securite-loi25.pdf (placé dans /app/frontend/public/). 8 sections : Loi 25, authentification, chiffrement, contrôle d'accès, GitHub, hébergement (option Québec), mesures complémentaires, résumé exécutif. Couleurs marque (émeraude/ardoise), logo, en-tête/pied avec pagination.
 
+## Page publique « Sécurité et confidentialité » (19 août 2026) — testée par captures (navigation, PDF HTTP 200, 9 piliers)
+- Nouveau composant SecurityPage.tsx (security-page), vue 'security' ajoutée au type View + App.tsx. Hero sombre avec badge « Protection dès la conception » + bouton téléchargement PDF (security-pdf-download → /dossier-securite-loi25.pdf). 9 cartes piliers (Loi 25, authentification, chiffrement, contrôle d'accès, borne punch, incidents, GitHub, hébergement, mesures complémentaires) + bandeau « Vos droits » avec lien vers la politique de confidentialité. Accès depuis la landing : lien pied de page « Sécurité et confidentialité » (footer-security-link) + badge « Conforme Loi 25 » rendu cliquable (footer-badge-loi25).
+
 ### Reste au backlog
 - Persistance serveur des employés/succursales (branchIds en localStorage seulement — fragilise le multi-succursales entre postes).
 - QuickBooks (attend clés Intuit). Domaine Resend à vérifier par l'utilisateur pour courriels multi-destinataires.

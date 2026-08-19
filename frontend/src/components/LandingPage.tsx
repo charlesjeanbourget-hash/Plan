@@ -282,6 +282,7 @@ export default function LandingPage({ onNavigate }: Props): JSX.Element {
               <button data-testid="footer-demo-link" onClick={() => scrollToId('demo')} className="text-left hover:text-emerald-700 transition-colors">Réserver une démo</button>
               <button data-testid="footer-faq-link" onClick={() => scrollToId('faq')} className="text-left hover:text-emerald-700 transition-colors">Questions fréquentes</button>
               <button data-testid="footer-privacy-link" onClick={() => onNavigate('privacy')} className="text-left hover:text-emerald-700 transition-colors">Politique de confidentialité</button>
+              <button data-testid="footer-security-link" onClick={() => onNavigate('security')} className="text-left hover:text-emerald-700 transition-colors">Sécurité et confidentialité</button>
               <button data-testid="footer-testimonials-link" onClick={() => scrollToId('demo')} className="text-left hover:text-emerald-700 transition-colors">Nous joindre</button>
             </div>
           </div>
@@ -290,9 +291,9 @@ export default function LandingPage({ onNavigate }: Props): JSX.Element {
           <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 flex flex-col sm:flex-row items-center justify-between gap-4">
             <p className="text-sm text-slate-500">© 2026 Arrière Plan — Le SIRH des pharmacies.</p>
             <div className="flex items-center gap-6">
-              <span data-testid="footer-badge-loi25" className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600">
+              <button data-testid="footer-badge-loi25" onClick={() => onNavigate('security')} className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-emerald-700 transition-colors">
                 <ShieldCheck className="w-4 h-4 text-emerald-600" /> Conforme Loi 25
-              </span>
+              </button>
               <span data-testid="footer-badge-quebec" className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600">
                 <Leaf className="w-4 h-4 text-bronze-600" /> Fait au Québec
               </span>

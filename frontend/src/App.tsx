@@ -14,6 +14,7 @@ import DashboardModule from '@/components/modules/DashboardModule';
 import EmployeeDossier from '@/components/modules/EmployeeDossier';
 import ResourcesModule from '@/components/modules/ResourcesModule';
 import PrivacyPolicy from '@/components/PrivacyPolicy';
+import SecurityPage from '@/components/SecurityPage';
 import { ForcePasswordChangeDialog } from '@/components/ForcePasswordChangeDialog';
 import { ForceMfaDialog } from '@/components/ForceMfaDialog';
 import { PrivacyConsentDialog } from '@/components/PrivacyConsentDialog';
@@ -145,6 +146,8 @@ function App(): JSX.Element {
         <PunchKiosk onNavigate={navigate} />
       ) : view === 'privacy' ? (
         <PrivacyPolicy onNavigate={navigate} />
+      ) : view === 'security' ? (
+        <SecurityPage onNavigate={navigate} />
       ) : (
         <LandingPage onNavigate={navigate} />
       )}

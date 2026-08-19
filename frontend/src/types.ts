@@ -1,6 +1,6 @@
 export type Role = 'superadmin' | 'admin' | 'manager' | 'employee';
 
-export type View = 'landing' | 'login' | 'careers' | 'agency' | 'dashboard' | 'punch' | 'privacy';
+export type View = 'landing' | 'login' | 'careers' | 'agency' | 'dashboard' | 'punch' | 'privacy' | 'security';
 
 export type ModuleKey =
   | 'dashboard'
