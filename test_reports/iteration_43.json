@@ -1,0 +1,52 @@
+{
+  "summary": "Itération 43 — test complet des 3 nouvelles fonctionnalités (employés volatils multi-succursales, export CSV des budgets de paie par succursale, incompatibilités entre employés). BACKEND : 13/13 tests pytest verts (/app/backend/tests/test_iteration43.py) — réciprocité incompatible_with + retrait, auto-référence ignorée, champ ignoré silencieusement pour un employé (julie), incompat_warning sur POST/PUT /api/shifts (même succursale = avertissement + quart créé ; succursale différente = null), export CSV (BOM UTF-8, séparateur ';', en-têtes FR, ligne TOTAL PHARMACIE, décimales à virgule, 400 période >62 j / dates invalides / dates inversées, 403 employé), et UNE SEULE génération IA multi-succursales (statut pending_approval, quarts de l'employée volatile e2 avec branch_id ∈ {br1, br2}, employé mono-succursale forcé sur br1, ancien format sans branch_ids accepté dans le même payload). FRONTEND : panneau Incompatibilités (toggle + toast + réciprocité + persistance), carte d'export budgets (2 semaines ET mensuel → CSV téléchargé + toast), panneau 'Heures et coûts par succursale' avec imputation correcte du coût à la succursale du quart (br2 8 h/218 $ → 13 h/351 $ après un quart Julie imputé à br2, br1 inchangé), avertissement ⚠️ Incompatibilité affiché à la création manuelle sans bloquer l'enregistrement. Aucune erreur console pendant les parcours Employés / Horaires / Paie. NETTOYAGE effectué : tous les quarts de test supprimés, incompatible_with remis à [] sur tous les profils, aucune proposition IA restante (0 en base).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/payroll/budget-export", "issue": "Le formatage décimal applique .replace('.', ',') sur TOUTE la ligne CSV : un nom de succursale contenant un point (ex. « Pharmacie St. Louis ») serait corrompu en « St, Louis ». Appliquer la virgule uniquement aux valeurs numériques."},
+      {"endpoint": "GET /api/payroll/budget-export", "issue": "Les heures réelles (punchs) sans quart planifié le même jour sont imputées à la ligne « Sans succursale » (branch_id vide) — comportement acceptable mais à documenter côté UI, sinon un écart apparaît sans succursale identifiable."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "IncompatibilitiesPanel", "issue": "Le panneau 'Incompatibilités de travail' est imbriqué DANS la section repliable « Champs RH personnalisés » (EmployeeDossier.tsx ~ligne 286-289) : il est invisible tant que l'utilisateur n'ouvre pas cette section et son titre n'a aucun rapport → forte perte de découvrabilité. Le déplacer dans sa propre CollapsibleSection (ex. « Incompatibilités de travail »).", "selector": "[data-testid=\"incompat-panel\"]", "priority": "MEDIUM"},
+      {"component": "IncompatibilitiesPanel", "issue": "Lint bloquant CI (react/no-unescaped-entities) sur l'apostrophe de « par l'IA » — corrigé par le testeur (l&apos;IA). Note : le reste du projet (SchedulingModule.tsx, 9 occurrences) a la même erreur ESLint préexistante, à traiter globalement.", "selector": "[data-testid=\"incompat-panel\"]", "priority": "LOW"}
+    ],
+    "integration_issues": [
+      {"flow": "Avertissement d'incompatibilité à la création manuelle (grille Horaires)", "issue": "Désynchronisation transitoire entre les quarts affichés (localStorage, données démo réensemencées à chaque nouvelle session) et les quarts serveur : au premier rendu, la grille peut afficher des quarts qui n'existent PAS côté serveur. Reproduit : un quart Julie créé en chevauchement d'un quart Karim VISIBLE dans la grille n'a produit AUCUN avertissement, car ce quart Karim n'existait qu'en localStorage (le sync GET /api/shifts l'a d'ailleurs remplacé ensuite). Après création des DEUX quarts via l'UI (donc présents côté serveur), l'avertissement s'affiche correctement. Risque d'avertissements manqués tant que la grille et le serveur ne sont pas alignés (afficher un état de chargement jusqu'à la fin de syncShifts / bloquer l'ajout avant sync).", "affected_selectors": ["[data-testid=\"add-shift-dialog\"]", "[data-sonner-toast]"]},
+      {"flow": "Employé volatil (multi-succursales)", "issue": "Les branchIds des employés vivent uniquement en localStorage : dans une nouvelle session de navigateur, Julie redevient mono-succursale et le sélecteur shift-branch-select disparaît. Non bloquant pour l'utilisateur réel (même navigateur) mais rend l'attribution multi-succursales non partagée entre postes/utilisateurs — les budgets par succursale reposent donc sur un état non persistant côté serveur.", "affected_selectors": ["[data-testid=\"shift-branch-select\"]", "[data-testid=\"edit-extra-branch-br2\"]"]}
+    ],
+    "design_issues": [
+      {"screen": "Paie — carte 'Budgets de paie par succursale'", "issues": ["Les champs de période utilisent les pickers natifs du navigateur (input type=date / type=month) au lieu du calendrier shadcn — cohérent avec le reste de l'app mais incohérent avec la charte shadcn", "La colonne « Budget période » est vide pour chaque succursale car schedule_settings.branch_budgets est vide pour ph1 : seule la ligne TOTAL PHARMACIE affiche un budget (10 000 $ = 5 000 $/sem × 2). Prévoir un texte d'aide « définissez un budget par succursale dans Horaires » pour éviter la confusion."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration43.py",
+    "/app/test_reports/pytest/it43_final.xml",
+    "/app/test_reports/pytest/it43_ai.xml"
+  ],
+  "action_items": [
+    "Déplacer IncompatibilitiesPanel hors de la section « Champs RH personnalisés » (sa propre section repliable) pour le rendre découvrable.",
+    "Corriger le formatage CSV de budget-export : virgule décimale appliquée aux nombres seulement, pas à la ligne entière (noms de succursale avec point corrompus).",
+    "Aligner grille et serveur avant toute création de quart (état de chargement / bouton désactivé jusqu'à la fin de syncShifts), sinon l'avertissement d'incompatibilité peut être manqué sur des quarts affichés mais absents du serveur.",
+    "Envisager la persistance serveur des succursales des employés (branchIds) : aujourd'hui en localStorage seulement, ce qui fragilise l'imputation budgétaire multi-succursales.",
+    "Nettoyer les erreurs ESLint react/no-unescaped-entities restantes (SchedulingModule.tsx : 9 occurrences) — bloquantes pour un build CI=true."
+  ],
+  "critical_code_review_comments": [
+    "server.py : _incompat_warning fait 1 requête profil par conflit (N+1) — regrouper via $in sur employee_id pour récupérer les noms en une seule requête.",
+    "server.py (8 400 lignes) : dépasse largement la limite de 700 lignes recommandée — découper en routeurs (paie, horaires, profils, IA).",
+    "budget-export : la construction du CSV et le formatage numérique devraient être extraits dans un helper testable ; la logique de proration des punchs sur plusieurs quarts d'une même journée mérite un test unitaire dédié.",
+    "HRContext.syncShifts : quand migrated=true, l'état local est écrasé sans indicateur de chargement, ce qui provoque le clignotement des données démo puis leur remplacement (source de la désynchronisation constatée)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration43.py",
+    "/app/frontend/src/components/IncompatibilitiesPanel.tsx"
+  ],
+  "success_rate": {"backend": "100% (13/13)", "frontend": "90% (toutes les fonctionnalités OK ; 1 problème de découvrabilité + 1 désynchro transitoire grille/serveur)"},
+  "seed_data_creation": "Aucune donnée persistante ajoutée. Quarts de test (2026-08-20 à 2026-08-26 et TEST_it43_*) supprimés ; incompatible_with remis à [] sur e1/e2/e3 et ni2xmk5fmsch98t7 ; proposition IA de test supprimée (0 proposition en base) ; aucune proposition appliquée.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "admin@luminahr.ca / Nlpx!tTE3Aw27 ; julie@luminahr.ca / O1ka!gfVV6e54 (connexion via le bouton « Connexion » de la landing page — /login redirige vers la landing)",
+  "context_for_next_testing_agent": "Le payload de POST /api/schedule/generate exige `position` (pas `role`) dans employees, sinon 422. La génération IA a répondu en ~13 s (proposition pending_approval immédiate). Les classes de tests d'incompatibilités utilisent des paires distinctes (e1↔ni2xmk5fmsch98t7 pour les profils, e2↔e3 pour les quarts) car pytest.ini exécute en xdist loadscope et deux classes tournent en parallèle. Les employés/succursales sont en localStorage (luminahr_state_v4) et sont réensemencés à chaque nouvelle session Playwright : pour tester shift-branch-select, il faut rendre l'employé multi-succursales via edit-employee-dialog DANS LA MÊME session. Le panneau incompat-panel n'est rendu qu'après avoir ouvert la section « Champs RH personnalisés ». Base propre à la fin de l'itération.",
+  "rca_of_the_issue": "Avertissement d'incompatibilité manqué : _incompat_warning ne compare qu'aux quarts stockés en MongoDB. Les quarts de démo affichés dans la grille proviennent de localStorage (dates recalculées relativement au jour courant) et ne sont pas tous présents côté serveur (les copies serveur portaient des dates de juillet). La grille montrait donc un chevauchement inexistant côté serveur → incompat_warning=null. Vérifié : après création des deux quarts via l'UI (donc en base, même succursale br2, chevauchement 09:00-17:00 / 10:00-16:00), le toast « ⚠️ Incompatibilité : ce quart chevauche celui de Karim Benali… » s'affiche et le quart est bien enregistré. Le second faux négatif observé provenait d'un employé redevenu mono-succursale (localStorage réensemencé) : le quart avait donc branch_id=br1 face à br2 — comportement attendu."
+}

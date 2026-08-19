@@ -6,6 +6,7 @@ import {
   CandidateStatus, RequestStatus, TaskStatus, PayrollStatus, ReplacementStatus, ShiftSwapRequest, Branch, Resource,
 } from '@/types';
 import { SEED_STATE } from '@/context/seedData';
+import { toast } from 'sonner';
 
 const STATE_KEY = 'luminahr_state_v4';
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -113,6 +114,7 @@ interface HRContextValue {
   updateResource: (id: string, patch: Partial<Resource>) => void;
   deleteResource: (id: string) => void;
   refreshShifts: () => Promise<void>;
+  shiftsSynced: boolean;
   resetData: () => void;
 }
 
@@ -140,6 +142,8 @@ export const HRProvider = ({ children }: { children: ReactNode }) => {
   const branchOf = useCallback((employeeId: string): string =>
     stateRef.current.employees.find((e) => e.id === employeeId)?.branchId ?? '', []);
 
+  const [shiftsSynced, setShiftsSynced] = useState(false);
+
   const syncShifts = useCallback(async (): Promise<void> => {
     if (!getToken()) return;
     try {
@@ -157,6 +161,8 @@ export const HRProvider = ({ children }: { children: ReactNode }) => {
       setState((prev) => ({ ...prev, shifts: server }));
     } catch {
       /* hors ligne : on garde l'état local */
+    } finally {
+      setShiftsSynced(true);
     }
   }, [branchOf]);
 
@@ -246,7 +252,9 @@ export const HRProvider = ({ children }: { children: ReactNode }) => {
       const shift: Shift = { ...s, id };
       patchList('shifts', (items) => (items.some((i) => i.id === id) ? items : [...items, shift]));
       if (getToken()) {
-        void axios.post(`${API}/shifts`, shiftToServer(shift, branchOf(shift.employeeId)), { headers: authHeaders() }).catch(() => undefined);
+        void axios.post<{ incompat_warning?: string | null }>(`${API}/shifts`, shiftToServer(shift, branchOf(shift.employeeId)), { headers: authHeaders() })
+          .then((r) => { if (r.data.incompat_warning) toast.warning(r.data.incompat_warning, { duration: 9000 }); })
+          .catch(() => undefined);
       }
     },
     updateShift: (id, patch) => {
@@ -269,7 +277,9 @@ export const HRProvider = ({ children }: { children: ReactNode }) => {
         if (patch.notes !== undefined) body.notes = patch.notes;
         if (patch.training !== undefined) body.training = patch.training;
         if (Object.keys(body).length > 0) {
-          void axios.put(`${API}/shifts/${id}`, body, { headers: authHeaders() }).catch(() => undefined);
+          void axios.put<{ incompat_warning?: string | null }>(`${API}/shifts/${id}`, body, { headers: authHeaders() })
+            .then((r) => { if (r.data.incompat_warning) toast.warning(r.data.incompat_warning, { duration: 9000 }); })
+            .catch(() => undefined);
         }
       }
     },
@@ -346,6 +356,7 @@ export const HRProvider = ({ children }: { children: ReactNode }) => {
       setState(SEED_STATE);
     },
     refreshShifts: syncShifts,
+    shiftsSynced,
   };
 
   return <HRContext.Provider value={value}>{children}</HRContext.Provider>;

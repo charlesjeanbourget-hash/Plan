@@ -1935,6 +1935,7 @@ class ProfileIn(BaseModel):
     hourly_rate: Optional[float] = None
     birth_date: Optional[str] = None
     custom_values: Optional[dict] = None
+    incompatible_with: Optional[list[str]] = None
 
 
 def sanitize_profile(doc: dict) -> dict:
@@ -1949,7 +1950,7 @@ async def get_or_create_profile(pharmacy_id: str, employee_id: str, employee_nam
         "id": str(uuid.uuid4()), "pharmacy_id": pharmacy_id, "employee_id": employee_id,
         "employee_name": employee_name, "roles": [], "capacities": [], "restrictions": [],
         "min_hours_week": 0, "max_hours_week": 40, "availability": default_availability(),
-        "punch_code_hash": None, "notes": "", "department": "",
+        "punch_code_hash": None, "notes": "", "department": "", "incompatible_with": [],
         "updated_at": datetime.now(timezone.utc).isoformat(), "updated_by": "",
     }
     doc = await db.employee_profiles.find_one_and_update(
@@ -2020,6 +2021,23 @@ async def update_profile(employee_id: str, payload: ProfileIn, user: dict = Depe
             patch.pop("custom_values")
         else:
             patch["custom_values"] = {str(k)[:60]: str(v)[:200] for k, v in list((patch["custom_values"] or {}).items())[:30]}
+    if "incompatible_with" in patch:
+        if user["role"] not in ("admin", "manager", "superadmin"):
+            patch.pop("incompatible_with")
+        else:
+            new_set = {str(x)[:60] for x in (patch["incompatible_with"] or []) if str(x).strip() and str(x) != employee_id}
+            patch["incompatible_with"] = sorted(new_set)[:50]
+            old_set = set(doc.get("incompatible_with") or [])
+            now_iso = datetime.now(timezone.utc).isoformat()
+            for other in new_set - old_set:
+                await get_or_create_profile(pid, other)
+                await db.employee_profiles.update_one(
+                    {"pharmacy_id": pid, "employee_id": other},
+                    {"$addToSet": {"incompatible_with": employee_id}, "$set": {"updated_at": now_iso}})
+            for other in old_set - new_set:
+                await db.employee_profiles.update_one(
+                    {"pharmacy_id": pid, "employee_id": other},
+                    {"$pull": {"incompatible_with": employee_id}, "$set": {"updated_at": now_iso}})
     patch["updated_at"] = datetime.now(timezone.utc).isoformat()
     patch["updated_by"] = user["email"]
     await db.employee_profiles.update_one({"id": doc["id"]}, {"$set": patch})
@@ -2454,6 +2472,116 @@ async def open_punches(principal: dict = Depends(get_principal)):
     return sorted(docs, key=lambda p: -p["elapsed_hours"])
 
 
+# ==================== Export budgets de paie par succursale ====================
+
+def _shift_net_hours(s: dict, auto_break: dict) -> float:
+    try:
+        h = max(0, _time_to_minutes(s["end"]) - _time_to_minutes(s["start"])) / 60
+    except (ValueError, AttributeError, KeyError):
+        return 0.0
+    if auto_break.get("enabled") and not auto_break.get("paid") and h >= float(auto_break.get("threshold_hours") or 6):
+        h = max(0.0, h - float(auto_break.get("minutes") or 30) / 60)
+    return h
+
+
+def _num_fr(v: float) -> str:
+    return f"{v:.2f}".replace(".", ",")
+
+
+@api_router.get("/payroll/budget-export")
+async def export_branch_budgets(start: str = Query(...), end: str = Query(...),
+                                names: str = Query("{}"), label: str = Query(""),
+                                principal: dict = Depends(get_principal)):
+    try:
+        d0, d1 = date.fromisoformat(start), date.fromisoformat(end)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Dates invalides (format AAAA-MM-JJ).")
+    if d1 < d0 or (d1 - d0).days > 62:
+        raise HTTPException(status_code=400, detail="Période invalide (maximum 62 jours).")
+    try:
+        name_map = {str(k): str(v)[:80] for k, v in (json.loads(names) or {}).items()}
+    except (json.JSONDecodeError, AttributeError):
+        name_map = {}
+    pid = principal["pharmacy_id"] or "ph1"
+    settings = await db.schedule_settings.find_one({"pharmacy_id": pid}, {"_id": 0}) or {}
+    auto_break = settings.get("auto_break") or {}
+    branch_budgets = {b.get("branch_id") or "": float(b.get("budget") or 0)
+                      for b in (settings.get("branch_budgets") or [])}
+    for b in (settings.get("branch_budgets") or []):
+        name_map.setdefault(b.get("branch_id") or "", b.get("branch_name") or "")
+    profiles = await db.employee_profiles.find(
+        {"pharmacy_id": pid}, {"_id": 0, "employee_id": 1, "hourly_rate": 1}).to_list(1000)
+    rate_by = {p["employee_id"]: float(p.get("hourly_rate") or 0) for p in profiles}
+    shifts = await db.shifts.find(
+        {"pharmacy_id": pid, "date": {"$gte": start, "$lte": end}}, {"_id": 0}).to_list(20000)
+
+    planned: dict = {}
+    shifts_by_emp_day: dict = {}
+    for s in shifts:
+        bid = s.get("branch_id") or ""
+        h = _shift_net_hours(s, auto_break)
+        row = planned.setdefault(bid, {"hours": 0.0, "cost": 0.0})
+        row["hours"] += h
+        row["cost"] += h * rate_by.get(s["employee_id"], 0)
+        shifts_by_emp_day.setdefault((s["employee_id"], s["date"]), []).append(s)
+
+    punches = await db.punches.find(
+        {"pharmacy_id": pid, "date": {"$gte": start, "$lte": end}, "punch_out": {"$ne": None}},
+        {"_id": 0}).to_list(20000)
+    punch_settings = await get_punch_settings(pid)
+    real: dict = {}
+    for p in punches:
+        h = punch_hours(p, punch_settings)
+        if h <= 0:
+            continue
+        day_shifts = shifts_by_emp_day.get((p["employee_id"], p["date"]), [])
+        rate = rate_by.get(p["employee_id"], 0)
+        if not day_shifts:
+            row = real.setdefault("", {"hours": 0.0, "cost": 0.0})
+            row["hours"] += h
+            row["cost"] += h * rate
+            continue
+        total_sched = sum(_shift_net_hours(s, auto_break) for s in day_shifts) or 1.0
+        for s in day_shifts:
+            frac = _shift_net_hours(s, auto_break) / total_sched
+            row = real.setdefault(s.get("branch_id") or "", {"hours": 0.0, "cost": 0.0})
+            row["hours"] += h * frac
+            row["cost"] += h * frac * rate
+
+    days = (d1 - d0).days + 1
+    factor = days / 7
+    all_bids = sorted(set(list(planned.keys()) + list(real.keys()) + list(branch_budgets.keys())),
+                      key=lambda b: name_map.get(b, b))
+    period_label = label or f"{start} au {end}"
+    lines = [f"Budgets de paie par succursale;Période : {period_label};{days} jour(s)",
+             "Succursale;Heures planifiées;Coût planifié $;Heures réelles;Coût réel $;"
+             "Budget période $ (hebdo × semaines);Écart réel vs budget $"]
+    tot = {"ph": 0.0, "pc": 0.0, "rh": 0.0, "rc": 0.0, "b": 0.0}
+    for bid in all_bids:
+        pl = planned.get(bid, {"hours": 0.0, "cost": 0.0})
+        re_ = real.get(bid, {"hours": 0.0, "cost": 0.0})
+        budget = round(branch_budgets.get(bid, 0) * factor, 2)
+        gap = _num_fr(re_["cost"] - budget) if budget > 0 else ""
+        nom = (name_map.get(bid) or ("Sans succursale" if not bid else bid)).replace(";", " ")
+        lines.append(f"{nom};{_num_fr(pl['hours'])};{_num_fr(pl['cost'])};{_num_fr(re_['hours'])};{_num_fr(re_['cost'])};"
+                     f"{_num_fr(budget) if budget > 0 else ''};{gap}")
+        tot["ph"] += pl["hours"]
+        tot["pc"] += pl["cost"]
+        tot["rh"] += re_["hours"]
+        tot["rc"] += re_["cost"]
+        tot["b"] += budget
+    weekly_budget = float(settings.get("weekly_budget") or 0)
+    global_budget = round(weekly_budget * factor, 2) if weekly_budget > 0 else tot["b"]
+    gap_total = _num_fr(tot["rc"] - global_budget) if global_budget > 0 else ""
+    lines.append(f"TOTAL PHARMACIE;{_num_fr(tot['ph'])};{_num_fr(tot['pc'])};{_num_fr(tot['rh'])};{_num_fr(tot['rc'])};"
+                 f"{_num_fr(global_budget) if global_budget > 0 else ''};{gap_total}")
+    content = ("\ufeff" + "\n".join(lines)).encode("utf-8")
+    await log_audit(principal["email"], principal["role"], "EXPORT_BUDGETS_PAIE", "paie", f"{start}_{end}",
+                    f"Export des budgets de paie par succursale du {start} au {end}", pid)
+    return Response(content=content, media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="budgets-paie_{start}_{end}.csv"'})
+
+
 # ==================== Paramètres de période de paie ====================
 
 class PaySettingsIn(BaseModel):
@@ -2529,8 +2657,16 @@ SCHEDULE_SYSTEM = (
     "les disponibilités le permettent. PRIORITÉ ABSOLUE au Laboratoire et à la caisse (service au comptoir — département Plancher) : "
     "s'il faut faire des compromis, couvre-les en premier et explique le compromis dans le summary.\n"
     "- BUDGETS PAR DÉPARTEMENT ET PAR SUCCURSALE : s'ils sont fournis (budgets_par_departement, budgets_par_succursale), la masse "
-    "salariale des quarts de chaque département — et celle des employés de chaque succursale (champ succursale de l'employé) — ne doit "
+    "salariale des quarts de chaque département — et celle des quarts rattachés à chaque succursale (champ branch_id du QUART) — ne doit "
     "pas dépasser son budget respectif, en plus du budget hebdomadaire global.\n"
+    "- EMPLOYÉS VOLATILS (MULTI-SUCCURSALES) : chaque employé a une liste succursales_permises. Tu peux répartir la semaine d'un employé "
+    "volatil entre plusieurs de ses succursales permises (ex. 5 h à une succursale et 4 h à une autre). CHAQUE quart doit inclure le champ "
+    "branch_id choisi PARMI les succursales_permises de l'employé, et son coût (heures × taux horaire) est imputé au budget de LA succursale "
+    "du quart, jamais à une autre. Ne planifie JAMAIS un employé dans une succursale absente de ses succursales_permises. "
+    "Ne planifie jamais deux quarts qui se chevauchent pour le même employé, même dans des succursales différentes.\n"
+    "- INCOMPATIBILITÉS ENTRE EMPLOYÉS : chaque employé peut avoir une liste incompatible_avec (ids d'employés). Ne planifie JAMAIS deux "
+    "employés incompatibles sur des quarts qui se chevauchent dans la MÊME succursale. Si c'est inévitable pour couvrir l'achalandage, "
+    "sépare-les (succursales ou plages différentes) et explique le compromis dans le summary.\n"
     "- PRIORITÉS DU GESTIONNAIRE : si priorites_du_gestionnaire est fourni, ces priorités PRIMENT sur les règles de priorisation "
     "par défaut (y compris la priorité Laboratoire/caisse), tout en respectant les contraintes dures (disponibilités, restrictions, "
     "absences, budgets, heures max). Repères : temps plein ≈ 30 h et plus par semaine selon min/max du profil ; ancienneté = date "
@@ -2557,6 +2693,7 @@ SCHEDULE_SYSTEM = (
     '  "shifts": [\n'
     '    {"employee_id": "id", "employee_name": "Prénom Nom", "date": "YYYY-MM-DD", '
     '"start": "08:00", "end": "16:00", "role": "Rôle pour ce quart", '
+    '"branch_id": "id de la succursale du quart, parmi les succursales_permises de l\'employé", '
     '"department": "Département du quart, parmi departements_disponibles (défaut : le département de l\'employé)"}\n'
     "  ]\n"
     "}"
@@ -2569,6 +2706,8 @@ class RosterEmployee(BaseModel):
     position: str
     branch_id: str = ""
     branch_name: str = ""
+    branch_ids: list[str] = []
+    branch_names: list[str] = []
     hire_date: str = ""
 
 
@@ -2813,6 +2952,31 @@ async def list_calendar_shifts(user: dict = Depends(get_current_user)):
     return {"shifts": docs, "migrated": bool(settings.get("shifts_server_ready"))}
 
 
+async def _incompat_warning(pid: str, shift: dict) -> Optional[str]:
+    prof = await db.employee_profiles.find_one(
+        {"pharmacy_id": pid, "employee_id": shift["employee_id"]},
+        {"_id": 0, "incompatible_with": 1})
+    incompat = set((prof or {}).get("incompatible_with") or [])
+    if not incompat:
+        return None
+    others = await db.shifts.find(
+        {"pharmacy_id": pid, "date": shift["date"], "employee_id": {"$in": list(incompat)},
+         "id": {"$ne": shift["id"]}},
+        {"_id": 0, "employee_id": 1, "start": 1, "end": 1, "branch_id": 1}).to_list(100)
+    conflicts = [o for o in others
+                 if o["start"] < shift["end"] and shift["start"] < o["end"]
+                 and (o.get("branch_id") or "") == (shift.get("branch_id") or "")]
+    if not conflicts:
+        return None
+    name_docs = await db.employee_profiles.find(
+        {"pharmacy_id": pid, "employee_id": {"$in": [o["employee_id"] for o in conflicts]}},
+        {"_id": 0, "employee_id": 1, "employee_name": 1}).to_list(100)
+    name_by = {d["employee_id"]: d.get("employee_name") for d in name_docs}
+    names = [name_by.get(o["employee_id"]) or o["employee_id"] for o in conflicts]
+    return ("⚠️ Incompatibilité : ce quart chevauche celui de " + ", ".join(sorted(set(names))) +
+            " dans la même succursale — ces employés ne doivent pas travailler ensemble. Le quart a tout de même été enregistré.")
+
+
 @api_router.post("/shifts")
 async def create_calendar_shift(payload: ShiftIn, principal: dict = Depends(get_principal)):
     pid = principal["pharmacy_id"] or "ph1"
@@ -2822,7 +2986,8 @@ async def create_calendar_shift(payload: ShiftIn, principal: dict = Depends(get_
     if res.upserted_id is not None and not doc["ai_generated"]:
         await _notify_shift_change(pid, doc["employee_id"], "Nouveau quart ajouté",
                                    f"Vous travaillez {_fmt_shift_txt(doc)}.", "sky")
-    return doc
+    warning = await _incompat_warning(pid, doc)
+    return {**doc, "incompat_warning": warning}
 
 
 @api_router.post("/shifts/bulk")
@@ -2873,7 +3038,8 @@ async def update_calendar_shift(shift_id: str, payload: ShiftPatchIn, principal:
         else:
             await _notify_shift_change(pid, doc["employee_id"], "Quart modifié",
                                        f"Avant : {_fmt_shift_txt(doc)} → maintenant : {_fmt_shift_txt(merged)}.", "amber")
-    return merged
+    warning = await _incompat_warning(pid, merged)
+    return {**merged, "incompat_warning": warning}
 
 
 @api_router.delete("/shifts/{shift_id}")
@@ -4714,6 +4880,12 @@ async def generate_schedule_content(proposal_id: str, pharmacy_id: str, week_sta
             "employes": [{
                 "employee_id": e["id"], "nom": e["name"], "poste": e["position"],
                 "succursale": e.get("branch_name") or "non précisée",
+                "succursales_permises": ([{"branch_id": bid, "nom": nom} for bid, nom in zip(
+                    e.get("branch_ids") or ([e["branch_id"]] if e.get("branch_id") else []),
+                    e.get("branch_names") or ([e.get("branch_name") or ""] if e.get("branch_id") else []))]
+                    or "une seule succursale (aucun choix à faire)"),
+                "incompatible_avec": next((p.get("incompatible_with") or [] for p in profiles
+                                           if p["employee_id"] == e["id"]), []) or "aucune incompatibilité",
                 "date_embauche": e.get("hire_date") or "inconnue",
                 "taux_horaire": next((p.get("hourly_rate") for p in profiles if p["employee_id"] == e["id"]
                                       and p.get("hourly_rate")), "inconnu"),
@@ -4732,6 +4904,9 @@ async def generate_schedule_content(proposal_id: str, pharmacy_id: str, week_sta
         shifts = []
         roster_ids = {e["id"] for e in roster}
         prof_by_id = {p["employee_id"]: p for p in profiles}
+        allowed_branches = {e["id"]: set((e.get("branch_ids") or []) + ([e["branch_id"]] if e.get("branch_id") else []))
+                            for e in roster}
+        home_branch = {e["id"]: e.get("branch_id") or "" for e in roster}
         for s in data.get("shifts", []):
             if s.get("employee_id") not in roster_ids or s.get("date") not in week_days:
                 continue
@@ -4740,9 +4915,13 @@ async def generate_schedule_content(proposal_id: str, pharmacy_id: str, week_sta
             ai_dept = str(s.get("department") or "")
             dept = department or (ai_dept if ai_dept in DEPARTMENTS_BE else "") \
                 or ((prof_by_id.get(s["employee_id"]) or {}).get("department") or "") or "Général"
-            shifts.append({"id": str(uuid.uuid4()), "employee_id": s["employee_id"],
+            eid = s["employee_id"]
+            ai_branch = str(s.get("branch_id") or "")
+            branch = ai_branch if ai_branch in allowed_branches.get(eid, set()) else home_branch.get(eid, "")
+            shifts.append({"id": str(uuid.uuid4()), "employee_id": eid,
                            "employee_name": str(s.get("employee_name", "")), "date": s["date"],
                            "start": str(s["start"]), "end": str(s["end"]), "role": str(s.get("role", "")),
+                           "branch_id": branch,
                            "department": dept})
         if not shifts:
             raise ValueError("L'IA n'a généré aucun quart valide")
@@ -4766,6 +4945,17 @@ async def generate_schedule_content(proposal_id: str, pharmacy_id: str, week_sta
                     warnings.append({
                         "text": f"Dédoublement possible : chevauche un quart existant {ex['start']}–{ex['end']} le {ex['date']}",
                         "kind": "overlap"})
+            incompat = set((prof.get("incompatible_with") or []))
+            if incompat:
+                for o in shifts:
+                    if o is s or o["employee_id"] not in incompat or o["date"] != s["date"]:
+                        continue
+                    if o["start"] < s["end"] and s["start"] < o["end"] \
+                            and (o.get("branch_id") or "") == (s.get("branch_id") or ""):
+                        warnings.append({
+                            "text": f"Incompatibilité : chevauche le quart de {o.get('employee_name') or o['employee_id']} "
+                                    f"({o['start']}–{o['end']}) — ces employés ne doivent pas travailler ensemble",
+                            "kind": "incompat"})
             s["warnings"] = warnings
         alerts = []
         for t in week_tasks:
@@ -4857,7 +5047,7 @@ async def generate_schedule_content(proposal_id: str, pharmacy_id: str, week_sta
             branch_by_emp = {e["id"]: (e.get("branch_id") or "") for e in roster}
             branch_costs: dict = {}
             for s in shifts:
-                bid = branch_by_emp.get(s["employee_id"], "")
+                bid = s.get("branch_id") or branch_by_emp.get(s["employee_id"], "")
                 branch_costs[bid] = branch_costs.get(bid, 0) + _shift_cost(s)
             for b in branch_budgets:
                 c = branch_costs.get(b.get("branch_id", ""), 0)
@@ -5068,7 +5258,7 @@ async def apply_proposal(proposal_id: str, principal: dict = Depends(get_princip
             id=s.get("id") or "", employee_id=s["employee_id"], date=s["date"], start=s["start"], end=s["end"],
             department=s.get("department") or doc.get("department") or "Général",
             ai_generated=True, proposal_id=proposal_id,
-            branch_id=branches.get(s["employee_id"], "")), pid)
+            branch_id=s.get("branch_id") or branches.get(s["employee_id"], "")), pid)
         await db.shifts.update_one({"id": shift_doc["id"], "pharmacy_id": pid}, {"$set": shift_doc}, upsert=True)
         existing_keys.add(key)
         inserted_emps.add(s["employee_id"])

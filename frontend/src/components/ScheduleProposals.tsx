@@ -374,12 +374,17 @@ export const ScheduleProposals = (): JSX.Element => {
             };
           })
           : [],
-        employees: state.employees.filter((emp) => emp.status === 'Actif').map((emp) => ({
-          id: emp.id, name: `${emp.firstName} ${emp.lastName}`, position: emp.position,
-          branch_id: emp.branchId ?? '',
-          branch_name: state.branches.find((b) => b.id === emp.branchId)?.name ?? '',
-          hire_date: emp.hireDate ?? '',
-        })),
+        employees: state.employees.filter((emp) => emp.status === 'Actif').map((emp) => {
+          const allIds = ((emp.branchIds ?? []).length > 0 ? (emp.branchIds ?? []) : [emp.branchId]).filter(Boolean);
+          return {
+            id: emp.id, name: `${emp.firstName} ${emp.lastName}`, position: emp.position,
+            branch_id: emp.branchId ?? '',
+            branch_name: state.branches.find((b) => b.id === emp.branchId)?.name ?? '',
+            branch_ids: allIds,
+            branch_names: allIds.map((bid) => state.branches.find((b) => b.id === bid)?.name ?? ''),
+            hire_date: emp.hireDate ?? '',
+          };
+        }),
       }, { headers });
       toast.success(budgetNum > 0
         ? `L'IA prépare l'horaire (budget ${cad(budgetNum)}) — les quarts apparaîtront automatiquement dans le calendrier.`

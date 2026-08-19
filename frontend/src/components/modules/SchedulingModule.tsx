@@ -72,7 +72,7 @@ const monthGridDays = (anchor: Date): string[] => {
 };
 
 export default function SchedulingModule(): JSX.Element {
-  const { state, addShift, deleteShift, updateShift, setShiftSwapStatus, getEmployee, refreshShifts } = useHR();
+  const { state, addShift, deleteShift, updateShift, setShiftSwapStatus, getEmployee, refreshShifts, shiftsSynced } = useHR();
   const { currentUser, token } = useAuth();
   const isAdmin = currentUser?.role !== 'employee';
   const [weekOffset, setWeekOffset] = useState(0);
@@ -133,6 +133,7 @@ export default function SchedulingModule(): JSX.Element {
   const [rates, setRates] = useState<Record<string, number>>({});
   const [deptDefaults, setDeptDefaults] = useState<Record<string, string>>({});
   const [weekDeptBudgets, setWeekDeptBudgets] = useState<Record<string, number>>({});
+  const [weekBranchBudgets, setWeekBranchBudgets] = useState<Record<string, number>>({});
   useEffect(() => {
     if (!isAdmin || !token) return;
     axios.get<{ employee_id: string; hourly_rate?: number; department?: string; capacities?: string[] }[]>(`${API}/profiles`, { headers: { Authorization: `Bearer ${token}` } })
@@ -161,8 +162,13 @@ export default function SchedulingModule(): JSX.Element {
     axios.get<{ stations: WorkStation[]; rush_periods: RushPeriod[] }>(`${API}/work-stations`, { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => { setStations(r.data.stations); setRushPeriods(r.data.rush_periods); })
       .catch(() => undefined);
-    axios.get<{ dept_budgets?: Record<string, number> }>(`${API}/schedule/settings`, { headers: { Authorization: `Bearer ${token}` } })
-      .then((r) => setWeekDeptBudgets(r.data.dept_budgets ?? {}))
+    axios.get<{ dept_budgets?: Record<string, number>; branch_budgets?: { branch_id: string; budget: number }[] }>(`${API}/schedule/settings`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => {
+        setWeekDeptBudgets(r.data.dept_budgets ?? {});
+        const bb: Record<string, number> = {};
+        (r.data.branch_budgets ?? []).forEach((b) => { bb[b.branch_id] = b.budget; });
+        setWeekBranchBudgets(bb);
+      })
       .catch(() => undefined);
   }, [isAdmin, token]);
 
@@ -1119,6 +1125,49 @@ export default function SchedulingModule(): JSX.Element {
         );
       })()}
 
+      {viewMode === 'week' && isAdmin && state.branches.length > 0 && (() => {
+        const weekShifts = state.shifts.filter((s) => s.date >= days[0] && s.date <= days[6]);
+        const homeBranch = (eid: string): string => getEmployee(eid)?.branchId ?? '';
+        const byBranch = new Map<string, { hours: number; cost: number }>();
+        weekShifts.forEach((s) => {
+          const bid = s.branchId || homeBranch(s.employeeId);
+          if (!bid) return;
+          const h = netHours(s);
+          const cur = byBranch.get(bid) ?? { hours: 0, cost: 0 };
+          cur.hours += h;
+          cur.cost += h * (rates[s.employeeId] ?? 0);
+          byBranch.set(bid, cur);
+        });
+        if (byBranch.size === 0) return null;
+        return (
+          <div data-testid="branch-totals-panel" className="mt-4 bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+            <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400 font-semibold mb-3 inline-flex items-center gap-1.5">
+              <Layers className="w-3.5 h-3.5 text-emerald-600" /> Heures et coûts par succursale — semaine du {days[0]}
+            </p>
+            <p className="text-[11px] text-slate-400 -mt-2 mb-3">Chaque quart est imputé à la succursale où il a lieu (employés volatils inclus).</p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+              {state.branches.filter((b) => byBranch.has(b.id)).map((b) => {
+                const v = byBranch.get(b.id)!;
+                const budget = weekBranchBudgets[b.id] ?? 0;
+                const over = budget > 0 && v.cost > budget;
+                return (
+                  <div key={b.id} data-testid={`branch-total-${b.id}`} className={`rounded-xl border p-3 ${over ? 'border-red-300 bg-red-50' : 'border-slate-200 bg-slate-50/60'}`}>
+                    <p className="text-xs font-bold text-slate-700 truncate">{b.name}</p>
+                    <p className="text-sm font-bold text-slate-900 mt-1">{fmtHours(v.hours)}</p>
+                    {v.cost > 0 && (
+                      <p data-testid={`branch-cost-${b.id}`} className={`text-xs font-semibold mt-0.5 ${over ? 'text-red-700' : 'text-emerald-700'}`}>
+                        {fmtCad(v.cost)}{budget > 0 && <span className="text-slate-400 font-normal"> / {fmtCad(budget)}</span>}
+                      </p>
+                    )}
+                    {over && <p data-testid={`branch-over-${b.id}`} className="text-[10px] text-red-600 font-semibold mt-0.5">Budget dépassé</p>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
       {viewMode === 'day' && (() => {
         const toMin = (t: string): number => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
         const H0 = 6 * 60;
@@ -1389,9 +1438,10 @@ export default function SchedulingModule(): JSX.Element {
             <Button
               data-testid="shift-submit-button"
               type="submit"
+              disabled={!shiftsSynced}
               className={`w-full rounded-full ${dialogLeaveConflict && leaveOverride ? 'bg-red-600 hover:bg-red-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}
             >
-              {dialogLeaveConflict && leaveOverride ? 'Enregistrer quand même' : 'Ajouter le quart'}
+              {!shiftsSynced ? 'Synchronisation des quarts…' : dialogLeaveConflict && leaveOverride ? 'Enregistrer quand même' : 'Ajouter le quart'}
             </Button>
           </form>
         </DialogContent>

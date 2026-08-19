@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Plus, Mail, Phone, MapPin, Trash2, Hash, UserX, Pencil, FileSpreadsheet, ListPlus, KeySquare } from 'lucide-react';
 import { CustomFieldsPanel } from '@/components/CustomFieldsPanel';
 import { ModuleAccessPanel } from '@/components/ModuleAccessPanel';
+import { IncompatibilitiesPanel } from '@/components/IncompatibilitiesPanel';
 import { ProfileEditor } from '@/components/ProfileEditor';
 import { SalaryHistory } from '@/components/SalaryHistory';
 import { PayrollNumbersDialog } from '@/components/PayrollNumbersDialog';
@@ -284,6 +285,13 @@ export default function EmployeeDossier(): JSX.Element {
             <div className="lg:col-span-3">
               <CollapsibleSection id="dossier-custom-fields" title="Champs RH personnalisés" icon={ListPlus}>
                 <CustomFieldsPanel employeeId={selected.id} />
+              </CollapsibleSection>
+            </div>
+          )}
+          {selected && (
+            <div className="lg:col-span-3">
+              <CollapsibleSection id="dossier-incompat" title="Incompatibilités de travail" icon={UserX}>
+                <IncompatibilitiesPanel employeeId={selected.id} />
               </CollapsibleSection>
             </div>
           )}

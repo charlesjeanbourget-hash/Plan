@@ -522,6 +522,7 @@ export interface EmployeeProfile {
   payroll_number?: string | null;
   department?: string;
   birth_date?: string;
+  incompatible_with?: string[];
   notes: string;
   updated_at: string;
   updated_by: string;
