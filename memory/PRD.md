@@ -504,6 +504,9 @@ Question utilisateur : « l'IA prend-elle en considération les remplaçants d'a
 ## Combler en un clic (19 août 2026) — testé par captures (quart ouvert publié + toast, mode remplaçant vérifié, données de test nettoyées)
 - Les badges de trou de la vue Succursales (gap-fill-{branch}-{date}[-{minutes}] et gap-fill-empty-*) sont cliquables (admins/managers seulement, prop canManage) → FillGapDialog.tsx (fill-gap-dialog) : date/succursale/heures préremplies (modifiables), 2 modes — « Quart ouvert (interne) » (département + attribution premier arrivé/ancienneté → POST /open-shifts avec branch_id et note « Trou de couverture — {succursale} ») et « Remplaçant d'agence » (poste POSITIONS + urgence → POST /replacements/requests avec le créneau, courriels agences envoyés automatiquement).
 
+## Dossier PDF sécurité/Loi 25 (19 août 2026) — testé (HTTP 200 + rendu visuel 3 pages vérifié)
+- PDF professionnel « Dossier de sécurité et de conformité » généré via reportlab (script /app/scripts/gen_security_pdf.py, régénérable). Servi statiquement : /dossier-securite-loi25.pdf (placé dans /app/frontend/public/). 8 sections : Loi 25, authentification, chiffrement, contrôle d'accès, GitHub, hébergement (option Québec), mesures complémentaires, résumé exécutif. Couleurs marque (émeraude/ardoise), logo, en-tête/pied avec pagination.
+
 ### Reste au backlog
 - Persistance serveur des employés/succursales (branchIds en localStorage seulement — fragilise le multi-succursales entre postes).
 - QuickBooks (attend clés Intuit). Domaine Resend à vérifier par l'utilisateur pour courriels multi-destinataires.
