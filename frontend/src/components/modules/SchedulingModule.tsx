@@ -1185,6 +1185,7 @@ export default function SchedulingModule(): JSX.Element {
           shifts={state.shifts.filter((s) => s.date >= days[0] && s.date <= days[6])}
           getEmployee={getEmployee}
           weather={weather}
+          canManage={isAdmin}
         />
       )}
 

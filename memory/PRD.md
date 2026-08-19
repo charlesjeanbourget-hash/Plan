@@ -501,6 +501,9 @@ Question utilisateur : « l'IA prend-elle en considération les remplaçants d'a
 ## Vue Multi-Succursales (19 août 2026) — testée par capture d'écran
 - Nouveau bouton « Succursales » (view-branches-button) dans le sélecteur de vues d'Horaires (visible si ≥1 succursale). Composant MultiBranchView.tsx (multi-branch-view) : tableau jours × succursales (+ colonne « Sans succursale » si quarts non rattachés), quarts triés avec badges volatil/formation, détection des trous de couverture vs heures d'ouverture configurables (inputs branch-view-open/close, persistées localStorage ap_branch_view_hours, défaut 08:00-21:00, trous ≥15 min), en-têtes avec heures planifiées + nb jours avec trou, badges « Aucune couverture »/« Trou HH:MM–HH:MM »/« Couvert », météo par jour. Navigation semaine partagée avec la vue Semaine.
 
+## Combler en un clic (19 août 2026) — testé par captures (quart ouvert publié + toast, mode remplaçant vérifié, données de test nettoyées)
+- Les badges de trou de la vue Succursales (gap-fill-{branch}-{date}[-{minutes}] et gap-fill-empty-*) sont cliquables (admins/managers seulement, prop canManage) → FillGapDialog.tsx (fill-gap-dialog) : date/succursale/heures préremplies (modifiables), 2 modes — « Quart ouvert (interne) » (département + attribution premier arrivé/ancienneté → POST /open-shifts avec branch_id et note « Trou de couverture — {succursale} ») et « Remplaçant d'agence » (poste POSITIONS + urgence → POST /replacements/requests avec le créneau, courriels agences envoyés automatiquement).
+
 ### Reste au backlog
 - Persistance serveur des employés/succursales (branchIds en localStorage seulement — fragilise le multi-succursales entre postes).
 - QuickBooks (attend clés Intuit). Domaine Resend à vérifier par l'utilisateur pour courriels multi-destinataires.

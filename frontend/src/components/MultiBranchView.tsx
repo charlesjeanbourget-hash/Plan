@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Shift, Branch, Employee } from '@/types';
 import { AlertTriangle, CheckCircle2, Building2 } from 'lucide-react';
+import { FillGapDialog, CoverageGap } from '@/components/FillGapDialog';
 
 interface Props {
   days: string[];
@@ -8,6 +9,7 @@ interface Props {
   shifts: Shift[];
   getEmployee: (id: string) => Employee | undefined;
   weather: Record<string, { icon: string; tmax: number }>;
+  canManage: boolean;
 }
 
 const toMin = (t: string): number => {
@@ -31,7 +33,8 @@ const findGaps = (intervals: [number, number][], open: number, close: number): [
 
 const HOURS_KEY = 'ap_branch_view_hours';
 
-export const MultiBranchView = ({ days, branches, shifts, getEmployee, weather }: Props): JSX.Element => {
+export const MultiBranchView = ({ days, branches, shifts, getEmployee, weather, canManage }: Props): JSX.Element => {
+  const [gapToFill, setGapToFill] = useState<CoverageGap | null>(null);
   const saved = ((): { open: string; close: string } => {
     try {
       return { open: '08:00', close: '21:00', ...(JSON.parse(localStorage.getItem(HOURS_KEY) ?? '{}') as object) };
@@ -121,9 +124,16 @@ export const MultiBranchView = ({ days, branches, shifts, getEmployee, weather }
                   return (
                     <td key={c.id} data-testid={`branch-cell-${c.id || 'none'}-${d}`} className="px-4 py-3">
                       {list.length === 0 ? (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-red-50 border border-red-200 text-red-700 px-2 py-0.5 text-[10px] font-bold">
-                          <AlertTriangle className="w-3 h-3" /> Aucune couverture
-                        </span>
+                        <button
+                          type="button"
+                          data-testid={`gap-fill-empty-${c.id || 'none'}-${d}`}
+                          disabled={!canManage}
+                          onClick={() => setGapToFill({ date: d, start: openTime, end: closeTime, branchId: c.id, branchName: c.name })}
+                          className={`inline-flex items-center gap-1 rounded-full bg-red-50 border border-red-200 text-red-700 px-2 py-0.5 text-[10px] font-bold ${canManage ? 'hover:bg-red-100 hover:border-red-300 cursor-pointer' : 'cursor-default'}`}
+                          title={canManage ? 'Cliquez pour combler ce trou' : undefined}
+                        >
+                          <AlertTriangle className="w-3 h-3" /> Aucune couverture{canManage && <span className="text-red-400 font-semibold">· combler</span>}
+                        </button>
                       ) : (
                         <div className="space-y-1">
                           {list.map((s) => {
@@ -139,9 +149,17 @@ export const MultiBranchView = ({ days, branches, shifts, getEmployee, weather }
                             );
                           })}
                           {dayGaps.length > 0 ? dayGaps.map(([s, e]) => (
-                            <span key={`${s}-${e}`} className="inline-flex items-center gap-1 rounded-full bg-red-50 border border-red-200 text-red-700 px-2 py-0.5 text-[10px] font-bold mr-1">
-                              <AlertTriangle className="w-3 h-3" /> Trou {fmtMin(s)}–{fmtMin(e)}
-                            </span>
+                            <button
+                              key={`${s}-${e}`}
+                              type="button"
+                              data-testid={`gap-fill-${c.id || 'none'}-${d}-${s}`}
+                              disabled={!canManage}
+                              onClick={() => setGapToFill({ date: d, start: fmtMin(s), end: fmtMin(e), branchId: c.id, branchName: c.name })}
+                              className={`inline-flex items-center gap-1 rounded-full bg-red-50 border border-red-200 text-red-700 px-2 py-0.5 text-[10px] font-bold mr-1 ${canManage ? 'hover:bg-red-100 hover:border-red-300 cursor-pointer' : 'cursor-default'}`}
+                              title={canManage ? 'Cliquez pour combler ce trou' : undefined}
+                            >
+                              <AlertTriangle className="w-3 h-3" /> Trou {fmtMin(s)}–{fmtMin(e)}{canManage && <span className="text-red-400 font-semibold">· combler</span>}
+                            </button>
                           )) : (
                             <span className="inline-flex items-center gap-1 text-emerald-600 text-[10px] font-semibold">
                               <CheckCircle2 className="w-3 h-3" /> Couvert
@@ -158,8 +176,10 @@ export const MultiBranchView = ({ days, branches, shifts, getEmployee, weather }
         </table>
       </div>
       <p className="px-5 py-2.5 text-[10px] text-slate-400 border-t border-slate-100">
-        Un « trou » est une plage sans aucun employé planifié entre les heures d'ouverture choisies. Les quarts « volatil » sont ceux effectués hors de la succursale d'origine de l'employé.
+        Un « trou » est une plage sans aucun employé planifié entre les heures d'ouverture choisies.
+        {canManage ? ' Cliquez sur un trou pour publier un quart ouvert ou demander un remplaçant d\u2019agence.' : ' Les quarts « volatil » sont ceux effectués hors de la succursale d\u2019origine de l\u2019employé.'}
       </p>
+      <FillGapDialog gap={gapToFill} onClose={() => setGapToFill(null)} />
     </div>
   );
 };
