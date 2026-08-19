@@ -498,6 +498,9 @@ Question utilisateur : « l'IA prend-elle en considération les remplaçants d'a
 3. **Incompatibilités entre employés**: employee_profiles.incompatible_with (réciprocité auto au PUT /profiles, admin/manager seulement, max 50). IA: « incompatible_avec » dans le payload + règle jamais ensemble (chevauchement même succursale) + warnings post-génération kind=incompat. Manuel: POST/PUT /shifts retournent incompat_warning (non bloquant, requête $in unique) → toast sonner via HRContext. UI: IncompatibilitiesPanel.tsx dans sa propre CollapsibleSection « Incompatibilités de travail » (dossier-incompat) du dossier employé.
 4. Divers: HRContext.shiftsSynced (bouton shift-submit-button désactivé « Synchronisation des quarts… » avant le 1er sync serveur, évite les avertissements manqués sur données démo), astuce budget dans BudgetExportCard.
 
+## Vue Multi-Succursales (19 août 2026) — testée par capture d'écran
+- Nouveau bouton « Succursales » (view-branches-button) dans le sélecteur de vues d'Horaires (visible si ≥1 succursale). Composant MultiBranchView.tsx (multi-branch-view) : tableau jours × succursales (+ colonne « Sans succursale » si quarts non rattachés), quarts triés avec badges volatil/formation, détection des trous de couverture vs heures d'ouverture configurables (inputs branch-view-open/close, persistées localStorage ap_branch_view_hours, défaut 08:00-21:00, trous ≥15 min), en-têtes avec heures planifiées + nb jours avec trou, badges « Aucune couverture »/« Trou HH:MM–HH:MM »/« Couvert », météo par jour. Navigation semaine partagée avec la vue Semaine.
+
 ### Reste au backlog
 - Persistance serveur des employés/succursales (branchIds en localStorage seulement — fragilise le multi-succursales entre postes).
 - QuickBooks (attend clés Intuit). Domaine Resend à vérifier par l'utilisateur pour courriels multi-destinataires.

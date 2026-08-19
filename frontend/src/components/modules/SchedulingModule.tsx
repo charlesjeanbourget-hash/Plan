@@ -25,6 +25,7 @@ import { DeptCopyDialog } from '@/components/DeptCopyDialog';
 import { BudgetActualCard } from '@/components/BudgetActualCard';
 import { ReadReceiptsDialog } from '@/components/ReadReceiptsDialog';
 import { OpenShiftsPanel } from '@/components/OpenShiftsPanel';
+import { MultiBranchView } from '@/components/MultiBranchView';
 import { downloadSchedulePdf } from '@/lib/schedulePdf';
 import { hoursBetween } from '@/lib/schedule';
 import { DEPARTMENTS } from '@/lib/pharmacy';
@@ -182,7 +183,7 @@ export default function SchedulingModule(): JSX.Element {
 
   const visibleShifts = state.shifts.filter((s) => deptFilter === 'all' || (s.department || 'Général') === deptFilter);
 
-  const [viewMode, setViewMode] = useState<'day' | 'week' | 'month'>('week');
+  const [viewMode, setViewMode] = useState<'day' | 'week' | 'month' | 'branches'>('week');
 
   const netHours = (s: Shift): number => {
     const h = hoursBetween(s.startTime, s.endTime);
@@ -635,6 +636,15 @@ export default function SchedulingModule(): JSX.Element {
           >
             Mois
           </button>
+          {state.branches.length > 0 && (
+            <button
+              data-testid="view-branches-button"
+              onClick={() => setViewMode('branches')}
+              className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-colors ${viewMode === 'branches' ? 'bg-emerald-600 text-white' : 'text-slate-500 hover:text-slate-800'}`}
+            >
+              Succursales
+            </button>
+          )}
         </div>
         {viewMode === 'day' && (
           <>
@@ -655,7 +665,7 @@ export default function SchedulingModule(): JSX.Element {
             )}
           </>
         )}
-        {viewMode === 'week' ? (
+        {viewMode === 'week' || viewMode === 'branches' ? (
           <>
             <Button data-testid="week-prev-button" variant="outline" size="icon" className="rounded-full" onClick={() => setWeekOffset(weekOffset - 1)}>
               <ChevronLeft className="w-4 h-4" />
@@ -1167,6 +1177,16 @@ export default function SchedulingModule(): JSX.Element {
           </div>
         );
       })()}
+
+      {viewMode === 'branches' && (
+        <MultiBranchView
+          days={days}
+          branches={state.branches}
+          shifts={state.shifts.filter((s) => s.date >= days[0] && s.date <= days[6])}
+          getEmployee={getEmployee}
+          weather={weather}
+        />
+      )}
 
       {viewMode === 'day' && (() => {
         const toMin = (t: string): number => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
