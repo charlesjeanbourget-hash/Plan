@@ -32,6 +32,13 @@ export default function LandingPage({ onNavigate }: Props): JSX.Element {
           <BrandLogo size="sm" hideTextOnSmall />
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             <button
+              data-testid="header-security-button"
+              onClick={() => onNavigate('security')}
+              className="hidden md:inline-flex items-center gap-1.5 px-3.5 py-2 text-xs sm:text-sm font-semibold text-slate-600 hover:text-emerald-700 transition-colors whitespace-nowrap"
+            >
+              <ShieldCheck className="w-4 h-4 text-emerald-600" /> Sécurité
+            </button>
+            <button
               data-testid="header-demo-button"
               onClick={() => scrollToId('demo')}
               className="hidden sm:inline-flex px-3.5 sm:px-5 py-2 rounded-full bg-bronze-600 text-white text-xs sm:text-sm font-semibold whitespace-nowrap hover:bg-bronze-700 transition-colors"
