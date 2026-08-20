@@ -179,18 +179,20 @@ bullets([
 # 6. Hébergement
 section(6, "Hébergement des données")
 bullets([
-    "<b>Situation actuelle :</b> application déployée sur une infrastructure infonuagique gérée "
-    "(conteneurs isolés, HTTPS, base MongoDB dédiée).",
-    "<b>Ce que la Loi 25 exige :</b> les renseignements personnels peuvent être hébergés hors Québec à condition "
-    "qu'une évaluation des facteurs relatifs à la vie privée (ÉFVP) démontre une protection adéquate.",
+    "<b>Situation actuelle :</b> les données sont hébergées sur l'infrastructure infonuagique Google Cloud, "
+    "région us-central1 (Iowa, États-Unis) : conteneurs isolés, HTTPS, base de données dédiée, chiffrement au "
+    "repos et en transit, sauvegardes horaires et quotidiennes.",
+    "<b>Ce que la Loi 25 exige (article 17) :</b> les renseignements personnels peuvent être hébergés hors Québec "
+    "à condition qu'une évaluation des facteurs relatifs à la vie privée (ÉFVP) démontre une protection adéquate. "
+    "Cette ÉFVP a été réalisée et documentée ; l'hébergement hors Québec est divulgué dans la politique de confidentialité.",
 ])
 story.append(Spacer(1, 4))
 story.append(Paragraph("Option renforcée planifiée — hébergement 100 % québécois", s_h2))
 bullets([
     "OVHcloud (Beauharnois), AWS ou Google Cloud (région Montréal) avec MongoDB Atlas région Montréal.",
-    "Avantage : les données ne quittent jamais le Québec → aucune ÉFVP de transfert requise, conformité simplifiée, "
+    "Avantage : les données ne quitteraient plus le Québec → aucune ÉFVP de transfert requise, conformité simplifiée, "
     "argument de confiance pour les pharmacies clientes.",
-    "Sauvegardes automatiques et chiffrement géré inclus avec MongoDB Atlas.",
+    "Sauvegardes automatiques, authentification obligatoire et chiffrement géré inclus avec MongoDB Atlas.",
 ])
 
 # 7. Complémentaires

@@ -48,19 +48,27 @@ const SECTIONS: { title: string; body: string[] }[] = [
     ],
   },
   {
-    title: '7. Incidents de confidentialité',
+    title: '7. Hébergement des données à l\'extérieur du Québec',
+    body: [
+      'Les données de la plateforme sont hébergées sur l\'infrastructure infonuagique Google Cloud, dans la région us-central1 (Iowa, États-Unis), gérée par notre fournisseur de plateforme. Vos renseignements personnels peuvent donc être conservés à l\'extérieur du Québec et du Canada, et être soumis aux lois applicables dans ce territoire.',
+      'Conformément à l\'article 17 de la Loi 25, une évaluation des facteurs relatifs à la vie privée (ÉFVP) a été réalisée avant cette communication hors Québec. Elle conclut que les renseignements bénéficient d\'une protection adéquate : chiffrement des données au repos et en transit, sauvegardes horaires et quotidiennes, infrastructure isolée, base de données inaccessible depuis Internet (vérifié par balayage externe), accès limités par rôle et journal d\'audit complet.',
+      'Une migration vers un hébergement situé au Québec (région Montréal) est à l\'étude afin que les données ne quittent plus le territoire québécois.',
+    ],
+  },
+  {
+    title: '8. Incidents de confidentialité',
     body: [
       'Tout incident de confidentialité présentant un risque de préjudice sérieux sera signalé à la Commission d\'accès à l\'information du Québec (CAI) et aux personnes concernées, conformément à la Loi 25. Un registre des incidents est tenu par le responsable de la protection des renseignements personnels.',
     ],
   },
   {
-    title: '8. Vos droits',
+    title: '9. Vos droits',
     body: [
       'Vous pouvez en tout temps demander l\'accès aux renseignements personnels que nous détenons à votre sujet, leur rectification ou leur suppression, ou retirer votre consentement, en écrivant au responsable de la protection des renseignements personnels. Une réponse vous sera fournie dans un délai de 30 jours.',
     ],
   },
   {
-    title: '9. Témoins (cookies) et stockage local',
+    title: '10. Témoins (cookies) et stockage local',
     body: [
       'La plateforme n\'utilise aucun témoin publicitaire ni traceur tiers. Seul le stockage local du navigateur est utilisé pour maintenir votre session de travail et vos préférences d\'affichage.',
     ],
@@ -90,7 +98,7 @@ export default function PrivacyPolicy({ onNavigate }: Props): JSX.Element {
           Politique de confidentialité
         </h1>
         <p className="text-sm text-slate-500 mb-10">
-          Dernière mise à jour : juillet 2026. Cette politique décrit comment Arrière Plan recueille,
+          Dernière mise à jour : août 2026. Cette politique décrit comment Arrière Plan recueille,
           utilise, protège et détruit les renseignements personnels.
         </p>
         <div className="space-y-8">

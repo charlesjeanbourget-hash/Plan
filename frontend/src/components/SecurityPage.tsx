@@ -89,9 +89,9 @@ const PILLARS: { id: string; icon: LucideIcon; title: string; items: string[] }[
     icon: Server,
     title: 'Hébergement des données',
     items: [
-      'Infrastructure infonuagique gérée : conteneurs isolés, HTTPS, base de données dédiée.',
-      'Option d\'hébergement 100 % québécois (région Montréal) : les données ne quittent jamais le Québec — aucune ÉFVP (évaluation des facteurs relatifs à la vie privée) de transfert requise.',
-      'Sauvegardes automatiques et chiffrement géré.',
+      'Données hébergées sur Google Cloud, région us-central1 (Iowa, États-Unis) : chiffrement au repos et en transit, sauvegardes horaires et quotidiennes, conteneurs isolés.',
+      'Communication hors Québec encadrée par la Loi 25 (article 17) : ÉFVP (évaluation des facteurs relatifs à la vie privée) documentée et divulgation transparente dans la politique de confidentialité.',
+      'Option d\'hébergement 100 % québécois (MongoDB Atlas, région Montréal) planifiée : les données ne quitteraient plus le Québec.',
     ],
   },
   {

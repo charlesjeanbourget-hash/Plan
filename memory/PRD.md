@@ -515,6 +515,13 @@ Question utilisateur : « l'IA prend-elle en considération les remplaçants d'a
 - **SecurityPage.tsx enrichie** : section « IA encadrée » (security-ai-section, 6 garanties : minimisation, aucun accès BD, aucun entraînement API, TLS, humain dans la boucle, garde-fous serveur), section « Tests de sécurité effectués » (security-tests-section, 5 cartes avec ids stables security-test-{slug}, badges min-width alignés), lexique 16 acronymes (security-glossary : Loi 25, MFA, TOTP, JWT, TLS, AES, SHA-256, bcrypt, NIP, OPQ, CAI, ÉFVP, API, IA, IP, SIRH), tous les acronymes développés dans les piliers, date pied de page corrigée (19 août 2026).
 - **PDF régénéré** : 5 pages — section 8 tableau des tests (CONFORME/PLANIFIÉ), section 9 IA encadrée, section 10 lexique (18 termes), section 11 résumé. /dossier-securite-loi25.pdf (~1,2 Mo).
 
+## Conformité hébergement US + ÉFVP (20 août 2026) — testé (captures + HTTP 200)
+- Contexte : Emergent a confirmé l'hébergement production sur Google Cloud us-central1 (Iowa, É.-U.). Obligations Loi 25 art. 17 remplies :
+- **PrivacyPolicy.tsx** : nouvelle section « 7. Hébergement des données à l'extérieur du Québec » (divulgation GCP Iowa, ÉFVP réalisée, migration Québec à l'étude), sections 7-9 renumérotées 8-10, date → août 2026.
+- **SecurityPage.tsx + PDF sécurité** : pilier Hébergement mis à jour avec la localisation réelle (GCP us-central1) + mention ÉFVP documentée.
+- **ÉFVP officielle** : /app/scripts/gen_efvp_pdf.py → /efvp-arriere-plan.pdf (3 pages : identification, renseignements visés, destination/CLOUD Act, mesures de protection, tableau d'analyse des risques, transparence, conclusion « protection adéquate art. 17 », bloc signature avec révision 12 mois). Document interne non lié sur le site — URL directe seulement.
+- Audit de sécurité (security_audit_agent) exécuté : INCOMPLET (interrompu) — 1 constat P1 : secrets dans /app/backend/.env (normal en préversion : .env non versionné git, mais recommander rotation des clés production). Communiqué à l'utilisateur.
+
 ### Reste au backlog
 - Persistance serveur des employés/succursales (branchIds en localStorage seulement — fragilise le multi-succursales entre postes).
 - QuickBooks (attend clés Intuit). Domaine Resend à vérifier par l'utilisateur pour courriels multi-destinataires.
