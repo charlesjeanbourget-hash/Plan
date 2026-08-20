@@ -121,24 +121,31 @@ bullets(["Détection des connexions depuis une nouvelle adresse IP avec alerte a
 # 2. Auth
 section(2, "Sécurité des comptes et de l'authentification")
 card_table([
-    ("Mots de passe hachés (bcrypt)", "Jamais stockés en clair — même l'équipe technique ne peut pas les lire."),
-    ("Vérification en 2 étapes (MFA)", "Codes TOTP compatibles Google Authenticator ; secrets MFA chiffrés en base de données."),
+    ("Mots de passe hachés (bcrypt)", "Hachés avec bcrypt (algorithme de hachage renforcé) — jamais stockés en clair ; "
+     "même l'équipe technique ne peut pas les lire."),
+    ("Vérification en 2 étapes (MFA — authentification multifacteur)",
+     "Codes TOTP (mot de passe à usage unique basé sur le temps) compatibles Google Authenticator ; "
+     "secrets MFA chiffrés en base de données."),
     ("MFA imposable", "L'administrateur peut exiger la MFA pour tous les comptes de la pharmacie."),
     ("Politique de mot de passe configurable", "Longueur minimale, majuscule / minuscule / chiffre / caractère spécial, "
      "expiration (90 j, 180 j ou 1 an) avec renouvellement forcé."),
-    ("Sessions à durée limitée", "Jetons JWT expirant après 24 heures — reconnexion obligatoire."),
+    ("Sessions à durée limitée", "Jetons JWT (JSON Web Token) expirant après 24 heures — reconnexion obligatoire."),
     ("Réinitialisation sécurisée", "Code à usage unique envoyé par courriel, valide 15 minutes, maximum 5 tentatives, haché en base."),
-    ("Alertes de connexion suspecte", "Courriel automatique lors d'une connexion depuis une nouvelle adresse IP."),
-    ("Borne de pointage protégée", "NIP à 4 chiffres hachés (SHA-256 + poivre secret) ; verrouillage temporaire après "
+    ("Alertes de connexion suspecte", "Courriel automatique lors d'une connexion depuis une nouvelle adresse IP "
+     "(Internet Protocol — l'adresse réseau de l'appareil)."),
+    ("Borne de pointage protégée", "NIP (numéro d'identification personnel) à 4 chiffres haché avec SHA-256 "
+     "(Secure Hash Algorithm — algorithme de hachage sécurisé) et un poivre secret ; verrouillage temporaire après "
      "plusieurs NIP invalides (anti-force brute)."),
 ])
 
 # 3. Chiffrement
 section(3, "Chiffrement des données")
 bullets([
-    "<b>En transit :</b> toutes les communications passent par HTTPS/TLS (navigateur ↔ serveur).",
-    "<b>Au repos :</b> les documents sensibles (certificats de licences professionnelles OPQ) sont chiffrés "
-    "avec une clé Fernet (AES-128) avant stockage — un accès direct aux fichiers ne révèle rien.",
+    "<b>En transit :</b> toutes les communications passent par HTTPS/TLS (Transport Layer Security — "
+    "protocole de chiffrement des communications entre le navigateur et le serveur).",
+    "<b>Au repos :</b> les documents sensibles (certificats de licences professionnelles de l'OPQ — Ordre des "
+    "pharmaciens du Québec) sont chiffrés avec une clé Fernet basée sur AES (Advanced Encryption Standard — "
+    "norme de chiffrement avancé) avant stockage — un accès direct aux fichiers ne révèle rien.",
     "<b>Secrets MFA :</b> chiffrés avec la même infrastructure de clés.",
     "<b>Clés et identifiants :</b> aucun secret n'est inscrit dans le code source ; tout est stocké dans des "
     "variables d'environnement sur le serveur uniquement.",
@@ -195,8 +202,107 @@ bullets([
     "<b>Gestion des départs :</b> suspension immédiate du compte et anonymisation possible à la fin de l'emploi.",
 ])
 
-# 8. Résumé
-section(8, "Résumé exécutif")
+# 8. Tests de sécurité effectués
+section(8, "Tests de durcissement de la base de données — résultats")
+story.append(Paragraph(
+    "Tests exécutés le 19 août 2026 selon la liste de vérification de durcissement MongoDB "
+    "(pare-feu, liaison d'adresses IP, authentification, balayage externe).", s_body))
+story.append(Spacer(1, 6))
+test_rows = [
+    [Paragraph("<b>Test</b>", s_cell_k), Paragraph("<b>Méthode</b>", s_cell_k), Paragraph("<b>Résultat</b>", s_cell_k)],
+    [Paragraph("Balayage externe des ports base de données (« test ultime »)", s_cell_v),
+     Paragraph("Tentatives de connexion TCP depuis l'extérieur du réseau vers les ports 27017, 27018 et 27019 "
+               "de la production (arriereplanrh.com) et de l'environnement de développement.", s_cell_v),
+     Paragraph("<b><font color='#065f46'>CONFORME</font></b> — Connexion refusée sur tous les ports base de données. "
+               "Seul le port 443 (HTTPS) répond.", s_cell_v)],
+    [Paragraph("Point d'entrée unique", s_cell_v),
+     Paragraph("Vérification des ports exposés publiquement.", s_cell_v),
+     Paragraph("<b><font color='#065f46'>CONFORME</font></b> — L'application n'est joignable que par HTTPS (443) ; "
+               "la base de données n'a aucune adresse publique.", s_cell_v)],
+    [Paragraph("Isolation réseau (équivalent pare-feu UFW)", s_cell_v),
+     Paragraph("La base MongoDB vit dans un conteneur isolé (Kubernetes) : seul le serveur d'application du même "
+               "conteneur peut lui parler.", s_cell_v),
+     Paragraph("<b><font color='#065f46'>CONFORME</font></b> — Équivalent moderne de la règle "
+               "« ALLOW FROM [IP application] » exigée sur un serveur autonome.", s_cell_v)],
+    [Paragraph("Liaison d'adresses (bindIp)", s_cell_v),
+     Paragraph("Inspection du fichier de configuration mongod.conf.", s_cell_v),
+     Paragraph("<b><font color='#065f46'>VÉRIFIÉ</font></b> — bindIp : 127.0.0.1 (connexions locales seulement) "
+               "dans la configuration ; l'exposition externe est bloquée au niveau réseau (confirmé par le balayage).", s_cell_v)],
+    [Paragraph("Authentification MongoDB (authorization)", s_cell_v),
+     Paragraph("Vérification de la configuration de sécurité du serveur de base de données.", s_cell_v),
+     Paragraph("<b><font color='#b45309'>PLANIFIÉ</font></b> — Non requise dans l'environnement géré actuel "
+               "(base inaccessible de l'extérieur : contrôle compensatoire). Sera imposée d'office lors de la "
+               "migration vers MongoDB Atlas région Montréal (authentification + TLS + liste blanche d'IP obligatoires).", s_cell_v)],
+]
+tt = Table(test_rows, colWidths=[42 * mm, 62 * mm, doc.width - 104 * mm], hAlign="LEFT", repeatRows=1)
+tt.setStyle(TableStyle([
+    ("BACKGROUND", (0, 0), (-1, 0), EMERALD),
+    ("TEXTCOLOR", (0, 0), (-1, 0), white),
+    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [white, BG_CARD]),
+    ("GRID", (0, 0), (-1, -1), 0.5, BORDER),
+    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+    ("LEFTPADDING", (0, 0), (-1, -1), 6),
+    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+    ("TOPPADDING", (0, 0), (-1, -1), 5),
+    ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+]))
+story.append(tt)
+story.append(Spacer(1, 4))
+story.append(Paragraph(
+    "<i>Conclusion des tests : le critère décisif — l'injoignabilité de la base de données depuis Internet — "
+    "est démontré sur les deux environnements. Les recommandations propres aux serveurs autonomes (UFW, bindIp réseau privé) "
+    "sont couvertes par des contrôles équivalents de l'infrastructure conteneurisée.</i>", s_body))
+
+# 9. IA encadrée
+section(9, "Encadrement de l'intelligence artificielle (IA)")
+story.append(Paragraph(
+    "Arrière Plan utilise l'IA pour générer les horaires, les formations et certaines analyses. "
+    "Voici pourquoi cette IA ne peut pas prendre vos renseignements sensibles ni en faire un usage non autorisé :", s_body))
+story.append(Spacer(1, 5))
+bullets([
+    "<b>Minimisation des données :</b> l'IA ne reçoit que le strict nécessaire à chaque tâche (noms, postes, "
+    "disponibilités, budgets). Elle ne reçoit jamais de mots de passe, de NIP (numéros d'identification personnels), "
+    "de documents signés ni de renseignements médicaux.",
+    "<b>Aucun accès direct :</b> l'IA n'a aucun accès à la base de données. Elle reçoit une demande ponctuelle, "
+    "renvoie une proposition, puis l'échange se termine — sans mémoire persistante de vos données.",
+    "<b>Aucun entraînement sur vos données :</b> les modèles sont utilisés par API professionnelle "
+    "(interface de programmation d'applications), dont les conditions d'utilisation excluent l'usage des données "
+    "transmises pour entraîner les modèles.",
+    "<b>Transit chiffré :</b> chaque échange avec les modèles d'IA passe par TLS (Transport Layer Security), "
+    "comme le reste de l'application.",
+    "<b>Un humain garde toujours le dernier mot :</b> aucune décision automatisée — chaque horaire, formation ou "
+    "proposition générée par l'IA doit être revue et approuvée par un gestionnaire avant d'être appliquée "
+    "(transparence exigée par la Loi 25 pour les traitements automatisés).",
+    "<b>Garde-fous serveur :</b> chaque réponse de l'IA est validée par le serveur (employés existants, succursales "
+    "permises, budgets, chevauchements) avant tout enregistrement — une réponse invalide est rejetée.",
+])
+
+# 10. Lexique
+section(10, "Lexique des acronymes et termes techniques")
+glossary_rows = [
+    ("Loi 25", "Loi québécoise modernisant la protection des renseignements personnels dans le secteur privé."),
+    ("MFA", "Multi-Factor Authentication — authentification multifacteur : un code en plus du mot de passe."),
+    ("TOTP", "Time-based One-Time Password — mot de passe à usage unique basé sur le temps (ex. Google Authenticator)."),
+    ("JWT", "JSON Web Token — jeton de session signé qui expire automatiquement (24 h ici)."),
+    ("HTTPS / TLS", "Transport Layer Security — chiffrement de toutes les communications entre l'appareil et le serveur."),
+    ("AES / Fernet", "Advanced Encryption Standard — norme de chiffrement utilisée pour protéger les fichiers sensibles."),
+    ("SHA-256", "Secure Hash Algorithm — fonction de hachage : transforme une donnée en empreinte irréversible."),
+    ("bcrypt", "Algorithme de hachage renforcé conçu spécifiquement pour protéger les mots de passe."),
+    ("NIP", "Numéro d'identification personnel — le code à 4 chiffres de la borne de pointage."),
+    ("OPQ", "Ordre des pharmaciens du Québec — ordre professionnel encadrant la pratique."),
+    ("CAI", "Commission d'accès à l'information du Québec — organisme de surveillance de la Loi 25."),
+    ("ÉFVP", "Évaluation des facteurs relatifs à la vie privée — analyse exigée avant un transfert de données hors Québec."),
+    ("API", "Application Programming Interface — interface de programmation permettant à deux logiciels de communiquer."),
+    ("IA", "Intelligence artificielle — ici, les modèles générant horaires et formations, toujours validés par un humain."),
+    ("IP", "Internet Protocol — l'adresse réseau identifiant un appareil connecté."),
+    ("TCP", "Transmission Control Protocol — protocole de connexion réseau utilisé pour les tests de balayage."),
+    ("SIRH", "Système d'information de ressources humaines — la catégorie de logiciel d'Arrière Plan."),
+    ("UFW", "Uncomplicated Firewall — pare-feu simplifié des serveurs Linux autonomes."),
+]
+card_table(glossary_rows, col1=34 * mm)
+
+# 11. Résumé
+section(11, "Résumé exécutif")
 quote = Table([[Paragraph(
     "Arrière Plan applique le principe de protection dès la conception (<i>privacy by design</i>) : consentement "
     "explicite, chiffrement des données sensibles, authentification forte imposable, journal d'audit exhaustif, "
