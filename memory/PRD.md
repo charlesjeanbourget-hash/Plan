@@ -525,6 +525,9 @@ Question utilisateur : « l'IA prend-elle en considération les remplaçants d'a
 ## Section ÉFVP sur le site (20 août 2026) — testée par captures + PDF HTTP 200
 - Nouveau composant EfvpSection.tsx (security-efvp-section) inséré dans SecurityPage entre les tests et « Vos droits » : bouton « Télécharger l'ÉFVP (PDF) » (efvp-pdf-download → /efvp-arriere-plan.pdf), tableau d'identification (5 lignes), renseignements visés, 4 cartes d'analyse des risques (CLOUD Act, accès BD, perte de données, IA), encadré conclusion « protection adéquate art. 17 ».
 
+## Feuille de vente one-pager (20 août 2026) — testée (rendu 1 page vérifié + HTTP 200)
+- /app/scripts/gen_sales_onepager.py → /feuille-vente-arriere-plan.pdf (1 page LETTER, couleurs marque) : hero sombre logo+titre, 3 colonnes (Horaires intelligents / Temps et paie / RH complète), bande sombre 4 exclusivités pharmacie, 4 statistiques (23/23 vs Agendrix, 5 h+, Loi 25, 9 exclusivités), 6 badges sécurité, bandeau CTA émeraude arriereplanrh.com.
+
 ### Reste au backlog
 - Persistance serveur des employés/succursales (branchIds en localStorage seulement — fragilise le multi-succursales entre postes).
 - QuickBooks (attend clés Intuit). Domaine Resend à vérifier par l'utilisateur pour courriels multi-destinataires.
