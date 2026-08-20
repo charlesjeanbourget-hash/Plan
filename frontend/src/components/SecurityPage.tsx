@@ -1,5 +1,6 @@
 import { View } from '@/types';
 import { BrandLogo } from '@/components/BrandLogo';
+import { EfvpSection } from '@/components/EfvpSection';
 import {
   ArrowLeft, ShieldCheck, FileDown, KeyRound, Lock, EyeOff, GitBranch, Server,
   FileSignature, ScrollText, UserX, Fingerprint, BellRing, LucideIcon,
@@ -288,6 +289,8 @@ export default function SecurityPage({ onNavigate }: Props): JSX.Element {
             sur les deux environnements. Le détail complet figure dans le dossier PDF téléchargeable.
           </p>
         </div>
+
+        <EfvpSection />
 
         <div className="mt-10 rounded-2xl bg-emerald-50 border border-emerald-100 p-6 sm:p-8 flex flex-col sm:flex-row items-start sm:items-center gap-5">
           <UserX className="w-8 h-8 text-emerald-700 shrink-0" />

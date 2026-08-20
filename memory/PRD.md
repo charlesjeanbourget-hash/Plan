@@ -522,6 +522,9 @@ Question utilisateur : « l'IA prend-elle en considération les remplaçants d'a
 - **ÉFVP officielle** : /app/scripts/gen_efvp_pdf.py → /efvp-arriere-plan.pdf (3 pages : identification, renseignements visés, destination/CLOUD Act, mesures de protection, tableau d'analyse des risques, transparence, conclusion « protection adéquate art. 17 », bloc signature avec révision 12 mois). Document interne non lié sur le site — URL directe seulement.
 - Audit de sécurité (security_audit_agent) exécuté : INCOMPLET (interrompu) — 1 constat P1 : secrets dans /app/backend/.env (normal en préversion : .env non versionné git, mais recommander rotation des clés production). Communiqué à l'utilisateur.
 
+## Section ÉFVP sur le site (20 août 2026) — testée par captures + PDF HTTP 200
+- Nouveau composant EfvpSection.tsx (security-efvp-section) inséré dans SecurityPage entre les tests et « Vos droits » : bouton « Télécharger l'ÉFVP (PDF) » (efvp-pdf-download → /efvp-arriere-plan.pdf), tableau d'identification (5 lignes), renseignements visés, 4 cartes d'analyse des risques (CLOUD Act, accès BD, perte de données, IA), encadré conclusion « protection adéquate art. 17 ».
+
 ### Reste au backlog
 - Persistance serveur des employés/succursales (branchIds en localStorage seulement — fragilise le multi-succursales entre postes).
 - QuickBooks (attend clés Intuit). Domaine Resend à vérifier par l'utilisateur pour courriels multi-destinataires.
