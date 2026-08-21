@@ -6,6 +6,7 @@ import {
   CandidateStatus, RequestStatus, TaskStatus, PayrollStatus, ReplacementStatus, ShiftSwapRequest, Branch, Resource,
 } from '@/types';
 import { SEED_STATE } from '@/context/seedData';
+import { useAuth } from '@/context/AuthContext';
 import { toast } from 'sonner';
 
 const STATE_KEY = 'luminahr_state_v4';
@@ -56,9 +57,10 @@ const shiftFromServer = (d: ServerShift): Shift => ({
   training: d.training || undefined,
 });
 
-const shiftToServer = (s: Shift, branchId: string): Record<string, unknown> => ({
+const shiftToServer = (s: Shift, branchId: string, employeeName = ''): Record<string, unknown> => ({
   id: s.id,
   employee_id: s.employeeId,
+  employee_name: employeeName,
   date: s.date,
   start: s.startTime,
   end: s.endTime,
@@ -130,17 +132,54 @@ const loadState = (): HRState => {
   return SEED_STATE;
 };
 
+const snapWithoutShifts = (s: HRState): string => {
+  const { shifts: _omit, ...rest } = s;
+  return JSON.stringify(rest);
+};
+
 export const HRProvider = ({ children }: { children: ReactNode }) => {
+  const { token } = useAuth();
   const [state, setState] = useState<HRState>(loadState);
   const stateRef = useRef(state);
+  const syncedRef = useRef(false);
+  const dirtyRef = useRef(false);
+  const lastPushedRef = useRef(snapWithoutShifts(state));
+  const pushTimer = useRef<number | null>(null);
 
   useEffect(() => {
     stateRef.current = state;
     localStorage.setItem(STATE_KEY, JSON.stringify(state));
+    if (!getToken()) return;
+    const snapshot = snapWithoutShifts(state);
+    if (snapshot === lastPushedRef.current) return;
+    dirtyRef.current = true;
+    if (pushTimer.current) window.clearTimeout(pushTimer.current);
+    pushTimer.current = window.setTimeout(() => {
+      const latest = stateRef.current;
+      const snap2 = snapWithoutShifts(latest);
+      const { shifts: _o2, ...rest2 } = latest;
+      axios.put(`${API}/hr-state`, { state: rest2 }, { headers: authHeaders() })
+        .then(() => {
+          lastPushedRef.current = snap2;
+          dirtyRef.current = false;
+          syncedRef.current = true;
+        })
+        .catch((err) => {
+          if (axios.isAxiosError(err) && err.response?.status === 409) {
+            dirtyRef.current = false;
+            toast.error('Synchronisation refusée par le serveur — l\'état à jour sera rechargé.');
+          }
+        });
+    }, 1500);
   }, [state]);
 
   const branchOf = useCallback((employeeId: string): string =>
     stateRef.current.employees.find((e) => e.id === employeeId)?.branchId ?? '', []);
+
+  const nameOf = useCallback((employeeId: string): string => {
+    const e = stateRef.current.employees.find((x) => x.id === employeeId);
+    return e ? `${e.firstName} ${e.lastName}` : '';
+  }, []);
 
   const [shiftsSynced, setShiftsSynced] = useState(false);
 
@@ -152,7 +191,7 @@ export const HRProvider = ({ children }: { children: ReactNode }) => {
         const local = stateRef.current.shifts;
         if (local.length > 0) {
           await axios.post(`${API}/shifts/bulk`,
-            { shifts: local.map((s) => shiftToServer(s, branchOf(s.employeeId))) },
+            { shifts: local.map((s) => shiftToServer(s, branchOf(s.employeeId), nameOf(s.employeeId))) },
             { headers: authHeaders() }).catch(() => undefined);
         }
         return;
@@ -164,7 +203,7 @@ export const HRProvider = ({ children }: { children: ReactNode }) => {
     } finally {
       setShiftsSynced(true);
     }
-  }, [branchOf]);
+  }, [branchOf, nameOf]);
 
   const syncLeaves = useCallback(async (): Promise<void> => {
     if (!getToken()) return;
@@ -198,23 +237,79 @@ export const HRProvider = ({ children }: { children: ReactNode }) => {
     }
   }, []);
 
+  const syncHrState = useCallback(async (): Promise<void> => {
+    if (!getToken()) return;
+    try {
+      if (dirtyRef.current) {
+        const latest = stateRef.current;
+        const snap = snapWithoutShifts(latest);
+        const { shifts: _omit, ...rest } = latest;
+        try {
+          await axios.put(`${API}/hr-state`, { state: rest }, { headers: authHeaders() });
+          lastPushedRef.current = snap;
+          dirtyRef.current = false;
+          syncedRef.current = true;
+          return;
+        } catch (err) {
+          if (axios.isAxiosError(err) && err.response?.status === 409) {
+            dirtyRef.current = false;
+          } else {
+            return;
+          }
+        }
+      }
+      const res = await axios.get<{ state: Partial<HRState> | null }>(`${API}/hr-state`, { headers: authHeaders() });
+      if (dirtyRef.current) return;
+      const server = res.data.state;
+      if (server && Object.keys(server).length > 0) {
+        const incoming = { ...SEED_STATE, ...server } as HRState;
+        const incomingSnap = snapWithoutShifts(incoming);
+        if (incomingSnap !== snapWithoutShifts(stateRef.current)) {
+          if (!syncedRef.current) {
+            localStorage.setItem('luminahr_state_backup_v1', JSON.stringify(stateRef.current));
+          }
+          lastPushedRef.current = incomingSnap;
+          setState((prev) => ({ ...incoming, shifts: prev.shifts }));
+        }
+      } else {
+        const latest = stateRef.current;
+        const snap = snapWithoutShifts(latest);
+        const { shifts: _omit, ...rest } = latest;
+        await axios.put(`${API}/hr-state`, { state: rest }, { headers: authHeaders() });
+        lastPushedRef.current = snap;
+      }
+      syncedRef.current = true;
+    } catch {
+      /* hors ligne : on garde l'état local */
+    }
+  }, []);
+
   useEffect(() => {
+    if (!token) {
+      syncedRef.current = false;
+      return undefined;
+    }
+    dirtyRef.current = false;
+    lastPushedRef.current = snapWithoutShifts(stateRef.current);
+    void syncHrState();
     void syncShifts();
     void syncLeaves();
     const intervalId = window.setInterval(() => {
       void syncShifts();
       void syncLeaves();
+      void syncHrState();
     }, 15000);
     const onFocus = (): void => {
       void syncShifts();
       void syncLeaves();
+      void syncHrState();
     };
     window.addEventListener('focus', onFocus);
     return () => {
       window.clearInterval(intervalId);
       window.removeEventListener('focus', onFocus);
     };
-  }, [syncShifts, syncLeaves]);
+  }, [token, syncShifts, syncLeaves, syncHrState]);
 
   const patchList = useCallback(
     <K extends keyof HRState>(key: K, fn: (items: HRState[K]) => HRState[K]) => {
@@ -252,7 +347,7 @@ export const HRProvider = ({ children }: { children: ReactNode }) => {
       const shift: Shift = { ...s, id };
       patchList('shifts', (items) => (items.some((i) => i.id === id) ? items : [...items, shift]));
       if (getToken()) {
-        void axios.post<{ incompat_warning?: string | null }>(`${API}/shifts`, shiftToServer(shift, branchOf(shift.employeeId)), { headers: authHeaders() })
+        void axios.post<{ incompat_warning?: string | null }>(`${API}/shifts`, shiftToServer(shift, branchOf(shift.employeeId), nameOf(shift.employeeId)), { headers: authHeaders() })
           .then((r) => { if (r.data.incompat_warning) toast.warning(r.data.incompat_warning, { duration: 9000 }); })
           .catch(() => undefined);
       }
@@ -263,6 +358,7 @@ export const HRProvider = ({ children }: { children: ReactNode }) => {
         const body: Record<string, unknown> = {};
         if (patch.employeeId !== undefined) {
           body.employee_id = patch.employeeId;
+          body.employee_name = nameOf(patch.employeeId);
           body.branch_id = patch.branchId ?? branchOf(patch.employeeId);
         }
         if (patch.branchId !== undefined) body.branch_id = patch.branchId;

@@ -532,3 +532,21 @@ Question utilisateur : « l'IA prend-elle en considération les remplaçants d'a
 - Persistance serveur des employés/succursales (branchIds en localStorage seulement — fragilise le multi-succursales entre postes).
 - QuickBooks (attend clés Intuit). Domaine Resend à vérifier par l'utilisateur pour courriels multi-destinataires.
 - ESLint react/no-unescaped-entities préexistants dans SchedulingModule (9 occurrences) si build CI=true.
+
+## Itération 46-47 (21 août 2026) — Batterie de tests complète + correctifs critiques & performance — testée 100 % (iteration_46.json : backend 38/38 ; pytest régression 50/50 ; frontend Playwright tous flux ; 1re synchro vérifiée à T+0,46 s)
+1. **RACE CONDITION RÉSOLUE (perte de données post-connexion, iter 45)** : HRContext dépend du `token` (useAuth) — synchro immédiate à la connexion ; `dirtyRef` marqué dès tout changement local ; `syncHrState` POUSSE D'ABORD si dirty (jamais d'adoption écrasante) ; re-vérification de dirty après le GET ; `lastPushedRef` initialisé au snapshot de montage. **Cause profonde n°2 corrigée** : React exécute les effets ENFANTS avant PARENTS → localStorage(`luminahr_auth_v3`) est maintenant écrit SYNCHRONIQUEMENT dans AuthContext.login()/verifyMfa()/logout() (avant setAuth) pour que getToken() fonctionne dès l'effet [token]. Mesuré : GET hr-state+shifts à T+0,46 s (avant : T+15,4 s) ; employé créé 1,4 s après connexion survit et est poussé au serveur.
+2. **Sécurité PUT /api/hr-state** : rôle employé limité à `EMPLOYEE_HR_STATE_KEYS` = {shiftSwaps, benefits, leaveRequests, onboardingItems, tasks} — fusion avec l'état existant, listes sensibles (employees, payrollEntries, contracts…) intouchables. Vérifié E2E.
+3. **Garde-fou anti-appauvrissement** : PUT admin qui viderait ≥2 listes gardées (chacune ayant ≥2 éléments) → 409 + audit SYNC_REFUSEE. Client : sur 409, dirty=false + toast + ré-adoption de l'état serveur au prochain tick (pas de gel de synchro). 1 seule liste vidée = autorisé (suppressions rapides légitimes).
+4. **employee_name sur les quarts** : ShiftIn/ShiftPatchIn + _shift_doc stockent employee_name (max 80 car.) ; frontend l'envoie à la création (nameOf) et à la réassignation.
+5. **37 index MongoDB de performance** au démarrage (shifts, punches, shift_tasks, leave_requests, notifications, chat_messages, audit_logs, licenses, evaluations, deliveries, appointments, trainings, hr_states, etc.) — log « Index de performance vérifiés : 37/37 ». Endpoints chauds mesurés < 1,5 s.
+6. **Annulation de congé approuvé** : DELETE /api/leave/requests/{id} désormais permis pour admin/manager même si approuvé (employé : toujours 400 hors « En attente »).
+- Tests : /app/backend/tests/test_iteration46.py (38 tests, régression complète ~18 s) + test_iteration45.py mis à jour au nouveau contrat (garde-fou 409, fusion employé) — 50/50.
+- NOTES données : proposition IA démo cb21ac33 n'existe plus (nettoyée) ; base ph1 contient 11 avantages (3 brouillons résiduels d'imports IA) ; export budgets CSV = GET /api/payroll/budget-export?start&end (le nom /api/reports/payroll/budgets de l'ancien résumé était erroné).
+
+## Backlog priorisé (21 août 2026)
+- **P1** : Intégration QuickBooks API (en attente des clés Intuit du client — playbook déjà obtenu, ne pas implémenter avant réception).
+- **P1** : rev/If-Match sur /api/hr-state (contrôle de concurrence fin — actuellement dernier-arrivé-gagne + garde-fou 409).
+- **P2** : Migration MongoDB Atlas (Montréal) — ÉFVP actuelle couvre l'hébergement US ; objectif futur 100 % local.
+- **P2** : Nettoyage des 3 avantages brouillons résiduels ph1 ; re-semer une proposition IA démo si besoin.
+- **P0 utilisateur** : vérifier le domaine Resend pour la livraison réelle des courriels (toujours en mode test).
+

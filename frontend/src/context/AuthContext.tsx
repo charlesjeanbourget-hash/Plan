@@ -102,7 +102,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (res.data.mfa_required && res.data.mfa_token) {
         return { error: null, mfaToken: res.data.mfa_token };
       }
-      setAuth({ token: res.data.access_token as string, user: mapUser(res.data.user as BackendUser) });
+      const next = { token: res.data.access_token as string, user: mapUser(res.data.user as BackendUser) };
+      localStorage.setItem(AUTH_KEY, JSON.stringify(next));
+      setAuth(next);
       return { error: null };
     } catch (err) {
       if (axios.isAxiosError(err) && err.response) {
@@ -118,7 +120,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         mfa_token: mfaToken,
         code,
       });
-      setAuth({ token: res.data.access_token, user: mapUser(res.data.user) });
+      const next = { token: res.data.access_token, user: mapUser(res.data.user) };
+      localStorage.setItem(AUTH_KEY, JSON.stringify(next));
+      setAuth(next);
       return null;
     } catch (err) {
       if (axios.isAxiosError(err) && err.response) {
@@ -146,7 +150,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  const logout = (): void => setAuth(null);
+  const logout = (): void => {
+    localStorage.removeItem(AUTH_KEY);
+    setAuth(null);
+  };
 
   const refreshUser = async (): Promise<void> => {
     if (!auth) return;

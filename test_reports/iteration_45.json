@@ -1,0 +1,40 @@
+{
+  "summary": "Itération 45 — Test du correctif de synchronisation multi-appareils de l'état RH (/api/hr-state + HRContext). Backend : 11/11 tests pytest passent (auth 401/403, PUT strip du champ shifts, persistance GET, updated_by, partage entre admin et julie de ph1, 413 sur état trop gros, régression CRUD /api/shifts). Frontend : scénario iPhone/iPad reproduit avec 2 contextes Playwright isolés — la synchro FONCTIONNE (l'appareil B vierge voit l'employé créé sur A, et la synchro inverse fonctionne après rechargement). MAIS un BOGUE CRITIQUE DE PERTE DE DONNÉES a été reproduit : aucune requête /api/hr-state n'est émise à la connexion (HRProvider est monté avant l'authentification, getToken() est null → sortie anticipée) ; la première synchro n'a lieu qu'au tick de l'intervalle de 15 s. Toute modification faite dans cette fenêtre de ~15 s n'est PAS poussée et est ENSUITE ÉCRASÉE par l'adoption de l'état serveur (employé 'RaceTest Perdu' créé juste après la connexion : disparu de l'écran 25 s plus tard, absent du serveur). Régressions OK : quarts (/api/shifts) synchronisés entre appareils, connexion julie, module Paie, page publique — aucune erreur console.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PUT /api/hr-state", "issue": "Aucun contrôle de rôle : un employé (julie@luminahr.ca) peut écraser TOUT l'état RH de la pharmacie (employees, payrollEntries, contracts, benefits, jobOffers...). PUT retourne 200 avec updated_by=julie@luminahr.ca. Restreindre à admin/manager (ou limiter les listes modifiables par un employé)."},
+      {"endpoint": "PUT /api/hr-state", "issue": "Pas de contrôle de concurrence (pas de champ rev/If-Match côté client) : écriture 'dernier arrivé gagne' sur tout le document — un appareil avec un état local périmé peut annuler les changements d'un autre appareil."},
+      {"endpoint": "POST /api/shifts", "issue": "Le quart créé depuis l'UI est stocké avec employee_name = null (observé sur le quart uiwrnu6dmt2idi0o). Cosmétique/qualité de données côté exports et courriels."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Synchronisation de l'état RH après connexion (PERTE DE DONNÉES)", "issue": "HRProvider monte AVANT l'authentification : dans l'effet de montage, getToken() est null → syncHrState/syncShifts sortent immédiatement et syncedRef reste false. Journal réseau : 0 requête /api/hr-state juste après la connexion, la 1re GET+PUT n'arrive qu'au tick de 15 s. Conséquence reproduite : un employé créé dans les ~15 s suivant la connexion n'est jamais poussé (l'effet de poussée est désactivé car syncedRef=false) puis est SILENCIEUSEMENT ÉCRASÉ quand syncHrState adopte l'état serveur. CORRECTIF SUGGÉRÉ : déclencher syncHrState dès que le jeton apparaît (dépendance sur le jeton/currentUser ou remontage du provider après login) ET ne pas adopter l'état serveur si des modifications locales postérieures à l'adoption sont en attente (fusionner ou pousser d'abord).", "affected_selectors": ["[data-testid=\"add-employee-button\"]", "[data-testid=\"employee-submit-button\"]", "[data-testid=\"employees-module\"]"]},
+      {"flow": "Adoption de l'état serveur", "issue": "L'adoption remplace l'état complet sans résolution de conflit ni indicateur UI (aucun toast/indicateur 'synchronisé'). L'utilisateur voit ses données disparaître sans explication (cas ci-dessus)."}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_iteration45.py", "/app/test_reports/pytest/iteration_45.xml"],
+  "action_items": [
+    "CRITIQUE : déclencher la synchro hr-state immédiatement à la connexion (dépendance jeton/currentUser dans l'effet de HRContext) — sinon toute modification faite dans les 15 s suivant la connexion est perdue.",
+    "CRITIQUE : ne jamais adopter l'état serveur si des modifications locales non poussées existent (vérifier dirtyRef avant setState, ou pousser d'abord puis relire) et/ou implémenter un rev/If-Match côté serveur.",
+    "SÉCURITÉ : restreindre PUT /api/hr-state aux rôles admin/manager (un employé peut actuellement réécrire tout l'état RH de la pharmacie).",
+    "MINEUR : renseigner employee_name lors de la création d'un quart depuis l'UI (POST /api/shifts)."
+  ],
+  "critical_code_review_comments": [
+    "HRContext.tsx ~ligne 250 : useEffect(..., [syncShifts, syncLeaves, syncHrState]) — dépendances stables donc l'effet ne se rejoue jamais après la connexion ; ajouter le jeton/utilisateur courant comme dépendance.",
+    "HRContext.tsx ~ligne 144 : `if (!syncedRef.current || !getToken()) return;` empêche toute poussée avant la 1re synchro ; les modifications faites dans l'intervalle sont perdues (aucune file d'attente).",
+    "HRContext.tsx ~ligne 236 : setState({...incoming}) écrase l'état local sans vérifier dirtyRef — source directe de la perte de données observée.",
+    "server.py ~ligne 939 : save_hr_state accepte n'importe quel utilisateur authentifié et écrase le document complet de la pharmacie (pas de rôle, pas de rev attendu)."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration45.py"],
+  "success_rate": {"backend": "100% (11/11)", "frontend": "80% (4/5 scénarios — le scénario de course post-connexion échoue)"},
+  "seed_data_creation": "Aucune donnée résiduelle. Employés de test créés puis supprimés (SyncTest Multi, SyncBack Deux, RaceTest Perdu) ; quart de test supprimé (DELETE 200). La collection hr_states contient l'état bootstrappé légitime de ph1 (rev 8, 16 listes, employés e1/e2/e3, champ shifts absent, 12 ko).",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "admin@luminahr.ca / Nlpx!tTE3Aw27 ; julie@luminahr.ca / O1ka!gfVV6e54 (depuis /app/memory/test_credentials.md)",
+  "context_for_next_testing_agent": "La connexion se fait via le bouton [data-testid=header-login-button] de la landing (l'URL /login redirige vers la landing — SPA sans route). Test multi-appareils : browser = page.context.browser puis browser.new_context() pour simuler iPad/iPhone. IMPORTANT : après la connexion, attendre ~18 s avant toute modification, sinon elle est perdue (bogue en cours). Le fichier /app/backend/tests/test_iteration45.py couvre hr-state + régression shifts (le test 413 pousse un gros payload, ~2 s). Après le correctif, revérifier : (1) requête GET/PUT /api/hr-state <2 s après la connexion, (2) employé créé immédiatement après la connexion toujours présent 25 s plus tard et présent sur le serveur.",
+  "rca_of_the_issue": "HRProvider est monté au niveau racine de l'app, avant l'authentification. L'effet de synchronisation (useEffect avec dépendances stables) s'exécute une seule fois au montage, quand getToken() renvoie null : syncHrState sort immédiatement et syncedRef.current reste false. Par conséquent (a) aucune adoption/bootstrap au moment de la connexion, (b) l'effet de poussée débouncée est court-circuité par `!syncedRef.current`, donc les modifications locales ne sont ni poussées ni mises en file. Au premier tick de l'intervalle de 15 s, syncHrState s'exécute enfin : si le serveur possède déjà un état, il est adopté et remplace l'état local, détruisant les modifications faites entre la connexion et ce tick (reproduit : employé 'RaceTest Perdu' visible immédiatement puis disparu après 25 s, absent du serveur). Mitigation : dépendre du jeton dans l'effet + vérifier dirtyRef avant l'adoption."
+}

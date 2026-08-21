@@ -923,6 +923,62 @@ def _ics_escape(text: str) -> str:
     return text.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
 
 
+# ==================== Synchronisation de l'état RH entre appareils ====================
+
+class HRStateIn(BaseModel):
+    state: dict
+
+
+@api_router.get("/hr-state")
+async def get_hr_state(user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    doc = await db.hr_states.find_one({"pharmacy_id": pid}, {"_id": 0}) or {}
+    return {"state": doc.get("state"), "updated_at": doc.get("updated_at"), "updated_by": doc.get("updated_by")}
+
+
+EMPLOYEE_HR_STATE_KEYS = {"shiftSwaps", "benefits", "leaveRequests", "onboardingItems", "tasks"}
+
+HR_STATE_GUARDED_KEYS = ["employees", "payrollEntries", "contracts", "benefits", "jobOffers",
+                         "candidates", "leaveRequests", "branches", "pharmacies", "resources",
+                         "faqItems", "onboardingItems", "performanceReviews", "replacementRequests",
+                         "shiftSwaps", "tasks"]
+
+
+@api_router.put("/hr-state")
+async def save_hr_state(payload: HRStateIn, user: dict = Depends(get_current_user)):
+    pid = user.get("pharmacy_id") or "ph1"
+    state = dict(payload.state or {})
+    state.pop("shifts", None)
+    existing = (await db.hr_states.find_one({"pharmacy_id": pid}, {"_id": 0, "state": 1}) or {}).get("state") or {}
+    if user["role"] not in ("admin", "manager", "superadmin"):
+        if existing:
+            merged = dict(existing)
+            for k in EMPLOYEE_HR_STATE_KEYS:
+                if k in state:
+                    merged[k] = state[k]
+            state = merged
+        else:
+            state = {k: v for k, v in state.items() if k in EMPLOYEE_HR_STATE_KEYS}
+    else:
+        wiped = [k for k in HR_STATE_GUARDED_KEYS
+                 if isinstance(existing.get(k), list) and len(existing[k]) >= 2
+                 and len(state.get(k) or []) == 0]
+        if len(wiped) >= 2:
+            await log_audit(user["email"], user["role"], "SYNC_REFUSEE", "hr_state", pid,
+                            f"Écriture refusée : listes vidées d'un coup ({', '.join(wiped)})", pid)
+            raise HTTPException(status_code=409,
+                                detail=f"Synchronisation refusée : l'état envoyé viderait plusieurs listes ({', '.join(wiped)}). "
+                                       "L'état à jour du serveur sera rechargé.")
+    if len(json.dumps(state, default=str)) > 6_000_000:
+        raise HTTPException(status_code=413, detail="État trop volumineux pour la synchronisation.")
+    now_iso = datetime.now(timezone.utc).isoformat()
+    await db.hr_states.update_one(
+        {"pharmacy_id": pid},
+        {"$set": {"state": state, "updated_at": now_iso, "updated_by": user["email"]}, "$inc": {"rev": 1}},
+        upsert=True)
+    return {"ok": True, "updated_at": now_iso}
+
+
 def _ics_utc(date_s: str, time_s: str) -> str:
     local = datetime.fromisoformat(f"{date_s}T{time_s}:00").replace(tzinfo=MONTREAL_TZ)
     return local.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -2868,6 +2924,7 @@ async def set_schedule_settings(payload: ScheduleSettingsIn, principal: dict = D
 class ShiftIn(BaseModel):
     id: str = ""
     employee_id: str
+    employee_name: str = ""
     date: str
     start: str
     end: str
@@ -2883,6 +2940,7 @@ class ShiftIn(BaseModel):
 
 class ShiftPatchIn(BaseModel):
     employee_id: Optional[str] = None
+    employee_name: Optional[str] = None
     date: Optional[str] = None
     start: Optional[str] = None
     end: Optional[str] = None
@@ -2914,6 +2972,7 @@ def _validate_shift_core(date_s: str, start: str, end: str) -> None:
 def _shift_doc(s: ShiftIn, pid: str) -> dict:
     _validate_shift_core(s.date, s.start, s.end)
     return {"id": s.id or str(uuid.uuid4()), "pharmacy_id": pid, "employee_id": s.employee_id,
+            "employee_name": (s.employee_name or "")[:80],
             "date": s.date, "start": s.start, "end": s.end,
             "department": s.department if s.department in DEPARTMENTS_BE else "Général",
             "resource_ids": [str(r) for r in (s.resource_ids or [])][:20],
@@ -3013,6 +3072,8 @@ async def update_calendar_shift(shift_id: str, payload: ShiftPatchIn, principal:
     if not doc:
         raise HTTPException(status_code=404, detail="Quart introuvable.")
     patch = {k: v for k, v in payload.model_dump().items() if v is not None}
+    if "employee_name" in patch:
+        patch["employee_name"] = (patch["employee_name"] or "")[:80]
     merged_date = patch.get("date", doc["date"])
     merged_start = patch.get("start", doc["start"])
     merged_end = patch.get("end", doc["end"])
@@ -3429,7 +3490,7 @@ async def cancel_leave_request(req_id: str, user: dict = Depends(get_current_use
     is_admin = user["role"] in ("admin", "manager", "superadmin")
     if not is_admin and doc["employee_id"] != (user.get("employee_id") or ""):
         raise HTTPException(status_code=403, detail="Accès refusé.")
-    if doc["status"] != "En attente":
+    if doc["status"] != "En attente" and not is_admin:
         raise HTTPException(status_code=400, detail="Seules les demandes en attente peuvent être annulées.")
     now = datetime.now(timezone.utc).isoformat()
     await db.leave_requests.update_one(
@@ -7394,6 +7455,53 @@ async def startup_tasks():
     except Exception as exc:
         logger.error(f"Init object storage échoué : {exc}")
     await seed_users()
+    perf_indexes = [
+        (db.hr_states, [("pharmacy_id", 1)]),
+        (db.shifts, [("pharmacy_id", 1), ("date", 1)]),
+        (db.shifts, [("pharmacy_id", 1), ("employee_id", 1), ("date", 1)]),
+        (db.shifts, [("id", 1), ("pharmacy_id", 1)]),
+        (db.punches, [("pharmacy_id", 1), ("date", 1)]),
+        (db.punches, [("pharmacy_id", 1), ("employee_id", 1), ("date", 1)]),
+        (db.shift_tasks, [("pharmacy_id", 1), ("date", 1)]),
+        (db.leave_requests, [("pharmacy_id", 1), ("status", 1)]),
+        (db.leave_requests, [("pharmacy_id", 1), ("employee_id", 1)]),
+        (db.leave_balances, [("pharmacy_id", 1), ("employee_id", 1)]),
+        (db.notifications, [("pharmacy_id", 1), ("created_at", -1)]),
+        (db.notifications, [("target_employee_id", 1)]),
+        (db.chat_messages, [("conversation_id", 1), ("created_at", 1)]),
+        (db.conversations, [("pharmacy_id", 1)]),
+        (db.conversation_reads, [("user_email", 1)]),
+        (db.audit_logs, [("pharmacy_id", 1), ("created_at", -1)]),
+        (db.licenses, [("pharmacy_id", 1)]),
+        (db.evaluations, [("pharmacy_id", 1)]),
+        (db.deliveries, [("pharmacy_id", 1), ("status", 1)]),
+        (db.appointments, [("pharmacy_id", 1), ("date", 1)]),
+        (db.schedule_proposals, [("pharmacy_id", 1)]),
+        (db.schedule_settings, [("pharmacy_id", 1)]),
+        (db.trainings, [("pharmacy_id", 1)]),
+        (db.training_assignments, [("pharmacy_id", 1)]),
+        (db.training_attempts, [("training_id", 1)]),
+        (db.open_shifts, [("pharmacy_id", 1), ("date", 1)]),
+        (db.benefits, [("pharmacy_id", 1)]),
+        (db.announcements, [("pharmacy_id", 1), ("created_at", -1)]),
+        (db.replacement_requests, [("pharmacy_id", 1)]),
+        (db.replacement_offers, [("request_id", 1)]),
+        (db.login_events, [("created_at", -1)]),
+        (db.password_resets, [("email", 1)]),
+        (db.polls, [("pharmacy_id", 1)]),
+        (db.kudos, [("pharmacy_id", 1), ("created_at", -1)]),
+        (db.document_requests, [("pharmacy_id", 1)]),
+        (db.time_bank_entries, [("pharmacy_id", 1), ("employee_id", 1)]),
+        (db.sst_incidents, [("pharmacy_id", 1)]),
+    ]
+    created = 0
+    for coll, keys in perf_indexes:
+        try:
+            await coll.create_index(keys)
+            created += 1
+        except Exception as exc:
+            logger.error(f"Index {keys} sur {coll.name} échoué : {exc}")
+    logger.info(f"Index de performance vérifiés : {created}/{len(perf_indexes)}")
     scheduler.add_job(monthly_reports_job, CronTrigger(day=1, hour=8, minute=0))
     scheduler.add_job(license_reminders_job, CronTrigger(hour=8, minute=30))
     scheduler.add_job(appointment_reminders_job, CronTrigger(hour=8, minute=0))
