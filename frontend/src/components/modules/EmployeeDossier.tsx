@@ -15,6 +15,7 @@ import { IncompatibilitiesPanel } from '@/components/IncompatibilitiesPanel';
 import { ProfileEditor } from '@/components/ProfileEditor';
 import { SalaryHistory } from '@/components/SalaryHistory';
 import { PayrollNumbersDialog } from '@/components/PayrollNumbersDialog';
+import { BranchManagerDialog } from '@/components/BranchManagerDialog';
 import { EmployeeImportDialog } from '@/components/EmployeeImportDialog';
 import { useAuth } from '@/context/AuthContext';
 import axios from 'axios';
@@ -38,6 +39,7 @@ export default function EmployeeDossier(): JSX.Element {
   const [hourlyRate, setHourlyRate] = useState('25');
   const [branchId, setBranchId] = useState(state.branches[0]?.id ?? '');
   const [payrollNumbersOpen, setPayrollNumbersOpen] = useState(false);
+  const [branchesOpen, setBranchesOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [editForm, setEditForm] = useState({
@@ -144,6 +146,9 @@ export default function EmployeeDossier(): JSX.Element {
         subtitle={`${state.employees.length} membres dans votre équipe.`}
         action={
           <div className="flex flex-wrap gap-2">
+            <Button data-testid="manage-branches-button" variant="outline" onClick={() => setBranchesOpen(true)} className="rounded-full border-bronze-300 text-bronze-800 hover:bg-bronze-50">
+              <MapPin className="w-4 h-4 mr-1" /> Succursales
+            </Button>
             <Button data-testid="import-employees-button" variant="outline" onClick={() => setImportOpen(true)} className="rounded-full border-bronze-300 text-bronze-800 hover:bg-bronze-50">
               <FileSpreadsheet className="w-4 h-4 mr-1" /> Importer (Excel)
             </Button>
@@ -157,6 +162,7 @@ export default function EmployeeDossier(): JSX.Element {
         }
       />
       <PayrollNumbersDialog open={payrollNumbersOpen} onClose={() => setPayrollNumbersOpen(false)} />
+      <BranchManagerDialog open={branchesOpen} onClose={() => setBranchesOpen(false)} />
       <EmployeeImportDialog open={importOpen} onClose={() => setImportOpen(false)} />
       {state.employees.length === 0 ? (
         <EmptyState text="Aucun employé. Ajoutez votre premier membre d'équipe." />
@@ -220,8 +226,8 @@ export default function EmployeeDossier(): JSX.Element {
                       .join(', ') || '—'
                   }</span></p>
                   <p className="text-slate-500">Embauche : <span className="font-semibold text-slate-800">{selected.hireDate}</span></p>
-                  <p className="text-slate-500">Taux horaire : <span className="font-semibold text-slate-800">{selected.hourlyRate.toFixed(2)} $ / h</span></p>
-                  <p className="text-slate-500">Heures / semaine : <span className="font-semibold text-slate-800">{selected.weeklyHours} h</span></p>
+                  <p className="text-slate-500">Taux horaire : <span className="font-semibold text-slate-800">{(selected.hourlyRate ?? 0).toFixed(2)} $ / h</span></p>
+                  <p className="text-slate-500">Heures / semaine : <span className="font-semibold text-slate-800">{selected.weeklyHours ?? 0} h</span></p>
                   <p className="text-slate-500">Contact d'urgence : <span className="font-semibold text-slate-800">{selected.emergencyContact || '—'}</span></p>
                 </div>
               </div>

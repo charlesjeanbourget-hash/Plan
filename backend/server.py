@@ -707,6 +707,14 @@ async def admin_create_user(payload: UserCreateIn, su: dict = Depends(require_su
     email = payload.email.strip().lower()
     if payload.role not in ("admin", "manager", "employee", "superadmin"):
         raise HTTPException(status_code=400, detail="Rôle invalide.")
+    pharmacy_id = (payload.pharmacy_id or "").strip()
+    if payload.role != "superadmin":
+        if not pharmacy_id:
+            raise HTTPException(status_code=400, detail="Une pharmacie doit obligatoirement être assignée à ce compte (isolation des données).")
+        if not await db.pharmacies.find_one({"id": pharmacy_id}):
+            raise HTTPException(status_code=400, detail="Pharmacie introuvable. Créez-la d'abord dans le module Superadmin.")
+    else:
+        pharmacy_id = ""
     if await db.users.find_one({"email": email}):
         raise HTTPException(status_code=400, detail="Un compte existe déjà avec ce courriel.")
     temp = gen_temp_password()
@@ -716,7 +724,7 @@ async def admin_create_user(payload: UserCreateIn, su: dict = Depends(require_su
         "password_hash": hash_password(temp),
         "name": payload.name,
         "role": payload.role,
-        "pharmacy_id": payload.pharmacy_id,
+        "pharmacy_id": pharmacy_id or None,
         "employee_id": payload.employee_id,
         "is_temporary_password": True,
         "suspended": False,
@@ -738,6 +746,8 @@ async def admin_update_user(user_id: str, payload: UserUpdateIn, su: dict = Depe
     patch = payload.model_dump(exclude_none=True)
     if patch.get("role") and patch["role"] not in ("admin", "manager", "employee", "superadmin"):
         raise HTTPException(status_code=400, detail="Rôle invalide.")
+    if patch.get("pharmacy_id") and not await db.pharmacies.find_one({"id": patch["pharmacy_id"]}):
+        raise HTTPException(status_code=400, detail="Pharmacie introuvable.")
     if patch:
         await db.users.update_one({"id": user_id}, {"$set": patch})
     action = "SUSPENSION_COMPTE" if payload.suspended is True else (
@@ -821,6 +831,17 @@ ALLOWED_CERT_TYPES = {"application/pdf", "image/png", "image/jpeg", "image/webp"
 MAX_CERT_SIZE = 10 * 1024 * 1024
 
 
+def scoped_pid(user: dict) -> str:
+    """Cloisonnement strict : chaque compte n'accède qu'aux données de SA pharmacie.
+    Superadmin sans pharmacie = espace plateforme isolé (aucune donnée client)."""
+    pid = (user.get("pharmacy_id") or "").strip()
+    if pid:
+        return pid
+    if user.get("role") == "superadmin":
+        return "__plateforme__"
+    raise HTTPException(status_code=403, detail="Aucune pharmacie associée à ce compte. Contactez votre administrateur.")
+
+
 async def get_principal(user: dict = Depends(get_current_user)):
     if user["role"] not in ("admin", "manager", "superadmin"):
         raise HTTPException(status_code=403, detail="Accès refusé : réservé aux administrateurs (Loi 25).")
@@ -829,7 +850,7 @@ async def get_principal(user: dict = Depends(get_current_user)):
 
 def license_scope(principal: dict, pharmacy_id: Optional[str] = None) -> dict:
     if principal["role"] == "superadmin":
-        return {"pharmacy_id": pharmacy_id} if pharmacy_id else {}
+        return {"pharmacy_id": scoped_pid(principal)}
     if not principal["pharmacy_id"]:
         raise HTTPException(status_code=403, detail="Aucune pharmacie associée à ce compte.")
     return {"pharmacy_id": principal["pharmacy_id"]}
@@ -923,6 +944,105 @@ def _ics_escape(text: str) -> str:
     return text.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
 
 
+# ==================== Pharmacies clientes (collection serveur, superadmin) ====================
+
+class PharmacyIn(BaseModel):
+    name: str
+    address: str = ""
+    city: str = ""
+    owner_name: str = ""
+    admin_email: str = ""
+    plan: str = "Essentiel"
+
+
+class PharmacyPatchIn(BaseModel):
+    name: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    owner_name: Optional[str] = None
+    admin_email: Optional[str] = None
+    plan: Optional[str] = None
+    active: Optional[bool] = None
+
+
+async def ensure_pharmacies_seeded() -> None:
+    if not await db.pharmacies.find_one({"id": "ph1"}):
+        await db.pharmacies.insert_one({
+            "id": "ph1", "name": "Pharmacie Lavoie & Associés", "address": "1200 rue Sainte-Catherine",
+            "city": "Montréal", "owner_name": "Dr. Sophie Lavoie", "admin_email": "admin@luminahr.ca",
+            "plan": "Pro", "active": True, "created_at": datetime.now(timezone.utc).isoformat()})
+    for pid in await db.users.distinct("pharmacy_id"):
+        if not pid:
+            continue
+        if not await db.pharmacies.find_one({"id": pid}):
+            await db.pharmacies.insert_one({
+                "id": pid, "name": f"Pharmacie ({pid})", "address": "", "city": "", "owner_name": "",
+                "admin_email": "", "plan": "Essentiel", "active": True,
+                "created_at": datetime.now(timezone.utc).isoformat()})
+
+
+@api_router.get("/superadmin/pharmacies")
+async def sa_list_pharmacies(su: dict = Depends(require_superadmin)):
+    docs = await db.pharmacies.find({}, {"_id": 0}).sort("created_at", 1).to_list(500)
+    counts: dict = {}
+    async for row in db.users.aggregate([
+            {"$match": {"pharmacy_id": {"$nin": [None, ""]}}},
+            {"$group": {"_id": "$pharmacy_id", "n": {"$sum": 1}}}]):
+        counts[row["_id"]] = row["n"]
+    for d in docs:
+        d["accounts_count"] = counts.get(d["id"], 0)
+    return docs
+
+
+@api_router.post("/superadmin/pharmacies")
+async def sa_create_pharmacy(payload: PharmacyIn, su: dict = Depends(require_superadmin)):
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Le nom de la pharmacie est requis.")
+    doc = {"id": "ph_" + uuid.uuid4().hex[:8], "name": name[:120],
+           "address": payload.address.strip()[:200], "city": payload.city.strip()[:80],
+           "owner_name": payload.owner_name.strip()[:120], "admin_email": payload.admin_email.strip()[:120],
+           "plan": payload.plan if payload.plan in ("Essentiel", "Pro", "Entreprise") else "Essentiel",
+           "active": True, "created_at": datetime.now(timezone.utc).isoformat()}
+    await db.pharmacies.insert_one(doc)
+    doc.pop("_id", None)
+    await log_audit(su["email"], su["role"], "CREATION_PHARMACIE", "pharmacie", doc["id"],
+                    f"Pharmacie cliente « {name} » créée", doc["id"])
+    return doc
+
+
+@api_router.put("/superadmin/pharmacies/{pharmacy_id}")
+async def sa_update_pharmacy(pharmacy_id: str, payload: PharmacyPatchIn, su: dict = Depends(require_superadmin)):
+    doc = await db.pharmacies.find_one({"id": pharmacy_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Pharmacie introuvable.")
+    patch = {k: v for k, v in payload.model_dump().items() if v is not None}
+    if "name" in patch and not patch["name"].strip():
+        raise HTTPException(status_code=400, detail="Le nom ne peut pas être vide.")
+    if "plan" in patch and patch["plan"] not in ("Essentiel", "Pro", "Entreprise"):
+        patch["plan"] = doc.get("plan", "Essentiel")
+    if patch:
+        await db.pharmacies.update_one({"id": pharmacy_id}, {"$set": patch})
+        await log_audit(su["email"], su["role"], "MODIF_PHARMACIE", "pharmacie", pharmacy_id,
+                        f"Pharmacie « {doc['name']} » modifiée ({', '.join(patch.keys())})", pharmacy_id)
+    return {**doc, **patch}
+
+
+@api_router.delete("/superadmin/pharmacies/{pharmacy_id}")
+async def sa_delete_pharmacy(pharmacy_id: str, su: dict = Depends(require_superadmin)):
+    doc = await db.pharmacies.find_one({"id": pharmacy_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Pharmacie introuvable.")
+    linked = await db.users.count_documents({"pharmacy_id": pharmacy_id})
+    if linked > 0:
+        raise HTTPException(status_code=400,
+                            detail=f"Impossible : {linked} compte(s) rattaché(s) à cette pharmacie. Réassignez ou supprimez-les d'abord.")
+    await db.pharmacies.delete_one({"id": pharmacy_id})
+    await log_audit(su["email"], su["role"], "SUPPRESSION_PHARMACIE", "pharmacie", pharmacy_id,
+                    f"Pharmacie « {doc['name']} » supprimée", pharmacy_id)
+    return {"status": "supprimé"}
+
+
 # ==================== Synchronisation de l'état RH entre appareils ====================
 
 class HRStateIn(BaseModel):
@@ -931,7 +1051,7 @@ class HRStateIn(BaseModel):
 
 @api_router.get("/hr-state")
 async def get_hr_state(user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     doc = await db.hr_states.find_one({"pharmacy_id": pid}, {"_id": 0}) or {}
     return {"state": doc.get("state"), "updated_at": doc.get("updated_at"), "updated_by": doc.get("updated_by")}
 
@@ -946,7 +1066,7 @@ HR_STATE_GUARDED_KEYS = ["employees", "payrollEntries", "contracts", "benefits",
 
 @api_router.put("/hr-state")
 async def save_hr_state(payload: HRStateIn, user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     state = dict(payload.state or {})
     state.pop("shifts", None)
     existing = (await db.hr_states.find_one({"pharmacy_id": pid}, {"_id": 0, "state": 1}) or {}).get("state") or {}
@@ -1625,7 +1745,7 @@ class ManualTrainingIn(BaseModel):
 
 @api_router.post("/trainings/manual")
 async def create_manual_training(payload: ManualTrainingIn, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     text = payload.source_text.strip()
     if len(text) < 200:
         raise HTTPException(status_code=400, detail="Décrivez la formation plus en détail (au moins 200 caractères) pour que l'IA puisse la construire.")
@@ -1647,7 +1767,7 @@ async def create_manual_training(payload: ManualTrainingIn, principal: dict = De
 @api_router.get("/trainings")
 async def list_trainings(pharmacy_id: Optional[str] = Query(None), user: dict = Depends(get_current_user)):
     if user["role"] == "superadmin":
-        query: dict = {"pharmacy_id": pharmacy_id} if pharmacy_id else {}
+        query: dict = {"pharmacy_id": scoped_pid(user)}
     elif user["role"] == "admin":
         if not user.get("pharmacy_id"):
             raise HTTPException(status_code=403, detail="Aucune pharmacie associée à ce compte.")
@@ -2019,9 +2139,9 @@ async def get_or_create_profile(pharmacy_id: str, employee_id: str, employee_nam
 def check_profile_access(user: dict, employee_id: str) -> str:
     if user["role"] in ("admin", "manager", "superadmin"):
         pid = user.get("pharmacy_id") or ""
-        if not pid and user["role"] == "admin":
+        if not pid and user["role"] in ("admin", "manager"):
             raise HTTPException(status_code=403, detail="Aucune pharmacie associée.")
-        return pid or "ph1"
+        return pid or "__plateforme__"
     if user.get("employee_id") != employee_id:
         raise HTTPException(status_code=403, detail="Vous ne pouvez modifier que votre propre profil.")
     return user.get("pharmacy_id") or ""
@@ -2030,9 +2150,7 @@ def check_profile_access(user: dict, employee_id: str) -> str:
 @api_router.get("/profiles")
 async def list_profiles(user: dict = Depends(get_current_user)):
     if user["role"] in ("admin", "manager", "superadmin"):
-        pid = user.get("pharmacy_id") or ""
-        query = {"pharmacy_id": pid} if pid else {}
-        docs = await db.employee_profiles.find(query, {"_id": 0}).to_list(1000)
+        docs = await db.employee_profiles.find({"pharmacy_id": scoped_pid(user)}, {"_id": 0}).to_list(1000)
         return [sanitize_profile(d) for d in docs]
     if not user.get("employee_id"):
         return []
@@ -2104,7 +2222,7 @@ async def update_profile(employee_id: str, payload: ProfileIn, user: dict = Depe
 
 @api_router.post("/profiles/{employee_id}/punch-code")
 async def generate_punch_code(employee_id: str, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     doc = await get_or_create_profile(pid, employee_id)
     for _ in range(50):
         code = f"{secrets.randbelow(10000):04d}"
@@ -2123,7 +2241,7 @@ async def generate_punch_code(employee_id: str, principal: dict = Depends(get_pr
 
 @api_router.get("/birthdays/today")
 async def birthdays_today(user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     today_md = datetime.now(MONTREAL_TZ).strftime("%m-%d")
     docs = await db.employee_profiles.find(
         {"pharmacy_id": pid, "birth_date": {"$regex": f"-{today_md}$"}},
@@ -2138,7 +2256,9 @@ async def send_birthday_wishes(pharmacy_id: Optional[str] = None) -> int:
         query["pharmacy_id"] = pharmacy_id
     sent = 0
     async for prof in db.employee_profiles.find(query, {"_id": 0}):
-        pid = prof.get("pharmacy_id") or "ph1"
+        pid = prof.get("pharmacy_id")
+        if not pid:
+            continue
         emp_name = prof.get("employee_name") or "un(e) collègue"
         convo = await db.conversations.find_one({"pharmacy_id": pid, "type": "equipe"}, {"_id": 0},
                                                 sort=[("created_at", 1)])
@@ -2169,7 +2289,7 @@ async def send_birthday_wishes(pharmacy_id: Optional[str] = None) -> int:
 async def run_birthday_wishes(user: dict = Depends(get_current_user)):
     if user["role"] not in ("admin", "manager", "superadmin"):
         raise HTTPException(status_code=403, detail="Accès réservé aux gestionnaires.")
-    pid = None if user["role"] == "superadmin" else (user.get("pharmacy_id") or "ph1")
+    pid = None if user["role"] == "superadmin" else (scoped_pid(user))
     sent = await send_birthday_wishes(pid)
     return {"sent": sent}
 
@@ -2324,7 +2444,7 @@ def local_iso(date_str: str, time_str: str) -> str:
 @api_router.get("/punches")
 async def list_punches(start: str = Query(...), end: str = Query(...),
                        employee_id: Optional[str] = Query(None), principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     query: dict = {"pharmacy_id": pid, "date": {"$gte": start, "$lte": end}}
     if employee_id:
         query["employee_id"] = employee_id
@@ -2333,7 +2453,7 @@ async def list_punches(start: str = Query(...), end: str = Query(...),
 
 @api_router.post("/punches/manual")
 async def add_manual_punch(payload: ManualPunchIn, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     p_in, p_out = local_iso(payload.date, payload.start_time), local_iso(payload.date, payload.end_time)
     if p_out <= p_in:
         raise HTTPException(status_code=400, detail="L'heure de fin doit être après l'heure de début.")
@@ -2358,7 +2478,7 @@ class PunchUpdateIn(BaseModel):
 
 @api_router.put("/punches/{punch_id}")
 async def update_punch(punch_id: str, payload: PunchUpdateIn, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     doc = await db.punches.find_one({"id": punch_id, "pharmacy_id": pid}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Entrée introuvable.")
@@ -2380,7 +2500,7 @@ async def update_punch(punch_id: str, payload: PunchUpdateIn, principal: dict = 
 
 @api_router.delete("/punches/{punch_id}")
 async def delete_punch(punch_id: str, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     doc = await db.punches.find_one({"id": punch_id, "pharmacy_id": pid}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Entrée introuvable.")
@@ -2424,7 +2544,7 @@ def aggregate_punch_hours(docs: list, settings: Optional[dict] = None) -> list:
 
 @api_router.get("/punches/summary")
 async def punches_summary(start: str = Query(...), end: str = Query(...), principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     docs = await db.punches.find(
         {"pharmacy_id": pid, "date": {"$gte": start, "$lte": end}}, {"_id": 0}).to_list(5000)
     return aggregate_punch_hours(docs, await get_punch_settings(pid))
@@ -2432,7 +2552,7 @@ async def punches_summary(start: str = Query(...), end: str = Query(...), princi
 
 @api_router.get("/punches/export")
 async def export_punches(start: str = Query(...), end: str = Query(...), principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     docs = await db.punches.find(
         {"pharmacy_id": pid, "date": {"$gte": start, "$lte": end}}, {"_id": 0}).to_list(5000)
     p_settings = await get_punch_settings(pid)
@@ -2463,7 +2583,7 @@ async def export_punches_payroll(start: str = Query(...), end: str = Query(...),
                                  format: str = Query(...), principal: dict = Depends(get_principal)):
     if format not in PAYROLL_EXPORT_FORMATS:
         raise HTTPException(status_code=400, detail="Format invalide. Choix : employeurd, nethris, adp.")
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     docs = await db.punches.find(
         {"pharmacy_id": pid, "date": {"$gte": start, "$lte": end}}, {"_id": 0}).to_list(5000)
     rows = [r for r in aggregate_punch_hours(docs, await get_punch_settings(pid)) if r["total_hours"] > 0]
@@ -2520,7 +2640,7 @@ async def export_punches_payroll(start: str = Query(...), end: str = Query(...),
 
 @api_router.get("/punches/open")
 async def open_punches(principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     docs = await db.punches.find({"pharmacy_id": pid, "punch_out": None}, {"_id": 0}).to_list(500)
     now = datetime.now(timezone.utc)
     for p in docs:
@@ -2558,7 +2678,7 @@ async def export_branch_budgets(start: str = Query(...), end: str = Query(...),
         name_map = {str(k): str(v)[:80] for k, v in (json.loads(names) or {}).items()}
     except (json.JSONDecodeError, AttributeError):
         name_map = {}
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     settings = await db.schedule_settings.find_one({"pharmacy_id": pid}, {"_id": 0}) or {}
     auto_break = settings.get("auto_break") or {}
     branch_budgets = {b.get("branch_id") or "": float(b.get("budget") or 0)
@@ -2647,7 +2767,7 @@ class PaySettingsIn(BaseModel):
 
 @api_router.get("/pay-settings")
 async def get_pay_settings(principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     doc = await db.pay_settings.find_one({"pharmacy_id": pid}, {"_id": 0})
     return doc or {"pharmacy_id": pid, "period_type": "biweekly", "anchor": "2026-06-01"}
 
@@ -2660,7 +2780,7 @@ async def save_pay_settings(payload: PaySettingsIn, principal: dict = Depends(ge
         date.fromisoformat(payload.anchor)
     except ValueError:
         raise HTTPException(status_code=400, detail="Date d'ancrage invalide.")
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     doc = {"pharmacy_id": pid, "period_type": payload.period_type, "anchor": payload.anchor}
     await db.pay_settings.update_one({"pharmacy_id": pid}, {"$set": doc}, upsert=True)
     await log_audit(principal["email"], principal["role"], "MODIFICATION_PERIODE_PAIE", "paie", pid,
@@ -2808,7 +2928,7 @@ def _sanitize_traffic(raw: dict) -> dict:
 
 @api_router.get("/schedule/settings")
 async def get_schedule_settings(user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     doc = await db.schedule_settings.find_one({"pharmacy_id": pid}, {"_id": 0})
     return {"weekly_budget": (doc or {}).get("weekly_budget", 0),
             "traffic": (doc or {}).get("traffic", {}),
@@ -2828,7 +2948,7 @@ async def set_schedule_settings(payload: ScheduleSettingsIn, principal: dict = D
         traffic = _sanitize_traffic(payload.traffic)
     except (ValueError, TypeError, AttributeError):
         raise HTTPException(status_code=400, detail="Valeurs d'achalandage invalides.")
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     update = {"pharmacy_id": pid, "weekly_budget": round(payload.weekly_budget, 2), "traffic": traffic,
               "updated_by": principal["email"], "updated_at": datetime.now(timezone.utc).isoformat()}
     if payload.traffic_periods is not None:
@@ -3005,7 +3125,7 @@ def _fmt_shift_txt(d: dict) -> str:
 
 @api_router.get("/shifts")
 async def list_calendar_shifts(user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     docs = await db.shifts.find({"pharmacy_id": pid}, {"_id": 0}).to_list(10000)
     settings = await db.schedule_settings.find_one({"pharmacy_id": pid}, {"_id": 0, "shifts_server_ready": 1}) or {}
     return {"shifts": docs, "migrated": bool(settings.get("shifts_server_ready"))}
@@ -3038,7 +3158,7 @@ async def _incompat_warning(pid: str, shift: dict) -> Optional[str]:
 
 @api_router.post("/shifts")
 async def create_calendar_shift(payload: ShiftIn, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     doc = _shift_doc(payload, pid)
     res = await db.shifts.update_one({"id": doc["id"], "pharmacy_id": pid}, {"$set": doc}, upsert=True)
     await _mark_shifts_ready(pid)
@@ -3051,7 +3171,7 @@ async def create_calendar_shift(payload: ShiftIn, principal: dict = Depends(get_
 
 @api_router.post("/shifts/bulk")
 async def bulk_import_shifts(payload: ShiftsBulkIn, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     if len(payload.shifts) > 3000:
         raise HTTPException(status_code=400, detail="Maximum 3000 quarts par import.")
     count = 0
@@ -3067,7 +3187,7 @@ async def bulk_import_shifts(payload: ShiftsBulkIn, principal: dict = Depends(ge
 
 @api_router.put("/shifts/{shift_id}")
 async def update_calendar_shift(shift_id: str, payload: ShiftPatchIn, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     doc = await db.shifts.find_one({"id": shift_id, "pharmacy_id": pid}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Quart introuvable.")
@@ -3105,7 +3225,7 @@ async def update_calendar_shift(shift_id: str, payload: ShiftPatchIn, principal:
 
 @api_router.delete("/shifts/{shift_id}")
 async def delete_calendar_shift(shift_id: str, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     doc = await db.shifts.find_one({"id": shift_id, "pharmacy_id": pid}, {"_id": 0})
     if not doc:
         await _mark_shifts_ready(pid)
@@ -3202,7 +3322,7 @@ async def get_work_stations_config(pid: str) -> dict:
 
 @api_router.get("/work-stations")
 async def list_work_stations(user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     doc = await get_work_stations_config(pid)
     return {"stations": doc.get("stations", []), "rush_periods": doc.get("rush_periods", [])}
 
@@ -3211,7 +3331,7 @@ async def list_work_stations(user: dict = Depends(get_current_user)):
 async def save_work_stations(payload: WorkStationsConfigIn, principal: dict = Depends(get_principal)):
     if principal["role"] not in ("admin", "manager", "superadmin"):
         raise HTTPException(status_code=403, detail="Accès réservé aux gestionnaires.")
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     stations = []
     for s in payload.stations[:120]:
         if s.department not in DEPARTMENTS_BE or not s.name.strip():
@@ -3316,7 +3436,7 @@ async def _assign_stations_range(pid: str, days: list[str], notify: bool = True)
 async def auto_assign_stations(payload: StationsAssignIn, principal: dict = Depends(get_principal)):
     if principal["role"] not in ("admin", "manager", "superadmin"):
         raise HTTPException(status_code=403, detail="Accès réservé aux gestionnaires.")
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     start = date.fromisoformat(payload.week_start)
     days = [(start + timedelta(days=i)).isoformat() for i in range(7)]
     assigned = await _assign_stations_range(pid, days)
@@ -3409,7 +3529,7 @@ async def _leave_remaining(pid: str, employee_id: str, ltype: str):
 
 @api_router.post("/leave/requests")
 async def create_leave_request(payload: LeaveRequestIn, user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     is_admin = user["role"] in ("admin", "manager", "superadmin")
     employee_id = payload.employee_id if (is_admin and payload.employee_id) else (user.get("employee_id") or "")
     if not employee_id:
@@ -3440,7 +3560,7 @@ async def create_leave_request(payload: LeaveRequestIn, user: dict = Depends(get
 
 @api_router.get("/leave/requests")
 async def list_leave_requests(user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     if user["role"] in ("admin", "manager", "superadmin"):
         docs = await db.leave_requests.find({"pharmacy_id": pid}, {"_id": 0}).sort("created_at", -1).to_list(2000)
         return [_leave_admin_view(d) for d in docs]
@@ -3451,7 +3571,7 @@ async def list_leave_requests(user: dict = Depends(get_current_user)):
 
 @api_router.post("/leave/requests/{req_id}/decide")
 async def decide_leave_request(req_id: str, payload: LeaveDecideIn, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     if payload.action not in ("approve", "reject"):
         raise HTTPException(status_code=400, detail="Action invalide (approve ou reject).")
     doc = await db.leave_requests.find_one({"id": req_id, "pharmacy_id": pid}, {"_id": 0})
@@ -3483,7 +3603,7 @@ async def decide_leave_request(req_id: str, payload: LeaveDecideIn, principal: d
 
 @api_router.delete("/leave/requests/{req_id}")
 async def cancel_leave_request(req_id: str, user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     doc = await db.leave_requests.find_one({"id": req_id, "pharmacy_id": pid}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Demande introuvable.")
@@ -3504,7 +3624,7 @@ async def cancel_leave_request(req_id: str, user: dict = Depends(get_current_use
 
 @api_router.get("/leave/absences")
 async def list_leave_absences(user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     is_admin = user["role"] in ("admin", "manager", "superadmin")
     settings = await db.schedule_settings.find_one({"pharmacy_id": pid}, {"_id": 0, "leaves_server_ready": 1}) or {}
     docs = await db.leave_requests.find({"pharmacy_id": pid, "status": "Approuvée"}, {"_id": 0}).to_list(3000)
@@ -3516,7 +3636,7 @@ async def list_leave_absences(user: dict = Depends(get_current_user)):
 
 @api_router.get("/leave/balances")
 async def list_leave_balances(user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     is_admin = user["role"] in ("admin", "manager", "superadmin")
     eid = user.get("employee_id") or "__none__"
     year = datetime.now(timezone.utc).astimezone(MONTREAL_TZ).year
@@ -3553,7 +3673,7 @@ async def list_leave_balances(user: dict = Depends(get_current_user)):
 
 @api_router.put("/leave/allocations/{employee_id}")
 async def set_leave_allocations(employee_id: str, payload: LeaveAllocationsIn, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     alloc = {}
     for t, v in (payload.allocations or {}).items():
         if t not in LEAVE_ALLOC_TYPES:
@@ -3577,7 +3697,7 @@ async def set_leave_allocations(employee_id: str, payload: LeaveAllocationsIn, p
 
 @api_router.post("/leave/bulk-import")
 async def bulk_import_leaves(payload: LeaveBulkIn, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     if len(payload.requests) > 1000:
         raise HTTPException(status_code=400, detail="Maximum 1000 demandes par import.")
     now = datetime.now(timezone.utc).isoformat()
@@ -3618,7 +3738,7 @@ class LeavePolicyIn(BaseModel):
 
 @api_router.get("/leave/policy")
 async def get_leave_policy(user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     doc = await db.leave_policies.find_one({"pharmacy_id": pid}, {"_id": 0}) or {}
     return {"carryover_enabled": bool(doc.get("carryover_enabled")),
             "carryover_max_days": float(doc.get("carryover_max_days") or 0),
@@ -3627,7 +3747,7 @@ async def get_leave_policy(user: dict = Depends(get_current_user)):
 
 @api_router.put("/leave/policy")
 async def set_leave_policy(payload: LeavePolicyIn, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     if not (0 <= payload.carryover_max_days <= 365):
         raise HTTPException(status_code=400, detail="Plafond invalide (0 à 365 jours).")
     types = [t for t in payload.types if t in LEAVE_ALLOC_TYPES]
@@ -3693,7 +3813,7 @@ async def run_leave_carryover(pid: str, year: int, actor: str = "cron", role: st
 
 @api_router.post("/leave/carryover/run")
 async def run_carryover_endpoint(year: int = Query(0), principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     target = year or datetime.now(timezone.utc).astimezone(MONTREAL_TZ).year
     if not (2020 <= target <= 2100):
         raise HTTPException(status_code=400, detail="Année invalide.")
@@ -3814,7 +3934,7 @@ async def process_benefits_import(job_id: str, pid: str, text: str, actor_email:
 
 @api_router.post("/benefits/upload")
 async def upload_benefits_pdf(file: UploadFile = File(...), principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     if file.content_type != "application/pdf":
         raise HTTPException(status_code=400, detail="Format non autorisé : déposez le document d'avantages en PDF.")
     data = await file.read()
@@ -3835,7 +3955,7 @@ async def upload_benefits_pdf(file: UploadFile = File(...), principal: dict = De
 
 @api_router.get("/benefits/imports/{job_id}")
 async def get_benefits_import(job_id: str, principal: dict = Depends(get_principal)):
-    doc = await db.benefit_imports.find_one({"id": job_id, "pharmacy_id": principal["pharmacy_id"] or "ph1"}, {"_id": 0})
+    doc = await db.benefit_imports.find_one({"id": job_id, "pharmacy_id": scoped_pid(principal)}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Import introuvable.")
     return doc
@@ -3843,7 +3963,7 @@ async def get_benefits_import(job_id: str, principal: dict = Depends(get_princip
 
 @api_router.get("/benefits")
 async def list_benefits(user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     q: dict = {"pharmacy_id": pid}
     if user["role"] not in ("admin", "manager", "superadmin"):
         q["status"] = "published"
@@ -3852,7 +3972,7 @@ async def list_benefits(user: dict = Depends(get_current_user)):
 
 @api_router.post("/benefits")
 async def create_benefit(payload: BenefitIn, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     fields = _clean_benefit_fields(payload.title, payload.description, payload.category,
                                    payload.details, payload.eligible_roles, payload.monthly_value)
     if not fields["title"]:
@@ -3870,7 +3990,7 @@ async def create_benefit(payload: BenefitIn, principal: dict = Depends(get_princ
 
 @api_router.put("/benefits/{benefit_id}")
 async def update_benefit(benefit_id: str, payload: BenefitUpdateIn, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     doc = await db.benefits.find_one({"id": benefit_id, "pharmacy_id": pid}, {"_id": 0, "image_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Avantage introuvable.")
@@ -3902,7 +4022,7 @@ async def update_benefit(benefit_id: str, payload: BenefitUpdateIn, principal: d
 
 @api_router.delete("/benefits/{benefit_id}")
 async def delete_benefit(benefit_id: str, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     doc = await db.benefits.find_one({"id": benefit_id, "pharmacy_id": pid}, {"_id": 0, "image_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Avantage introuvable.")
@@ -3914,7 +4034,7 @@ async def delete_benefit(benefit_id: str, principal: dict = Depends(get_principa
 
 @api_router.post("/benefits/{benefit_id}/generate-image")
 async def regenerate_benefit_image(benefit_id: str, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     doc = await db.benefits.find_one({"id": benefit_id, "pharmacy_id": pid}, {"_id": 0, "image_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Avantage introuvable.")
@@ -3925,7 +4045,7 @@ async def regenerate_benefit_image(benefit_id: str, principal: dict = Depends(ge
 
 @api_router.get("/benefits/{benefit_id}/image")
 async def get_benefit_image(benefit_id: str, user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     q: dict = {"id": benefit_id, "pharmacy_id": pid}
     if user["role"] not in ("admin", "manager", "superadmin"):
         q["status"] = "published"
@@ -3958,7 +4078,7 @@ class OpenShiftClaimIn(BaseModel):
 
 @api_router.post("/open-shifts")
 async def create_open_shift(payload: OpenShiftIn, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     _validate_shift_core(payload.date, payload.start, payload.end)
     doc = {"id": str(uuid.uuid4()), "pharmacy_id": pid, "date": payload.date,
            "start": payload.start, "end": payload.end,
@@ -3984,7 +4104,7 @@ async def create_open_shift(payload: OpenShiftIn, principal: dict = Depends(get_
 
 @api_router.get("/open-shifts")
 async def list_open_shifts(user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     is_admin = user["role"] in ("admin", "manager", "superadmin")
     docs = await db.open_shifts.find({"pharmacy_id": pid, "status": {"$ne": "cancelled"}}, {"_id": 0}) \
         .sort("date", 1).to_list(200)
@@ -4029,7 +4149,7 @@ async def _assign_open_shift(doc: dict, pid: str, emp_id: str, name: str, positi
 
 @api_router.post("/open-shifts/{os_id}/claim")
 async def claim_open_shift(os_id: str, payload: OpenShiftClaimIn, user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     emp_id = user.get("employee_id")
     if not emp_id:
         raise HTTPException(status_code=400, detail="Aucun dossier employé associé à votre compte.")
@@ -4075,7 +4195,7 @@ class OpenShiftAwardIn(BaseModel):
 
 @api_router.post("/open-shifts/{os_id}/award")
 async def award_open_shift(os_id: str, payload: OpenShiftAwardIn, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     doc = await db.open_shifts.find_one({"id": os_id, "pharmacy_id": pid}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Quart introuvable.")
@@ -4094,7 +4214,7 @@ async def award_open_shift(os_id: str, payload: OpenShiftAwardIn, principal: dic
 
 @api_router.delete("/open-shifts/{os_id}")
 async def cancel_open_shift(os_id: str, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     res = await db.open_shifts.update_one({"id": os_id, "pharmacy_id": pid, "status": "open"},
                                           {"$set": {"status": "cancelled"}})
     if res.modified_count == 0:
@@ -4119,7 +4239,7 @@ class PollVoteIn(BaseModel):
 
 @api_router.post("/polls")
 async def create_poll(payload: PollIn, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     question = payload.question.strip()[:300]
     labels = [str(o).strip()[:120] for o in payload.options if str(o).strip()]
     if not question:
@@ -4160,14 +4280,14 @@ def _poll_view(doc: dict, user: dict) -> dict:
 
 @api_router.get("/polls")
 async def list_polls(user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     docs = await db.polls.find({"pharmacy_id": pid}, {"_id": 0}).sort("created_at", -1).to_list(50)
     return [_poll_view(d, user) for d in docs]
 
 
 @api_router.post("/polls/{poll_id}/vote")
 async def vote_poll(poll_id: str, payload: PollVoteIn, user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     doc = await db.polls.find_one({"id": poll_id, "pharmacy_id": pid}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Sondage introuvable.")
@@ -4186,7 +4306,7 @@ async def vote_poll(poll_id: str, payload: PollVoteIn, user: dict = Depends(get_
 
 @api_router.post("/polls/{poll_id}/close")
 async def close_poll(poll_id: str, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     res = await db.polls.update_one({"id": poll_id, "pharmacy_id": pid}, {"$set": {"status": "closed"}})
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Sondage introuvable.")
@@ -4195,7 +4315,7 @@ async def close_poll(poll_id: str, principal: dict = Depends(get_principal)):
 
 @api_router.delete("/polls/{poll_id}")
 async def delete_poll(poll_id: str, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     res = await db.polls.delete_one({"id": poll_id, "pharmacy_id": pid})
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Sondage introuvable.")
@@ -4214,7 +4334,7 @@ class KudosIn(BaseModel):
 
 @api_router.post("/kudos")
 async def create_kudos(payload: KudosIn, user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     if not payload.to_employee_id or not payload.to_name.strip():
         raise HTTPException(status_code=400, detail="Choisissez un(e) collègue à féliciter.")
     doc = {"id": str(uuid.uuid4()), "pharmacy_id": pid,
@@ -4233,7 +4353,7 @@ async def create_kudos(payload: KudosIn, user: dict = Depends(get_current_user))
 
 @api_router.get("/kudos")
 async def list_kudos(user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     docs = await db.kudos.find({"pharmacy_id": pid}, {"_id": 0}).sort("created_at", -1).to_list(60)
     return [{**d, "applause_count": len(d.get("applause") or []),
              "my_applause": user["email"] in (d.get("applause") or []),
@@ -4242,7 +4362,7 @@ async def list_kudos(user: dict = Depends(get_current_user)):
 
 @api_router.post("/kudos/{kudos_id}/applaud")
 async def applaud_kudos(kudos_id: str, user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     doc = await db.kudos.find_one({"id": kudos_id, "pharmacy_id": pid}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Félicitation introuvable.")
@@ -4257,7 +4377,7 @@ async def applaud_kudos(kudos_id: str, user: dict = Depends(get_current_user)):
 
 @api_router.delete("/kudos/{kudos_id}")
 async def delete_kudos(kudos_id: str, user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     doc = await db.kudos.find_one({"id": kudos_id, "pharmacy_id": pid}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Félicitation introuvable.")
@@ -4320,12 +4440,12 @@ class PunchSettingsIn(BaseModel):
 
 @api_router.get("/punch/settings")
 async def read_punch_settings(principal: dict = Depends(get_principal)):
-    return await get_punch_settings(principal["pharmacy_id"] or "ph1")
+    return await get_punch_settings(scoped_pid(principal))
 
 
 @api_router.put("/punch/settings")
 async def write_punch_settings(payload: PunchSettingsIn, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     if payload.rounding_minutes not in (0, 5, 10, 15):
         raise HTTPException(status_code=400, detail="Arrondi permis : 0, 5, 10 ou 15 minutes.")
     if payload.rounding_mode not in ("nearest", "up", "down"):
@@ -4393,7 +4513,7 @@ class ScheduleTemplateIn(BaseModel):
 
 @api_router.get("/schedule/templates")
 async def list_schedule_templates(principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     return await db.schedule_templates.find({"pharmacy_id": pid}, {"_id": 0}).sort("created_at", -1).to_list(100)
 
 
@@ -4411,7 +4531,7 @@ async def create_schedule_template(payload: ScheduleTemplateIn, principal: dict 
             raise HTTPException(status_code=400, detail="Jour de semaine invalide.")
         if e.end <= e.start:
             raise HTTPException(status_code=400, detail="Heures de quart invalides.")
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     doc = {
         "id": str(uuid.uuid4()), "pharmacy_id": pid, "name": name,
         "entries": [e.model_dump() for e in payload.entries],
@@ -4426,7 +4546,7 @@ async def create_schedule_template(payload: ScheduleTemplateIn, principal: dict 
 @api_router.delete("/schedule/templates/{template_id}")
 async def delete_schedule_template(template_id: str, principal: dict = Depends(get_principal)):
     doc = await db.schedule_templates.find_one({"id": template_id}, {"_id": 0})
-    if not doc or doc["pharmacy_id"] != (principal["pharmacy_id"] or "ph1"):
+    if not doc or doc["pharmacy_id"] != (scoped_pid(principal)):
         raise HTTPException(status_code=404, detail="Modèle introuvable.")
     await db.schedule_templates.delete_one({"id": template_id})
     await log_audit(principal["email"], principal["role"], "SUPPRESSION_MODELE_HORAIRE", "horaire", template_id,
@@ -4438,7 +4558,7 @@ async def delete_schedule_template(template_id: str, principal: dict = Depends(g
 
 @api_router.get("/notifications")
 async def list_notifications(user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     ors = [{"target_email": user["email"]}, {"target_roles": user["role"]}]
     if user.get("employee_id"):
         ors.append({"target_employee_id": user["employee_id"]})
@@ -4477,7 +4597,7 @@ async def publish_schedule(payload: SchedulePublishIn, principal: dict = Depends
         raise HTTPException(status_code=400, detail="Semaine invalide.")
     if not payload.recipients:
         raise HTTPException(status_code=400, detail="Aucun employé à notifier pour cette semaine.")
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     prev = await db.schedule_publications.find_one({"pharmacy_id": pid, "week_start": payload.week_start}, {"_id": 0})
     updated = bool(prev)
     now = datetime.now(timezone.utc).isoformat()
@@ -4532,7 +4652,7 @@ async def mark_schedule_seen(payload: ScheduleSeenIn, user: dict = Depends(get_c
     eid = user.get("employee_id")
     if not eid:
         return {"status": "ignoré"}
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     await db.schedule_views.update_one(
         {"pharmacy_id": pid, "employee_id": eid, "week_start": payload.week_start},
         {"$set": {"pharmacy_id": pid, "employee_id": eid, "week_start": payload.week_start,
@@ -4546,7 +4666,7 @@ async def schedule_publish_status(week_start: str = Query(...), principal: dict 
         date.fromisoformat(week_start)
     except ValueError:
         raise HTTPException(status_code=400, detail="Semaine invalide.")
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     pub = await db.schedule_publications.find_one({"pharmacy_id": pid, "week_start": week_start}, {"_id": 0})
     if not pub:
         return {"published": False, "recipients": []}
@@ -4570,7 +4690,7 @@ async def punch_cost(start: str = Query(...), end: str = Query(...), principal: 
         raise HTTPException(status_code=400, detail="Dates invalides.")
     if start > end:
         raise HTTPException(status_code=400, detail="La date de début doit précéder la date de fin.")
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     settings = await db.schedule_settings.find_one({"pharmacy_id": pid}, {"_id": 0}) or {}
     weekly_budget = settings.get("weekly_budget", 0)
     punches = await db.punches.find(
@@ -4629,7 +4749,7 @@ class ChatMessageIn(BaseModel):
 
 
 def chat_can_access(convo: dict, user: dict) -> bool:
-    if convo["pharmacy_id"] != (user.get("pharmacy_id") or "ph1"):
+    if convo["pharmacy_id"] != (scoped_pid(user)):
         return False
     if convo["type"] == "equipe":
         return True
@@ -4640,7 +4760,7 @@ def chat_can_access(convo: dict, user: dict) -> bool:
 
 @api_router.get("/chat/users")
 async def chat_users(principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     return await db.users.find(
         {"pharmacy_id": pid, "role": {"$in": ["admin", "manager", "employee"]}},
         {"_id": 0, "email": 1, "name": 1, "role": 1, "employee_id": 1}).sort("name", 1).to_list(300)
@@ -4650,7 +4770,7 @@ async def chat_users(principal: dict = Depends(get_principal)):
 async def create_conversation(payload: ConversationIn, principal: dict = Depends(get_principal)):
     if payload.type not in CONVERSATION_TYPES:
         raise HTTPException(status_code=400, detail="Type de conversation invalide.")
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     participants: list = []
     if payload.type == "direct":
         email = payload.participant_email.strip().lower()
@@ -4686,7 +4806,7 @@ async def create_conversation(payload: ConversationIn, principal: dict = Depends
 
 @api_router.get("/chat/conversations")
 async def list_conversations(user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     convos = await db.conversations.find({"pharmacy_id": pid}, {"_id": 0}).sort("last_message_at", -1).to_list(200)
     visible = [c for c in convos if chat_can_access(c, user)]
     reads = await db.conversation_reads.find({"email": user["email"]}, {"_id": 0}).to_list(500)
@@ -4766,7 +4886,7 @@ async def get_chat_attachment(attachment_id: str, user: dict = Depends(get_curre
 @api_router.post("/chat/messages/{message_id}/pin")
 async def pin_chat_message(message_id: str, principal: dict = Depends(get_principal)):
     msg = await db.chat_messages.find_one({"id": message_id}, {"_id": 0})
-    if not msg or msg["pharmacy_id"] != (principal["pharmacy_id"] or "ph1"):
+    if not msg or msg["pharmacy_id"] != (scoped_pid(principal)):
         raise HTTPException(status_code=404, detail="Message introuvable.")
     convo = await db.conversations.find_one({"id": msg["conversation_id"]}, {"_id": 0})
     if not convo:
@@ -4791,7 +4911,7 @@ async def pin_chat_message(message_id: str, principal: dict = Depends(get_princi
 @api_router.delete("/chat/conversations/{conversation_id}")
 async def delete_conversation(conversation_id: str, principal: dict = Depends(get_principal)):
     convo = await db.conversations.find_one({"id": conversation_id}, {"_id": 0})
-    if not convo or convo["pharmacy_id"] != (principal["pharmacy_id"] or "ph1"):
+    if not convo or convo["pharmacy_id"] != (scoped_pid(principal)):
         raise HTTPException(status_code=404, detail="Conversation introuvable.")
     await db.chat_messages.delete_many({"conversation_id": conversation_id})
     await db.conversation_reads.delete_many({"conversation_id": conversation_id})
@@ -5160,7 +5280,7 @@ async def generate_schedule_content(proposal_id: str, pharmacy_id: str, week_sta
 
 @api_router.post("/schedule/generate")
 async def schedule_generate(payload: ScheduleGenIn, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     try:
         date.fromisoformat(payload.week_start)
     except ValueError:
@@ -5222,11 +5342,10 @@ async def schedule_generate(payload: ScheduleGenIn, principal: dict = Depends(ge
 
 @api_router.get("/schedule/proposals")
 async def list_proposals(user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or ""
     if user["role"] in ("admin", "manager", "superadmin"):
-        query: dict = {"pharmacy_id": pid} if pid else {}
-        docs = await db.schedule_proposals.find(query, {"_id": 0}).sort("created_at", -1).to_list(100)
+        docs = await db.schedule_proposals.find({"pharmacy_id": scoped_pid(user)}, {"_id": 0}).sort("created_at", -1).to_list(100)
         return [proposal_view(d) for d in docs]
+    pid = user.get("pharmacy_id") or ""
     eid = user.get("employee_id")
     if not eid:
         return []
@@ -5414,7 +5533,7 @@ class EvalRespondIn(BaseModel):
 
 @api_router.post("/evaluations")
 async def create_evaluation(payload: EvaluationCreateIn, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     if payload.current_rate <= 0:
         raise HTTPException(status_code=400, detail="Taux horaire actuel invalide.")
     now = datetime.now(timezone.utc).isoformat()
@@ -5435,13 +5554,12 @@ async def create_evaluation(payload: EvaluationCreateIn, principal: dict = Depen
 
 @api_router.get("/evaluations")
 async def list_evaluations(user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or ""
     if user["role"] in ("admin", "manager", "superadmin"):
-        query: dict = {"pharmacy_id": pid} if pid else {}
+        query: dict = {"pharmacy_id": scoped_pid(user)}
     else:
         if not user.get("employee_id"):
             return []
-        query = {"pharmacy_id": pid, "employee_id": user["employee_id"]}
+        query = {"pharmacy_id": user.get("pharmacy_id") or "", "employee_id": user["employee_id"]}
     return await db.evaluations.find(query, {"_id": 0}).sort("created_at", -1).to_list(200)
 
 
@@ -5610,7 +5728,7 @@ async def send_evaluation_reminders() -> int:
 async def run_evaluation_reminders(principal: dict = Depends(get_principal)):
     sent = await send_evaluation_reminders()
     await log_audit(principal["email"], principal["role"], "RAPPELS_AUTOEVAL", "évaluation", "rappels",
-                    f"{sent} relance(s) d'auto-évaluation envoyée(s) manuellement", principal["pharmacy_id"] or "ph1")
+                    f"{sent} relance(s) d'auto-évaluation envoyée(s) manuellement", scoped_pid(principal))
     return {"sent": sent}
 
 
@@ -5639,11 +5757,9 @@ class TaskCopyWeekIn(BaseModel):
 
 @api_router.get("/tasks")
 async def list_tasks(start: str = Query(...), end: str = Query(...), user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or ""
-    await materialize_recurring_tasks(pid or "ph1", start, end)
-    query: dict = {"date": {"$gte": start, "$lte": end}}
-    if pid:
-        query["pharmacy_id"] = pid
+    pid = scoped_pid(user)
+    await materialize_recurring_tasks(pid, start, end)
+    query: dict = {"date": {"$gte": start, "$lte": end}, "pharmacy_id": pid}
     if user["role"] not in ("admin", "manager", "superadmin"):
         eid = user.get("employee_id") or ""
         query["$or"] = [{"assignee_employee_id": eid}, {"assignee_employee_id": ""}]
@@ -5657,7 +5773,7 @@ async def create_task(payload: ShiftTaskIn, principal: dict = Depends(get_princi
     qualification_warning = False
     competences = [str(c).strip() for c in (payload.competences or []) if str(c).strip()][:10]
     if payload.assignee_employee_id:
-        prof = await get_or_create_profile(principal["pharmacy_id"] or "ph1",
+        prof = await get_or_create_profile(scoped_pid(principal),
                                            payload.assignee_employee_id, payload.assignee_name)
         caps = prof.get("capacities") or []
         if competences:
@@ -5667,7 +5783,7 @@ async def create_task(payload: ShiftTaskIn, principal: dict = Depends(get_princi
     task_id = str(uuid.uuid4())
     doc = {
         "id": task_id,
-        "pharmacy_id": principal["pharmacy_id"] or "ph1",
+        "pharmacy_id": scoped_pid(principal),
         "date": payload.date,
         "shift": payload.shift,
         "title": payload.title.strip(),
@@ -5693,7 +5809,7 @@ async def create_task(payload: ShiftTaskIn, principal: dict = Depends(get_princi
 
 @api_router.post("/tasks/copy-week")
 async def copy_week_tasks(payload: TaskCopyWeekIn, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     from_start = datetime.fromisoformat(payload.from_start).date()
     from_end = from_start + timedelta(days=6)
     to_start = datetime.fromisoformat(payload.to_start).date()
@@ -6341,7 +6457,7 @@ async def morning_digest_job():
 
 @api_router.get("/reports/budget-history")
 async def budget_history(months: int = Query(6, ge=1, le=12), principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     today = datetime.now(timezone.utc).astimezone(MONTREAL_TZ).date()
     labels = []
     cur = today.replace(day=1)
@@ -6389,7 +6505,7 @@ class PharmacySettingsIn(BaseModel):
 
 @api_router.get("/pharmacy/settings")
 async def get_pharmacy_settings(user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     doc = await db.pharmacy_settings.find_one({"pharmacy_id": pid}, {"_id": 0})
     return {"address": (doc or {}).get("address") or DEFAULT_PHARMACY_ADDRESS,
             "mileage_rate": (doc or {}).get("mileage_rate", 0.50)}
@@ -6399,7 +6515,7 @@ async def get_pharmacy_settings(user: dict = Depends(get_current_user)):
 async def set_pharmacy_settings(payload: PharmacySettingsIn, principal: dict = Depends(get_principal)):
     if not payload.address.strip():
         raise HTTPException(status_code=400, detail="Adresse requise.")
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     update = {"pharmacy_id": pid, "address": payload.address.strip(),
               "updated_by": principal["email"], "updated_at": datetime.now(timezone.utc).isoformat()}
     if payload.mileage_rate >= 0:
@@ -6464,7 +6580,7 @@ def _tour_order(start, items):
 
 @api_router.get("/deliveries/route")
 async def delivery_route(courier_employee_id: str = Query(""), user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     is_manager = user["role"] in ("admin", "manager", "superadmin")
     eid = courier_employee_id if (is_manager and courier_employee_id) else (user.get("employee_id") or "")
     if not eid:
@@ -6508,7 +6624,7 @@ async def delivery_mileage(start: str = Query(...), end: str = Query(...), princ
         date.fromisoformat(end)
     except ValueError:
         raise HTTPException(status_code=400, detail="Dates invalides.")
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     settings = await db.pharmacy_settings.find_one({"pharmacy_id": pid}, {"_id": 0})
     start_address = (settings or {}).get("address") or DEFAULT_PHARMACY_ADDRESS
     rate = (settings or {}).get("mileage_rate", 0.50)
@@ -6552,7 +6668,7 @@ async def delivery_mileage(start: str = Query(...), end: str = Query(...), princ
 
 @api_router.get("/deliveries/proofs")
 async def delivery_proofs(client: str = Query(""), principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     query: dict = {"pharmacy_id": pid, "status": "livree", "proof_image": {"$nin": [None, ""]}}
     if client.strip():
         query["client_name"] = {"$regex": re.escape(client.strip()), "$options": "i"}
@@ -6597,7 +6713,7 @@ def delivery_email_html(d: dict) -> str:
 
 @api_router.get("/deliveries")
 async def list_deliveries(user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     query: dict = {"pharmacy_id": pid}
     if user["role"] not in ("admin", "manager", "superadmin"):
         query["courier_employee_id"] = user.get("employee_id") or ""
@@ -6612,7 +6728,7 @@ async def create_delivery(payload: DeliveryIn, principal: dict = Depends(get_pri
         raise HTTPException(status_code=400, detail="Priorité invalide.")
     if not payload.courier_employee_id:
         raise HTTPException(status_code=400, detail="Choisissez un livreur.")
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     now = datetime.now(timezone.utc).isoformat()
     doc = {
         "id": str(uuid.uuid4()), "pharmacy_id": pid,
@@ -6705,7 +6821,7 @@ class AppointmentIn(BaseModel):
 
 @api_router.get("/appointments")
 async def list_appointments(start: str = Query(""), end: str = Query(""), user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     query: dict = {"pharmacy_id": pid}
     if start and end:
         query["date"] = {"$gte": start, "$lte": end}
@@ -6722,7 +6838,7 @@ async def create_appointment(payload: AppointmentIn, user: dict = Depends(get_cu
     if not is_manager and payload.employee_id != (user.get("employee_id") or ""):
         raise HTTPException(status_code=403, detail="Vous ne pouvez ajouter des rendez-vous que pour vous-même.")
     doc = {
-        "id": str(uuid.uuid4()), "pharmacy_id": user.get("pharmacy_id") or "ph1",
+        "id": str(uuid.uuid4()), "pharmacy_id": scoped_pid(user),
         "employee_id": payload.employee_id, "employee_name": payload.employee_name,
         "date": payload.date, "start": payload.start, "end": payload.end,
         "client_name": payload.client_name.strip(), "reason": payload.reason.strip(),
@@ -6892,7 +7008,7 @@ async def create_tasks_bulk(payload: TaskBulkIn, principal: dict = Depends(get_p
         tid = str(uuid.uuid4())
         await db.shift_tasks.insert_one({
             "id": tid,
-            "pharmacy_id": principal["pharmacy_id"] or "ph1",
+            "pharmacy_id": scoped_pid(principal),
             "date": payload.date,
             "shift": payload.shift,
             "title": item.title.strip(),
@@ -6910,7 +7026,7 @@ async def create_tasks_bulk(payload: TaskBulkIn, principal: dict = Depends(get_p
         created += 1
     await log_audit(principal["email"], principal["role"], "AJOUT_MODELE_TACHES", "tâche", payload.date,
                     f"{created} tâche(s) ajoutée(s) ({payload.date}, quart {payload.shift})",
-                    principal["pharmacy_id"] or "ph1")
+                    scoped_pid(principal))
     return {"created": created}
 
 
@@ -6955,7 +7071,7 @@ def compute_task_badges(week_map: dict, team_checks: int, current_week: str) -> 
 
 @api_router.get("/tasks/stats")
 async def task_stats(weeks: int = Query(8, ge=1, le=26), user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     is_employee = user["role"] not in ("admin", "manager", "superadmin")
     my_eid = user.get("employee_id") or ""
     my_name = user.get("name") or ""
@@ -7023,7 +7139,7 @@ async def task_stats(weeks: int = Query(8, ge=1, le=26), user: dict = Depends(ge
 
 @api_router.get("/tasks/honor-roll")
 async def task_honor_roll(month: str = Query(""), user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     today = datetime.now(timezone.utc).astimezone(MONTREAL_TZ).date()
     target_month = month if re.fullmatch(r"\d{4}-\d{2}", month or "") else today.isoformat()[:7]
     docs = await db.shift_tasks.find(
@@ -7057,7 +7173,7 @@ class TaskGoalIn(BaseModel):
 
 @api_router.get("/tasks/goal")
 async def get_task_goal(start: str = Query(""), user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     try:
         ws = date.fromisoformat(start) if start else None
     except ValueError:
@@ -7081,7 +7197,7 @@ async def get_task_goal(start: str = Query(""), user: dict = Depends(get_current
 async def set_task_goal(payload: TaskGoalIn, principal: dict = Depends(get_principal)):
     if not 50 <= payload.target <= 100:
         raise HTTPException(status_code=400, detail="L'objectif doit être entre 50 et 100 %.")
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     await db.task_goals.update_one(
         {"pharmacy_id": pid},
         {"$set": {"pharmacy_id": pid, "target": payload.target,
@@ -7102,7 +7218,7 @@ class AgencyIn(BaseModel):
 
 @api_router.get("/agencies")
 async def list_agencies(principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     local = await db.agencies.find({"pharmacy_id": pid}, {"_id": 0}).sort("name", 1).to_list(200)
     partners = await db.global_partners.find({}, {"_id": 0}).sort("name", 1).to_list(500)
     return local + [{**p, "pharmacy_id": "", "global": True} for p in partners]
@@ -7110,7 +7226,7 @@ async def list_agencies(principal: dict = Depends(get_principal)):
 
 @api_router.post("/agencies")
 async def create_agency(payload: AgencyIn, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     doc = {"id": str(uuid.uuid4()), "pharmacy_id": pid, "name": payload.name.strip(),
            "email": payload.email.strip().lower(), "roles": payload.roles,
            "created_at": datetime.now(timezone.utc).isoformat()}
@@ -7122,7 +7238,7 @@ async def create_agency(payload: AgencyIn, principal: dict = Depends(get_princip
 
 @api_router.delete("/agencies/{agency_id}")
 async def delete_agency(agency_id: str, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     doc = await db.agencies.find_one({"id": agency_id, "pharmacy_id": pid}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Agence introuvable.")
@@ -7164,7 +7280,7 @@ def replacement_email_html(pharmacy_name: str, role: str, slots: list, notes: st
 
 @api_router.post("/replacements/requests")
 async def create_replacement_request(payload: ReplacementRequestIn, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     if not payload.slots:
         raise HTTPException(status_code=400, detail="Ajoutez au moins une plage à combler.")
     for s in payload.slots:
@@ -7217,7 +7333,7 @@ async def create_replacement_request(payload: ReplacementRequestIn, principal: d
 
 @api_router.get("/replacements/requests")
 async def list_replacement_requests(principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     docs = await db.replacement_requests.find({"pharmacy_id": pid}, {"_id": 0, "token": 0}).sort("created_at", -1).to_list(200)
     for d in docs:
         d["offers_count"] = await db.replacement_offers.count_documents({"request_id": d["id"]})
@@ -7231,7 +7347,7 @@ async def list_replacement_requests(principal: dict = Depends(get_principal)):
 
 @api_router.get("/replacements/requests/{request_id}/offers")
 async def list_replacement_offers(request_id: str, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     req = await db.replacement_requests.find_one({"id": request_id, "pharmacy_id": pid}, {"_id": 0})
     if not req:
         raise HTTPException(status_code=404, detail="Demande introuvable.")
@@ -7288,7 +7404,7 @@ class ChooseOfferIn(BaseModel):
 
 @api_router.post("/replacements/requests/{request_id}/choose")
 async def choose_replacement_offer(request_id: str, payload: ChooseOfferIn, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     req = await db.replacement_requests.find_one({"id": request_id, "pharmacy_id": pid}, {"_id": 0})
     if not req:
         raise HTTPException(status_code=404, detail="Demande introuvable.")
@@ -7340,7 +7456,7 @@ async def choose_replacement_offer(request_id: str, payload: ChooseOfferIn, prin
 
 @api_router.delete("/replacements/requests/{request_id}")
 async def delete_replacement_request(request_id: str, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     req = await db.replacement_requests.find_one({"id": request_id, "pharmacy_id": pid}, {"_id": 0})
     if not req:
         raise HTTPException(status_code=404, detail="Demande introuvable.")
@@ -7455,6 +7571,7 @@ async def startup_tasks():
     except Exception as exc:
         logger.error(f"Init object storage échoué : {exc}")
     await seed_users()
+    await ensure_pharmacies_seeded()
     perf_indexes = [
         (db.hr_states, [("pharmacy_id", 1)]),
         (db.shifts, [("pharmacy_id", 1), ("date", 1)]),
@@ -7581,7 +7698,7 @@ async def get_weather_forecast(pid: str) -> list:
 
 @api_router.get("/weather")
 async def get_weather(user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     return {"days": await get_weather_forecast(pid)}
 
 
@@ -7603,7 +7720,7 @@ class SstPatchIn(BaseModel):
 
 @api_router.get("/sst/incidents")
 async def list_sst_incidents(user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     q: dict = {"pharmacy_id": pid}
     if user["role"] == "employee":
         q["employee_id"] = user.get("employee_id") or "__none__"
@@ -7612,7 +7729,7 @@ async def list_sst_incidents(user: dict = Depends(get_current_user)):
 
 @api_router.post("/sst/incidents")
 async def create_sst_incident(payload: SstIncidentIn, user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     if payload.incident_type not in ("accident", "incident", "premiers_soins", "quasi_accident"):
         raise HTTPException(status_code=400, detail="Type de déclaration invalide.")
     if payload.severity not in ("mineure", "moderee", "majeure"):
@@ -7638,7 +7755,7 @@ async def create_sst_incident(payload: SstIncidentIn, user: dict = Depends(get_c
 
 @api_router.patch("/sst/incidents/{sst_id}")
 async def patch_sst_incident(sst_id: str, payload: SstPatchIn, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     update: dict = {}
     if payload.status is not None:
         if payload.status not in ("ouvert", "en_analyse", "clos"):
@@ -7667,14 +7784,14 @@ class CustomFieldsIn(BaseModel):
 
 @api_router.get("/hr/custom-fields")
 async def get_custom_fields(user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     doc = await db.hr_custom_fields.find_one({"pharmacy_id": pid}, {"_id": 0})
     return {"fields": (doc or {}).get("fields", [])}
 
 
 @api_router.put("/hr/custom-fields")
 async def set_custom_fields(payload: CustomFieldsIn, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     fields = []
     for f in payload.fields[:12]:
         if not isinstance(f, dict):
@@ -7704,7 +7821,7 @@ class DocRequestPatchIn(BaseModel):
 
 @api_router.get("/document-requests")
 async def list_document_requests(user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     q: dict = {"pharmacy_id": pid}
     if user["role"] == "employee":
         q["employee_id"] = user.get("employee_id") or "__none__"
@@ -7713,7 +7830,7 @@ async def list_document_requests(user: dict = Depends(get_current_user)):
 
 @api_router.post("/document-requests")
 async def create_document_request(payload: DocRequestIn, user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     if not user.get("employee_id"):
         raise HTTPException(status_code=400, detail="Aucun dossier employé associé à votre compte.")
     doc = {"id": str(uuid.uuid4()), "pharmacy_id": pid,
@@ -7729,7 +7846,7 @@ async def create_document_request(payload: DocRequestIn, user: dict = Depends(ge
 
 @api_router.patch("/document-requests/{req_id}")
 async def patch_document_request(req_id: str, payload: DocRequestPatchIn, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     if payload.status not in ("en_attente", "en_traitement", "fournie", "refusee"):
         raise HTTPException(status_code=400, detail="Statut invalide.")
     doc = await db.document_requests.find_one_and_update(
@@ -7754,7 +7871,7 @@ class TimeBankIn(BaseModel):
 
 @api_router.get("/time-bank")
 async def get_time_bank(user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     if user["role"] == "employee":
         eid = user.get("employee_id") or "__none__"
         entries = await db.time_bank_entries.find({"pharmacy_id": pid, "employee_id": eid}, {"_id": 0}).sort("created_at", -1).to_list(100)
@@ -7769,7 +7886,7 @@ async def get_time_bank(user: dict = Depends(get_current_user)):
 
 @api_router.post("/time-bank")
 async def add_time_bank_entry(payload: TimeBankIn, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     if not (-100 <= payload.hours <= 100) or payload.hours == 0:
         raise HTTPException(status_code=400, detail="Heures invalides (entre −100 et 100, non nulles).")
     prof = await db.employee_profiles.find_one({"pharmacy_id": pid, "employee_id": payload.employee_id},
@@ -7796,14 +7913,14 @@ class AnnouncementIn(BaseModel):
 
 @api_router.get("/announcements")
 async def list_announcements(user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     docs = await db.announcements.find({"pharmacy_id": pid}, {"_id": 0}).sort("created_at", -1).to_list(30)
     return sorted(docs, key=lambda d: (not d.get("pinned"), ), reverse=False)
 
 
 @api_router.post("/announcements")
 async def create_announcement(payload: AnnouncementIn, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     if not (payload.title or "").strip():
         raise HTTPException(status_code=400, detail="Le titre est requis.")
     doc = {"id": str(uuid.uuid4()), "pharmacy_id": pid, "title": payload.title.strip()[:120],
@@ -7821,7 +7938,7 @@ async def create_announcement(payload: AnnouncementIn, principal: dict = Depends
 
 @api_router.delete("/announcements/{ann_id}")
 async def delete_announcement(ann_id: str, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     res = await db.announcements.delete_one({"id": ann_id, "pharmacy_id": pid})
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Annonce introuvable.")
@@ -7830,7 +7947,7 @@ async def delete_announcement(ann_id: str, principal: dict = Depends(get_princip
 
 @api_router.post("/announcements/{ann_id}/like")
 async def like_announcement(ann_id: str, user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     key = user.get("employee_id") or user["email"]
     doc = await db.announcements.find_one({"id": ann_id, "pharmacy_id": pid}, {"_id": 0, "likes": 1})
     if not doc:
@@ -7849,7 +7966,7 @@ class ContractSignIn(BaseModel):
 
 @api_router.get("/contracts/signatures")
 async def list_contract_signatures(user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     q: dict = {"pharmacy_id": pid}
     if user["role"] == "employee":
         q["employee_id"] = user.get("employee_id") or "__none__"
@@ -7858,7 +7975,7 @@ async def list_contract_signatures(user: dict = Depends(get_current_user)):
 
 @api_router.post("/contracts/sign")
 async def sign_contract(payload: ContractSignIn, user: dict = Depends(get_current_user)):
-    pid = user.get("pharmacy_id") or "ph1"
+    pid = scoped_pid(user)
     if not payload.signature.startswith("data:image/") or len(payload.signature) > 200_000:
         raise HTTPException(status_code=400, detail="Signature invalide.")
     if user["role"] == "employee":
@@ -7896,7 +8013,7 @@ class ModuleOverridesIn(BaseModel):
 
 @api_router.get("/users/by-employee/{employee_id}")
 async def get_user_by_employee(employee_id: str, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     target = await db.users.find_one({"pharmacy_id": pid, "employee_id": employee_id}, {"_id": 0})
     if not target:
         return {"found": False}
@@ -7906,7 +8023,7 @@ async def get_user_by_employee(employee_id: str, principal: dict = Depends(get_p
 
 @api_router.put("/users/by-employee/{employee_id}/modules")
 async def set_module_overrides(employee_id: str, payload: ModuleOverridesIn, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     target = await db.users.find_one({"pharmacy_id": pid, "employee_id": employee_id}, {"_id": 0})
     if not target:
         raise HTTPException(status_code=404, detail="Aucun compte utilisateur lié à cet employé.")
@@ -8024,7 +8141,7 @@ async def send_report_email(pid: str, report_id: str, recipients: list) -> bool:
 
 @api_router.get("/reports")
 async def list_reports(principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     user = await db.users.find_one({"email": principal["email"]}, {"_id": 0, "report_favorites": 1})
     schedules = await db.report_schedules.find({"pharmacy_id": pid}, {"_id": 0}).to_list(20)
     return {"catalog": REPORT_CATALOG,
@@ -8053,7 +8170,7 @@ async def set_report_schedule(report_id: str, payload: ReportScheduleIn, princip
         raise HTTPException(status_code=404, detail="Rapport inconnu.")
     if payload.frequency not in ("hebdo", "mensuel", "off"):
         raise HTTPException(status_code=400, detail="Fréquence invalide (hebdo, mensuel ou off).")
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     await db.report_schedules.update_one(
         {"pharmacy_id": pid, "report_id": report_id},
         {"$set": {"pharmacy_id": pid, "report_id": report_id, "frequency": payload.frequency,
@@ -8064,7 +8181,7 @@ async def set_report_schedule(report_id: str, payload: ReportScheduleIn, princip
 
 @api_router.post("/reports/{report_id}/send")
 async def send_report_now(report_id: str, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     ok = await send_report_email(pid, report_id, [principal["email"]])
     if not ok:
         raise HTTPException(status_code=400, detail="Envoi impossible — le courriel expéditeur/destinataire n'est pas autorisé par Resend (vérifiez votre domaine sur resend.com/domains).")
@@ -8094,14 +8211,14 @@ class ApiKeyIn(BaseModel):
 
 @api_router.get("/dev/keys")
 async def list_api_keys(principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     return await db.api_keys.find({"pharmacy_id": pid},
                                   {"_id": 0, "key_hash": 0}).sort("created_at", -1).to_list(20)
 
 
 @api_router.post("/dev/keys")
 async def create_api_key(payload: ApiKeyIn, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     count = await db.api_keys.count_documents({"pharmacy_id": pid})
     if count >= 5:
         raise HTTPException(status_code=400, detail="Maximum 5 clés API par pharmacie.")
@@ -8118,7 +8235,7 @@ async def create_api_key(payload: ApiKeyIn, principal: dict = Depends(get_princi
 
 @api_router.delete("/dev/keys/{key_id}")
 async def delete_api_key(key_id: str, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     res = await db.api_keys.delete_one({"id": key_id, "pharmacy_id": pid})
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Clé introuvable.")
@@ -8259,7 +8376,7 @@ async def delete_demo_request(req_id: str, su: dict = Depends(require_superadmin
 
 @api_router.post("/employees/{employee_id}/anonymize")
 async def anonymize_employee(employee_id: str, principal: dict = Depends(get_principal)):
-    pid = principal["pharmacy_id"] or "ph1"
+    pid = scoped_pid(principal)
     exists = await db.users.find_one({"employee_id": employee_id}, {"_id": 0, "id": 1}) \
         or await db.employee_profiles.find_one({"pharmacy_id": pid, "employee_id": employee_id}, {"_id": 0, "id": 1})
     if not exists:
@@ -8403,7 +8520,7 @@ async def my_data_export(user: dict = Depends(get_current_user)):
     if user.get("employee_id"):
         notif_ors.append({"target_employee_id": user["employee_id"]})
     export["notifications"] = await db.notifications.find(
-        {"pharmacy_id": user.get("pharmacy_id") or "ph1", "$or": notif_ors},
+        {"pharmacy_id": scoped_pid(user), "$or": notif_ors},
         {"_id": 0}).sort("created_at", -1).to_list(500)
     await log_audit(user["email"], user["role"], "EXPORT_DONNEES_PERSONNELLES", "utilisateur", user["id"],
                     "Export de ses propres données (droit d'accès Loi 25)", user.get("pharmacy_id") or "")

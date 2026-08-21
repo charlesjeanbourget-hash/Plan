@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, FormEvent } from 'react';
 import axios from 'axios';
-import { useHR } from '@/context/HRContext';
 import { useAuth } from '@/context/AuthContext';
 import { ManagedUser, Role } from '@/types';
+import type { ServerPharmacy } from '@/components/modules/SuperadminModule';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -36,8 +36,7 @@ const apiError = (err: unknown): string => {
   return 'Une erreur est survenue.';
 };
 
-export const SuperadminUsers = (): JSX.Element => {
-  const { state } = useHR();
+export const SuperadminUsers = ({ pharmacies }: { pharmacies: ServerPharmacy[] }): JSX.Element => {
   const { currentUser, token } = useAuth();
   const headers = { Authorization: `Bearer ${token ?? ''}` };
 
@@ -65,14 +64,28 @@ export const SuperadminUsers = (): JSX.Element => {
   }, [refresh]);
 
   const pharmacyName = (id: string | null): string =>
-    state.pharmacies.find((p) => p.id === id)?.name ?? '—';
+    pharmacies.find((p) => p.id === id)?.name ?? '—';
+
+  const assignPharmacy = async (user: ManagedUser, pid: string): Promise<void> => {
+    try {
+      await axios.put(`${API}/admin/users/${user.id}`, { pharmacy_id: pid }, { headers });
+      toast.success(`${user.email} rattaché(e) à « ${pharmacyName(pid)} ».`);
+      await refresh();
+    } catch (err) {
+      toast.error(apiError(err));
+    }
+  };
 
   const createUser = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
+    if (role !== 'superadmin' && !pharmacyId) {
+      toast.error('Une pharmacie doit être assignée à ce compte (isolation des données).');
+      return;
+    }
     try {
       const res = await axios.post<{ user: ManagedUser; temporary_password: string }>(
         `${API}/admin/users`,
-        { email, name, role, pharmacy_id: role === 'superadmin' ? null : pharmacyId || null },
+        { email, name, role, pharmacy_id: role === 'superadmin' ? null : pharmacyId },
         { headers }
       );
       setCreateOpen(false);
@@ -161,7 +174,20 @@ export const SuperadminUsers = (): JSX.Element => {
                     {ROLE_LABELS[u.role]}
                   </span>
                 </td>
-                <td className="p-3 text-slate-600">{u.role === 'superadmin' ? 'Toutes' : pharmacyName(u.pharmacy_id)}</td>
+                <td className="p-3">
+                  {u.role === 'superadmin' ? (
+                    <span className="text-slate-600 text-xs">Plateforme</span>
+                  ) : (
+                    <Select value={u.pharmacy_id ?? ''} onValueChange={(v) => void assignPharmacy(u, v)}>
+                      <SelectTrigger data-testid={`assign-pharmacy-${u.email}`} className="h-8 w-44 text-xs">
+                        <SelectValue placeholder="⚠ Aucune — assigner" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {pharmacies.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </td>
                 <td className="p-3">
                   {u.is_temporary_password ? (
                     <span className="text-xs font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">Temporaire</span>
@@ -237,11 +263,11 @@ export const SuperadminUsers = (): JSX.Element => {
               </div>
               {role !== 'superadmin' && (
                 <div className="space-y-2">
-                  <Label>Pharmacie</Label>
+                  <Label>Pharmacie <span className="text-red-500">*</span></Label>
                   <Select value={pharmacyId} onValueChange={setPharmacyId}>
-                    <SelectTrigger data-testid="user-pharmacy-select"><SelectValue placeholder="Choisir" /></SelectTrigger>
+                    <SelectTrigger data-testid="user-pharmacy-select"><SelectValue placeholder="Choisir (obligatoire)" /></SelectTrigger>
                     <SelectContent>
-                      {state.pharmacies.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+                      {pharmacies.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>

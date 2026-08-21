@@ -96,9 +96,10 @@ export default function Sidebar({ active, onSelect, onLogout }: Props): JSX.Elem
     const overrides = currentUser?.moduleOverrides ?? {};
     if (overrides[item.key] === false) return false;
     if (simpleMode && !SIMPLE_MODULES.includes(item.key)) return false;
+    if (currentUser?.role === 'superadmin') return item.key === 'superadmin';
     if (currentUser?.role === 'employee') return overrides[item.key] === true || EMPLOYEE_MODULES.includes(item.key);
     if (item.key === 'myspace') return false;
-    if (item.key === 'superadmin') return currentUser?.role === 'superadmin';
+    if (item.key === 'superadmin') return false;
     return true;
   });
 

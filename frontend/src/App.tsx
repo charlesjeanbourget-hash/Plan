@@ -84,6 +84,10 @@ function App(): JSX.Element {
     return () => window.removeEventListener('ap-navigate', handler);
   }, []);
 
+  useEffect(() => {
+    if (currentUser?.role === 'superadmin') setActiveModule('superadmin');
+  }, [currentUser?.role]);
+
   const replacementToken = new URLSearchParams(window.location.search).get('remplacement');
   if (replacementToken) {
     return (

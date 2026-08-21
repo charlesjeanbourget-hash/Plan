@@ -5,13 +5,15 @@ import {
   PayrollEntry, PerformanceReview, OnboardingItem, Contract, Benefit, FAQItem, Pharmacy,
   CandidateStatus, RequestStatus, TaskStatus, PayrollStatus, ReplacementStatus, ShiftSwapRequest, Branch, Resource,
 } from '@/types';
-import { SEED_STATE } from '@/context/seedData';
+import { SEED_STATE, EMPTY_STATE } from '@/context/seedData';
 import { useAuth } from '@/context/AuthContext';
 import { toast } from 'sonner';
 
-const STATE_KEY = 'luminahr_state_v4';
+const STATE_KEY_PREFIX = 'ap_state_v5_';
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const AUTH_KEY = 'luminahr_auth_v3';
+
+const stateKeyFor = (scope: string): string => `${STATE_KEY_PREFIX}${scope}`;
 
 export const uid = (): string => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 
@@ -122,14 +124,19 @@ interface HRContextValue {
 
 const HRContext = createContext<HRContextValue | undefined>(undefined);
 
-const loadState = (): HRState => {
-  const raw = localStorage.getItem(STATE_KEY);
+const loadStateFor = (scope: string): HRState => {
+  const seed = scope === 'anon' ? SEED_STATE : EMPTY_STATE;
+  const raw = localStorage.getItem(stateKeyFor(scope));
   if (raw) {
-    const parsed = JSON.parse(raw) as Partial<HRState>;
-    return { ...SEED_STATE, ...parsed } as HRState;
+    try {
+      const parsed = JSON.parse(raw) as Partial<HRState>;
+      return { ...seed, ...parsed } as HRState;
+    } catch {
+      /* cache corrompu : repart du seed */
+    }
   }
-  localStorage.setItem(STATE_KEY, JSON.stringify(SEED_STATE));
-  return SEED_STATE;
+  localStorage.setItem(stateKeyFor(scope), JSON.stringify(seed));
+  return seed;
 };
 
 const snapWithoutShifts = (s: HRState): string => {
@@ -137,24 +144,36 @@ const snapWithoutShifts = (s: HRState): string => {
   return JSON.stringify(rest);
 };
 
-export const HRProvider = ({ children }: { children: ReactNode }) => {
-  const { token } = useAuth();
-  const [state, setState] = useState<HRState>(loadState);
+interface InnerProps {
+  scope: string;
+  token: string | null;
+  children: ReactNode;
+}
+
+const HRProviderInner = ({ scope, token, children }: InnerProps) => {
+  const canSync = scope !== 'anon' && scope !== 'nopharm';
+  const [state, setState] = useState<HRState>(() => loadStateFor(scope));
   const stateRef = useRef(state);
   const syncedRef = useRef(false);
   const dirtyRef = useRef(false);
   const lastPushedRef = useRef(snapWithoutShifts(state));
   const pushTimer = useRef<number | null>(null);
+  const syncHrStateRef = useRef<(() => Promise<void>) | null>(null);
 
   useEffect(() => {
     stateRef.current = state;
-    localStorage.setItem(STATE_KEY, JSON.stringify(state));
-    if (!getToken()) return;
+    localStorage.setItem(stateKeyFor(scope), JSON.stringify(state));
+    if (!canSync || !getToken()) return;
     const snapshot = snapWithoutShifts(state);
     if (snapshot === lastPushedRef.current) return;
     dirtyRef.current = true;
     if (pushTimer.current) window.clearTimeout(pushTimer.current);
-    pushTimer.current = window.setTimeout(() => {
+    const flush = (): void => {
+      if (!dirtyRef.current) return;
+      if (!syncedRef.current) {
+        pushTimer.current = window.setTimeout(flush, 1000);
+        return;
+      }
       const latest = stateRef.current;
       const snap2 = snapWithoutShifts(latest);
       const { shifts: _o2, ...rest2 } = latest;
@@ -162,15 +181,16 @@ export const HRProvider = ({ children }: { children: ReactNode }) => {
         .then(() => {
           lastPushedRef.current = snap2;
           dirtyRef.current = false;
-          syncedRef.current = true;
         })
         .catch((err) => {
           if (axios.isAxiosError(err) && err.response?.status === 409) {
             dirtyRef.current = false;
-            toast.error('Synchronisation refusée par le serveur — l\'état à jour sera rechargé.');
+            toast.error('Synchronisation refusée par le serveur — rechargement de l\'état à jour.');
+            void syncHrStateRef.current?.();
           }
         });
-    }, 1500);
+    };
+    pushTimer.current = window.setTimeout(flush, 1500);
   }, [state]);
 
   const branchOf = useCallback((employeeId: string): string =>
@@ -184,7 +204,7 @@ export const HRProvider = ({ children }: { children: ReactNode }) => {
   const [shiftsSynced, setShiftsSynced] = useState(false);
 
   const syncShifts = useCallback(async (): Promise<void> => {
-    if (!getToken()) return;
+    if (!canSync || !getToken()) return;
     try {
       const res = await axios.get<{ shifts: ServerShift[]; migrated: boolean }>(`${API}/shifts`, { headers: authHeaders() });
       if (!res.data.migrated) {
@@ -206,7 +226,7 @@ export const HRProvider = ({ children }: { children: ReactNode }) => {
   }, [branchOf, nameOf]);
 
   const syncLeaves = useCallback(async (): Promise<void> => {
-    if (!getToken()) return;
+    if (!canSync || !getToken()) return;
     try {
       const res = await axios.get<{ items: { id: string; employee_id: string; start_date: string; end_date: string; type: string }[]; migrated: boolean }>(`${API}/leave/absences`, { headers: authHeaders() });
       if (!res.data.migrated) {
@@ -238,62 +258,63 @@ export const HRProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const syncHrState = useCallback(async (): Promise<void> => {
-    if (!getToken()) return;
-    try {
-      if (dirtyRef.current) {
-        const latest = stateRef.current;
-        const snap = snapWithoutShifts(latest);
-        const { shifts: _omit, ...rest } = latest;
-        try {
-          await axios.put(`${API}/hr-state`, { state: rest }, { headers: authHeaders() });
-          lastPushedRef.current = snap;
+    if (!canSync || !getToken()) return;
+    const pushLocal = async (): Promise<boolean> => {
+      const latest = stateRef.current;
+      const snap = snapWithoutShifts(latest);
+      const { shifts: _omit, ...rest } = latest;
+      try {
+        await axios.put(`${API}/hr-state`, { state: rest }, { headers: authHeaders() });
+        lastPushedRef.current = snap;
+        dirtyRef.current = false;
+        syncedRef.current = true;
+        return true;
+      } catch (err) {
+        if (axios.isAxiosError(err) && err.response?.status === 409) {
           dirtyRef.current = false;
-          syncedRef.current = true;
-          return;
-        } catch (err) {
-          if (axios.isAxiosError(err) && err.response?.status === 409) {
-            dirtyRef.current = false;
-          } else {
-            return;
-          }
+          return false; // le garde-fou serveur a refusé : on adopte l'état serveur
         }
+        throw err;
       }
+    };
+    try {
+      if (dirtyRef.current && (await pushLocal())) return;
       const res = await axios.get<{ state: Partial<HRState> | null }>(`${API}/hr-state`, { headers: authHeaders() });
-      if (dirtyRef.current) return;
+      if (dirtyRef.current && (await pushLocal())) return;
       const server = res.data.state;
       if (server && Object.keys(server).length > 0) {
-        const incoming = { ...SEED_STATE, ...server } as HRState;
+        const incoming = { ...EMPTY_STATE, ...server } as HRState;
         const incomingSnap = snapWithoutShifts(incoming);
         if (incomingSnap !== snapWithoutShifts(stateRef.current)) {
           if (!syncedRef.current) {
-            localStorage.setItem('luminahr_state_backup_v1', JSON.stringify(stateRef.current));
+            localStorage.setItem(`ap_state_backup_v5_${scope}`, JSON.stringify(stateRef.current));
           }
           lastPushedRef.current = incomingSnap;
           setState((prev) => ({ ...incoming, shifts: prev.shifts }));
         }
       } else {
-        const latest = stateRef.current;
-        const snap = snapWithoutShifts(latest);
-        const { shifts: _omit, ...rest } = latest;
-        await axios.put(`${API}/hr-state`, { state: rest }, { headers: authHeaders() });
-        lastPushedRef.current = snap;
+        await pushLocal();
       }
       syncedRef.current = true;
     } catch {
       /* hors ligne : on garde l'état local */
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  syncHrStateRef.current = syncHrState;
 
   useEffect(() => {
-    if (!token) {
+    if (!token || !canSync) {
       syncedRef.current = false;
       return undefined;
     }
     dirtyRef.current = false;
     lastPushedRef.current = snapWithoutShifts(stateRef.current);
-    void syncHrState();
-    void syncShifts();
-    void syncLeaves();
+    void (async () => {
+      await syncHrState();
+      void syncShifts();
+      void syncLeaves();
+    })();
     const intervalId = window.setInterval(() => {
       void syncShifts();
       void syncLeaves();
@@ -346,7 +367,7 @@ export const HRProvider = ({ children }: { children: ReactNode }) => {
       const id = s.id ?? uid();
       const shift: Shift = { ...s, id };
       patchList('shifts', (items) => (items.some((i) => i.id === id) ? items : [...items, shift]));
-      if (getToken()) {
+      if (canSync && getToken()) {
         void axios.post<{ incompat_warning?: string | null }>(`${API}/shifts`, shiftToServer(shift, branchOf(shift.employeeId), nameOf(shift.employeeId)), { headers: authHeaders() })
           .then((r) => { if (r.data.incompat_warning) toast.warning(r.data.incompat_warning, { duration: 9000 }); })
           .catch(() => undefined);
@@ -354,7 +375,7 @@ export const HRProvider = ({ children }: { children: ReactNode }) => {
     },
     updateShift: (id, patch) => {
       patchList('shifts', (items) => items.map((i) => (i.id === id ? { ...i, ...patch } : i)));
-      if (getToken()) {
+      if (canSync && getToken()) {
         const body: Record<string, unknown> = {};
         if (patch.employeeId !== undefined) {
           body.employee_id = patch.employeeId;
@@ -381,7 +402,7 @@ export const HRProvider = ({ children }: { children: ReactNode }) => {
     },
     deleteShift: (id) => {
       patchList('shifts', (items) => items.filter((i) => i.id !== id));
-      if (getToken()) {
+      if (canSync && getToken()) {
         void axios.delete(`${API}/shifts/${id}`, { headers: authHeaders() }).catch(() => undefined);
       }
     },
@@ -448,14 +469,25 @@ export const HRProvider = ({ children }: { children: ReactNode }) => {
         s.resourceIds ? { ...s, resourceIds: s.resourceIds.filter((rid) => rid !== id) } : s));
     },
     resetData: () => {
-      localStorage.setItem(STATE_KEY, JSON.stringify(SEED_STATE));
-      setState(SEED_STATE);
+      const seed = scope === 'anon' ? SEED_STATE : EMPTY_STATE;
+      localStorage.setItem(stateKeyFor(scope), JSON.stringify(seed));
+      setState(seed);
     },
     refreshShifts: syncShifts,
     shiftsSynced,
   };
 
   return <HRContext.Provider value={value}>{children}</HRContext.Provider>;
+};
+
+export const HRProvider = ({ children }: { children: ReactNode }) => {
+  const { currentUser, token } = useAuth();
+  const scope = currentUser ? (currentUser.pharmacyId || 'nopharm') : 'anon';
+  return (
+    <HRProviderInner key={scope} scope={scope} token={currentUser ? token : null}>
+      {children}
+    </HRProviderInner>
+  );
 };
 
 export const useHR = (): HRContextValue => {

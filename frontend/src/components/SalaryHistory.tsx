@@ -6,7 +6,7 @@ import { TrendingUp, ArrowRight } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
-const money = (v: number): string => v.toLocaleString('fr-CA', { style: 'currency', currency: 'CAD' });
+const money = (v?: number | null): string => (v ?? 0).toLocaleString('fr-CA', { style: 'currency', currency: 'CAD' });
 
 interface Props {
   employeeId: string;

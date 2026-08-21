@@ -131,3 +131,23 @@ export const SEED_STATE: HRState = {
     { id: 'ph3', name: 'Pharmacie Beaulieu', address: '780 boul. Laurier', city: 'Québec', ownerName: 'Dr. Anne Beaulieu', adminEmail: 'anne.beaulieu@pharmab.ca', employeeCount: 6, plan: 'Essentiel', active: false },
   ],
 };
+
+export const EMPTY_STATE: HRState = {
+  branches: [],
+  resources: [],
+  shiftSwaps: [],
+  employees: [],
+  shifts: [],
+  tasks: [],
+  jobOffers: [],
+  candidates: [],
+  leaveRequests: [],
+  replacementRequests: [],
+  payrollEntries: [],
+  performanceReviews: [],
+  onboardingItems: [],
+  contracts: [],
+  benefits: [],
+  faqItems: [],
+  pharmacies: [],
+};

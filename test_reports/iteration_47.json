@@ -1,0 +1,48 @@
+{
+  "summary": "Validation en profondeur des correctifs d'isolation multi-pharmacies. Backend : balayage exhaustif de 45+ endpoints GET avec les jetons de Léo (ph_a89755dc), de l'admin ph1 et du superadmin + détection automatique de marqueurs nominatifs ph1 (Sophie/Julie/Karim/Lavoie/luminahr.ca/ph1). Nouveau fichier /app/backend/tests/test_iteration47.py (80 tests) + régression test_iteration45/46 (50 tests) : 124 réussis, 6 échoués (4 endpoints distincts). Frontend : scénario exact du client dans un SEUL contexte Playwright (admin ph1 -> Léo -> retour admin), UI superadmin, gestion des succursales. VERDICT : l'isolation admin<->admin (le bug rapporté par le client) est CORRIGÉE, aucune fuite ph1 vers Léo ni pollution inverse, backend comme frontend. RÉSIDU : 4 endpoints laissent le superadmin lire les données RH NOMINATIVES de TOUTES les pharmacies (contraire à l'exigence « le superadmin ne voit aucune donnée RH »).",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "GET /api/profiles", "issue": "FUITE : le superadmin (sans pharmacie) reçoit 60 profils de TOUTES les pharmacies (ph1 + ph_a89755dc) avec noms, taux horaires, disponibilités, capacités. Cause ligne ~2138 : `pid = user.get('pharmacy_id') or ''` puis `query = {'pharmacy_id': pid} if pid else {}` -> filtre vide = tout. Utiliser scoped_pid(user) ('__plateforme__').", "priority": "CRITICAL"},
+      {"endpoint": "GET /api/evaluations", "issue": "FUITE : le superadmin voit l'évaluation nominative de Julie Gagnon (ph1) avec taux et scores. Même motif ligne ~5545-5547.", "priority": "HIGH"},
+      {"endpoint": "GET /api/trainings", "issue": "FUITE : le superadmin reçoit les formations de ph1 (contenu complet + réponses d'examen, 16 Ko). Ligne ~1755 : `query = {} if pharmacy_id absent` pour le rôle superadmin.", "priority": "HIGH"},
+      {"endpoint": "GET /api/licenses", "issue": "FUITE : le superadmin voit la licence professionnelle nominative de Julie (ph1) via license_scope() qui ne filtre pas quand pharmacy_id n'est pas passé en query.", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "GET /api/schedule/proposals", "issue": "Même motif que /evaluations (ligne ~5332-5334) : query vide pour un superadmin sans pharmacie. Aucune fuite observable aujourd'hui car schedule_proposals est vide, mais la faille est latente."},
+      {"endpoint": "POST /api/superadmin/pharmacies", "issue": "Aucun endpoint DELETE : les pharmacies créées (tests ou erreur de saisie) ne peuvent qu'être désactivées (PUT active:false) et polluent le tableau du superadmin. Les 3 pharmacies TEST_ créées pendant les tests ont dû être supprimées directement en Mongo."},
+      {"endpoint": "GET /api/tasks", "issue": "Paramètres start/end obligatoires -> 422 sans query (comportement attendu mais non documenté ; aucune fuite)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "HRContext / module Employés", "issue": "INTERMITTENT (1 occurrence sur 5 essais) : après une session superadmin, la reconnexion admin@luminahr.ca a affiché « 0 membres dans votre équipe », aucun employé et AUCUNE succursale dans branch-manager-dialog, avec toast rouge « Synchronisation refusée par le serveur — l'état à jour sera rechargé » et 2 réponses 409 sur PUT /api/hr-state. Les données serveur sont restées intactes (le garde-fou 409 a protégé ph1) mais l'utilisateur voit un état VIDE = perception de perte de données. Cause probable : rendu avec EMPTY_STATE (scope ph1 sans cache localStorage) puis PUT de synchro avant la résolution du GET /api/hr-state.", "selector": "[data-testid=\"manage-branches-button\"], [data-testid=\"sidebar-link-employees\"]", "priority": "HIGH"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration47.py",
+    "/app/backend/tests/test_iteration45.py",
+    "/app/backend/tests/test_iteration46.py",
+    "/app/test_reports/pytest/pytest_results_47.xml"
+  ],
+  "action_items": [
+    "Remplacer le motif `pid = user.get('pharmacy_id') or ''` + `query = {...} if pid else {}` par scoped_pid(user) dans GET /api/profiles (~2138), GET /api/evaluations (~5545), GET /api/schedule/proposals (~5332) et GET /api/trainings (~1755) afin que le superadmin sans pharmacie soit cloisonné dans '__plateforme__'.",
+    "Corriger license_scope() : pour un superadmin sans pharmacy_id en query, renvoyer {'pharmacy_id': '__plateforme__'} (ou 400) au lieu d'un filtre vide.",
+    "Corriger la course de synchro HRContext : ne jamais émettre de PUT /api/hr-state avant que le GET initial du scope courant soit résolu, et recharger automatiquement l'état après un 409 (le toast actuel annonce un rechargement qui n'a pas lieu — l'UI reste vide jusqu'à un F5 manuel).",
+    "Ajouter DELETE /api/superadmin/pharmacies/{id} (avec refus si des comptes y sont rattachés) pour permettre le nettoyage."
+  ],
+  "critical_code_review_comments": [
+    "server.py fait 8618 lignes : à découpler en routeurs (auth, rh, horaires, paie, superadmin) — le bug de fuite provient exactement de ce genre de duplication de motif de scoping sur 130+ endpoints.",
+    "Le scoping doit être centralisé : imposer scoped_pid() (ou une dépendance FastAPI `pid: str = Depends(require_pid)`) et interdire tout `find({})` sans filtre pharmacy_id ; un test de garde (grep/CI) éviterait les régressions.",
+    "GET /api/superadmin/overview et le tableau des pharmacies n'exposent que des métadonnées (nom, propriétaire, ville, nb de comptes, statistiques agrégées) : conforme, pas une fuite."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration47.py", "/app/test_reports/iteration_47.json"],
+  "success_rate": {"backend": "95% (124/130 tests ; 4 endpoints en fuite côté superadmin uniquement)", "frontend": "95% (P4/P5/P6 réussis ; 1 anomalie intermittente d'état vide)"},
+  "seed_data_creation": "Aucune donnée persistante créée. Créés puis supprimés : compte superadmin TEST_sa47@exemple.ca, quart TEST_shift47 (ph1), succursales TEST_Succursale47/TEST_Succ47 (ph1), pharmacies TEST_Pharmacie47 (3 exemplaires, supprimées en Mongo faute d'endpoint DELETE). État final vérifié : ph1 = 3 employés (Sophie/Julie/Karim), 2 succursales, 8 paies ; pharmacies = ph1 + Pharmacie Test Léo uniquement ; aucun compte TEST_.",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "/app/memory/test_credentials.md — complet et valide (admin@luminahr.ca, julie@luminahr.ca, leo-test@exemple.ca, jeffmenard78@hotmail.com tous fonctionnels ; réponse login = access_token).",
+  "context_for_next_testing_agent": "PRIORITÉ 1(b)/1(c) VALIDÉES : 45 endpoints GET balayés avec le jeton de Léo -> zéro donnée nominative ph1 (seul « Employe DeLeo » et ses réglages par défaut) ; /audit-logs et /superadmin/overview correctement 403 pour Léo ; l'admin ph1 ne voit rien de ph_a89755dc. PRIORITÉ 2 et 3 VALIDÉES (400 sans pharmacie / pharmacie inexistante, superadmin créable sans pharmacie, CRUD pharmacies + 404). PRIORITÉ 4 VALIDÉE dans un seul contexte navigateur : admin ph1 (Sophie/Julie/Karim) -> Léo (aucune fuite, Horaires/Paie/Tableau de bord vides) -> retour admin (3 employés intacts, aucune pollution DeLeo), 0 PUT hr-state pollué, 0 erreur console. PRIORITÉ 5 VALIDÉE : sidebar superadmin = uniquement 'sidebar-link-superadmin', tableau des pharmacies avec toggles, user-pharmacy-select obligatoire (toast « Une pharmacie doit être assignée à ce compte »), options alimentées par le serveur, assign-pharmacy-{email} sur les 4 comptes non-superadmin. PRIORITÉ 6 VALIDÉE : branch-manager-dialog liste Centre-Ville (2 emp.) et Plateau (1 emp.), ajout OK (PUT 200), suppression bloquée « Impossible : 2 employé(s) rattaché(s) », suppression d'une succursale vide OK. RESTE À CORRIGER : les 4 endpoints de fuite superadmin (tests déjà écrits et rouges dans test_iteration47.py::TestPriorite1IsolationSuperadmin) + la course de synchro HRContext (409). Relancer : pytest tests/test_iteration47.py tests/test_iteration45.py tests/test_iteration46.py.",
+  "rca_of_the_issue": "Le repli « or ph1 » a bien été éliminé, mais 5 endpoints conservent un second motif dangereux : `pid = user.get('pharmacy_id') or ''` suivi de `query = {'pharmacy_id': pid} if pid else {}`. Pour un superadmin (pharmacy_id vide) le filtre devient {} -> lecture de TOUTES les pharmacies. Concerné : /api/profiles, /api/evaluations, /api/trainings, /api/schedule/proposals et license_scope() (/api/licenses). Reproduction : jeton superadmin -> GET /api/profiles = 60 profils dont Julie Gagnon (ph1) avec taux horaires. Correctif : utiliser scoped_pid(user) qui renvoie '__plateforme__' pour le superadmin. Aucune fuite entre deux admins de pharmacies différentes (le bug initial du client) n'a été retrouvée, ni au backend ni au frontend."
+}
