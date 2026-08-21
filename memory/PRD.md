@@ -566,3 +566,11 @@ Bug rapporté : « les données du superadmin se retrouvent dans les nouveaux co
 - Compte test permanent 2e pharmacie : leo-test@exemple.ca / LeoIsole2026!x (Pharmacie Test Léo, ph_a89755dc, 1 employé « Employe DeLeo »).
 - NOTE PROD : au déploiement, les comptes prod sans pharmacie recevront 403 → le superadmin doit leur assigner une pharmacie via Superadmin → Comptes (sélecteur par ligne). Les données déjà copiées dans un doc hr_states d'une autre pharmacie ne sont pas nettoyées automatiquement.
 
+
+## Itération 49 (21 août 2026) — Superadmin : gestion complète des comptes + cartes statistiques fonctionnelles — testée 100 % (iteration_48.json : 9/9 UI, 130 pytest, données restaurées)
+1. **Dialogue « Gérer le compte »** (manage-user-dialog) : modification nom/courriel/rôle/pharmacie (PUT /admin/users/{id} — backend accepte désormais name+email avec 400 si courriel dupliqué, nom vide, ou retrait de son propre rôle superadmin) + support à distance intégré : réinitialisation du mot de passe, suspension/réactivation (switch), suppression. Garde-fous UI sur son propre compte (rôle/suspension/suppression désactivés).
+2. **Vue mobile** : table masquée sur <sm, cartes user-card-{email} + bouton manage-user-mobile-{email} (le client gère tout depuis son iPhone).
+3. **Cartes statistiques cliquables** : StatCard accepte onClick/testId ; CollapsibleSection écoute l'événement 'ap-open-section' (helper openSection(id)) avec ouverture + défilement. stat-pharmacies → tableau pharmacies ; stat-accounts → section Comptes ; stat-active-accounts → Journal des connexions ; les 8 cartes de la Vue d'ensemble ouvrent metric-detail-dialog avec ventilation PAR PHARMACIE (METRICS : comptes employés, licences, alertes, formations, quarts à venir, heures punchées 30 j, congés en attente, messages 30 j).
+4. Correctif : noms de pharmacies de la Vue d'ensemble désormais depuis la collection serveur (prop pharmacies) — affichaient l'id brut depuis l'isolation ; DELETE /api/superadmin/pharmacies/{id} ajouté (400 si comptes rattachés) ; pharmacies de test purgées (base : ph1 + Pharmacie Test Léo, 7 comptes).
+- PROD : le client doit REDÉPLOYER pour recevoir ces changements + l'isolation (itération 48).
+

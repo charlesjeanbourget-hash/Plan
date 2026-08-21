@@ -1,5 +1,9 @@
-import { ReactNode, useState } from 'react';
-import { LucideIcon, ChevronDown } from 'lucide-react';
+import { ReactNode, useState, useEffect, useRef } from 'react';
+import { LucideIcon, ChevronDown, ChevronRight } from 'lucide-react';
+
+export const openSection = (id: string): void => {
+  window.dispatchEvent(new CustomEvent('ap-open-section', { detail: id }));
+};
 
 export const ModuleHeader = ({ title, subtitle, action }: { title: string; subtitle: string; action?: ReactNode }): JSX.Element => (
   <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-8">
@@ -12,16 +16,40 @@ export const ModuleHeader = ({ title, subtitle, action }: { title: string; subti
   </div>
 );
 
-export const StatCard = ({ label, value, icon: Icon, hint }: { label: string; value: string; icon: LucideIcon; hint?: string }): JSX.Element => (
-  <div className="bg-white rounded-xl border border-slate-200 p-6 hover:-translate-y-0.5 transition-transform">
-    <div className="flex items-center justify-between mb-4">
-      <p className="text-xs uppercase tracking-[0.15em] text-slate-500 font-semibold">{label}</p>
-      <Icon className="w-4 h-4 text-emerald-600" />
+export const StatCard = ({ label, value, icon: Icon, hint, onClick, testId }: { label: string; value: string; icon: LucideIcon; hint?: string; onClick?: () => void; testId?: string }): JSX.Element => {
+  const inner = (
+    <>
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-xs uppercase tracking-[0.15em] text-slate-500 font-semibold">{label}</p>
+        <Icon className="w-4 h-4 text-emerald-600" />
+      </div>
+      <p className="font-heading text-3xl font-extrabold text-slate-900">{value}</p>
+      {hint && (
+        <p className="text-xs text-slate-400 mt-1.5 inline-flex items-center gap-1">
+          {hint}
+          {onClick && <ChevronRight className="w-3 h-3 text-emerald-600" />}
+        </p>
+      )}
+    </>
+  );
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        data-testid={testId}
+        onClick={onClick}
+        className="w-full text-left bg-white rounded-xl border border-slate-200 p-6 hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-md transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+      >
+        {inner}
+      </button>
+    );
+  }
+  return (
+    <div data-testid={testId} className="bg-white rounded-xl border border-slate-200 p-6 hover:-translate-y-0.5 transition-transform">
+      {inner}
     </div>
-    <p className="font-heading text-3xl font-extrabold text-slate-900">{value}</p>
-    {hint && <p className="text-xs text-slate-400 mt-1.5">{hint}</p>}
-  </div>
-);
+  );
+};
 
 const BADGE_STYLES: Record<string, string> = {
   'Actif': 'bg-emerald-100 text-emerald-800',
@@ -76,6 +104,7 @@ export const CollapsibleSection = ({ id, title, icon: Icon, badge, badgeTone = '
   className?: string;
   children: ReactNode;
 }): JSX.Element => {
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem(`ap-section-${id}`);
@@ -84,6 +113,16 @@ export const CollapsibleSection = ({ id, title, icon: Icon, badge, badgeTone = '
       return defaultOpen;
     }
   });
+  useEffect(() => {
+    const onOpen = (e: Event): void => {
+      if ((e as CustomEvent<string>).detail !== id) return;
+      setOpen(true);
+      try { localStorage.setItem(`ap-section-${id}`, '1'); } catch { /* noop */ }
+      window.setTimeout(() => containerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120);
+    };
+    window.addEventListener('ap-open-section', onOpen);
+    return () => window.removeEventListener('ap-open-section', onOpen);
+  }, [id]);
   const toggle = (): void => {
     setOpen((o) => {
       try { localStorage.setItem(`ap-section-${id}`, o ? '0' : '1'); } catch { /* noop */ }
@@ -91,7 +130,7 @@ export const CollapsibleSection = ({ id, title, icon: Icon, badge, badgeTone = '
     });
   };
   return (
-    <div className={className}>
+    <div ref={containerRef} className={`${className} scroll-mt-4`}>
       <button
         type="button"
         data-testid={`section-toggle-${id}`}

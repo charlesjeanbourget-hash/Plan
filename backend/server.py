@@ -691,6 +691,7 @@ class UserCreateIn(BaseModel):
 
 class UserUpdateIn(BaseModel):
     name: Optional[str] = None
+    email: Optional[str] = None
     role: Optional[str] = None
     pharmacy_id: Optional[str] = None
     suspended: Optional[bool] = None
@@ -746,6 +747,16 @@ async def admin_update_user(user_id: str, payload: UserUpdateIn, su: dict = Depe
     patch = payload.model_dump(exclude_none=True)
     if patch.get("role") and patch["role"] not in ("admin", "manager", "employee", "superadmin"):
         raise HTTPException(status_code=400, detail="Rôle invalide.")
+    if user_id == su["id"] and patch.get("role") and patch["role"] != "superadmin":
+        raise HTTPException(status_code=400, detail="Impossible de retirer votre propre rôle superadmin.")
+    if patch.get("email"):
+        patch["email"] = patch["email"].strip().lower()
+        if patch["email"] != target["email"] and await db.users.find_one({"email": patch["email"]}):
+            raise HTTPException(status_code=400, detail="Un compte existe déjà avec ce courriel.")
+    if patch.get("name") is not None:
+        patch["name"] = patch["name"].strip()[:120]
+        if not patch["name"]:
+            raise HTTPException(status_code=400, detail="Le nom ne peut pas être vide.")
     if patch.get("pharmacy_id") and not await db.pharmacies.find_one({"id": patch["pharmacy_id"]}):
         raise HTTPException(status_code=400, detail="Pharmacie introuvable.")
     if patch:

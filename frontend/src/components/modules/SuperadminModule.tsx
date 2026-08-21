@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback, FormEvent } from 'react';
+import { useState, useEffect, useCallback, useRef, FormEvent } from 'react';
 import axios from 'axios';
 import { useAuth } from '@/context/AuthContext';
 import { PharmacyPlan, OverviewAccount } from '@/types';
-import { ModuleHeader, StatCard, CollapsibleSection } from '@/components/modules/shared';
+import { ModuleHeader, StatCard, CollapsibleSection, openSection } from '@/components/modules/shared';
 import { SuperadminUsers } from '@/components/modules/SuperadminUsers';
 import { SuperadminOverview } from '@/components/modules/SuperadminOverview';
 import { SuperadminPartners } from '@/components/SuperadminPartners';
@@ -51,6 +51,7 @@ export default function SuperadminModule(): JSX.Element {
   const [city, setCity] = useState('');
   const [ownerName, setOwnerName] = useState('');
   const [plan, setPlan] = useState<PharmacyPlan>('Essentiel');
+  const pharmaciesTableRef = useRef<HTMLDivElement | null>(null);
 
   const refreshPharmacies = useCallback(async (): Promise<void> => {
     try {
@@ -126,17 +127,28 @@ export default function SuperadminModule(): JSX.Element {
         }
       />
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-10" data-testid="superadmin-live-stats">
-        <StatCard label="Pharmacies clientes" value={String(pharmacies.length)} icon={Building2} hint="Données réelles de la plateforme" />
-        <StatCard label="Comptes clients" value={live ? String(live.accounts) : '…'} icon={Users} hint={live ? `${live.employees} employé(s) · ${live.managers} gestionnaire(s)` : 'Chargement…'} />
+        <StatCard
+          label="Pharmacies clientes" value={String(pharmacies.length)} icon={Building2}
+          hint="Voir la liste des pharmacies" testId="stat-pharmacies"
+          onClick={() => pharmaciesTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+        />
+        <StatCard
+          label="Comptes clients" value={live ? String(live.accounts) : '…'} icon={Users}
+          hint={live ? `${live.employees} employé(s) · ${live.managers} gestionnaire(s) — gérer` : 'Chargement…'}
+          testId="stat-accounts"
+          onClick={() => openSection('sa-users')}
+        />
         <StatCard
           label="Comptes actifs"
           value={live ? `${Math.round(((live.accounts - live.suspended) / Math.max(live.accounts, 1)) * 100)} %` : '…'}
           icon={ShieldCheck}
-          hint={live ? (live.suspended > 0 ? `${live.suspended} compte(s) suspendu(s)` : 'Aucun compte suspendu') : 'Chargement…'}
+          hint={live ? (live.suspended > 0 ? `${live.suspended} compte(s) suspendu(s) — voir le journal` : 'Voir le journal des connexions') : 'Chargement…'}
+          testId="stat-active-accounts"
+          onClick={() => openSection('sa-logins')}
         />
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto mb-6" data-testid="pharmacies-table">
+      <div ref={pharmaciesTableRef} className="bg-white rounded-xl border border-slate-200 overflow-x-auto mb-6 scroll-mt-4" data-testid="pharmacies-table">
         <table className="w-full text-sm min-w-[800px]">
           <thead>
             <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-[0.15em] text-slate-500">
@@ -181,7 +193,7 @@ export default function SuperadminModule(): JSX.Element {
       </div>
 
       <CollapsibleSection id="sa-overview" title="Vue d'ensemble de la plateforme" icon={LayoutDashboard} defaultOpen className="mb-4">
-        <SuperadminOverview />
+        <SuperadminOverview pharmacies={pharmacies} />
       </CollapsibleSection>
 
       <CollapsibleSection id="sa-security" title="Sécurité" icon={ShieldCheck} className="mb-4">

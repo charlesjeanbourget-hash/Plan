@@ -1,0 +1,30 @@
+{
+  "summary": "Tests frontend (Playwright, desktop 1920x1080 + mobile 390x844) des nouvelles fonctionnalités superadmin : dialogue « Gérer le compte » (édition nom/courriel/rôle/pharmacie, garde-fous sur son propre compte), support à distance (réinitialisation de mot de passe, suspension/réactivation, suppression), cartes mobiles, cartes statistiques cliquables (superadmin + Vue d'ensemble avec ventilation par pharmacie). Régression : création de compte sans pharmacie bloquée, isolation leo-test via GET /api/hr-state, suite pytest test_iteration45/46/47 = 130 réussis / 4 ignorés / 0 échec. TOUS les scénarios demandés PASSENT, aucune erreur console, aucun échec bloquant.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Superadmin — dialogue « Gérer le compte » sur son PROPRE compte", "issues": ["Le sélecteur de rôle et les boutons suspendre/supprimer sont correctement désactivés, mais le bouton save-user-button reste actif : un clic renvoie un PUT sur son propre compte (sans effet nuisible, backend protégé). Envisager de désactiver aussi l'enregistrement ou d'afficher une note « compte courant »."]},
+      {"screen": "Vue d'ensemble — metric-detail-dialog « Employés gérés »", "issues": ["La valeur correspond aux COMPTES de rôle employé, pas aux fiches RH : « Pharmacie Test Léo » affiche 0 alors qu'elle a 1 employé RH (Employe DeLeo). Libellé possiblement trompeur pour le client (préciser « comptes employés »)."]}
+    ]
+  },
+  "test_report_links": ["/app/test_reports/pytest/iteration_48.xml", "/app/backend/tests/test_iteration45.py", "/app/backend/tests/test_iteration46.py", "/app/backend/tests/test_iteration47.py"],
+  "action_items": [
+    "Optionnel (UX) : désactiver save-user-button ou afficher un indicateur « compte courant » dans le dialogue Gérer lorsqu'on ouvre son propre compte superadmin.",
+    "Optionnel (libellé) : renommer « Employés gérés » en « Comptes employés » (ou brancher sur les fiches RH) dans metric-detail-dialog.",
+    "Hygiène de données : test_iteration47 crée une pharmacie TEST_Pharmacie47 qui reste en base (aucun DELETE /api/superadmin/pharmacies) — je l'ai purgée manuellement en Mongo ; ajouter l'endpoint DELETE ou un teardown."
+  ],
+  "critical_code_review_comments": [
+    "SuperadminUsers.tsx : refresh() utilise `headers` capturé hors dépendances avec eslint-disable ; fonctionnel aujourd'hui mais un changement de jeton (ré-authentification sans remontage) enverrait un Bearer périmé. Envisager d'inclure token dans les deps.",
+    "Le dialogue Gérer envoie name+email+role+pharmacy_id à chaque enregistrement, même inchangés : un courriel déjà utilisé renvoie 400 (bien géré par toast), mais un PATCH partiel serait plus sûr."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (130 tests pytest 45/46/47)", "frontend": "100% (9 scénarios demandés)"},
+  "seed_data_creation": "Compte temp-del@exemple.ca (Pharmacie Test Léo) créé puis SUPPRIMÉ via le dialogue Gérer. Nom de Léo modifié en « Léo Bourget » puis RESTAURÉ « Léo Test ». leo-test suspendu (login 403 « Compte suspendu ») puis RÉACTIVÉ (login 200). Mot de passe de Julie réinitialisé (Lumina-rtfBwC3L) puis REMIS à « O1ka!gfVV6e54 » via /api/auth/change-password (login 200 vérifié, is_temporary_password=false). Pharmacie résiduelle TEST_Pharmacie47_off supprimée en Mongo. Base finale : 2 pharmacies, 7 comptes — état initial restauré.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "/app/memory/test_credentials.md — inchangés et vérifiés (superadmin jeffmenard78, julie O1ka!gfVV6e54, leo-test LeoIsole2026!x)",
+  "context_for_next_testing_agent": "Détail des vérifications : (1) manage-user-{email} ouvre manage-user-dialog, édition du nom -> toast « Compte mis à jour. » + table rafraîchie ; (2) edit-user-role-select (4 options) et edit-user-pharmacy-select (2 pharmacies, noms lisibles) modifiables ; sur jeffmenard78 : role/suspend/delete tous disabled=True ; (3) manage-reset-password-button -> credentials-dialog + temp-password-value + copie OK, ligne marquée « Temporaire » ; (4) manage-delete-button -> delete-user-dialog -> confirm-delete-user-button -> compte disparu (login 401 ensuite) ; (5) manage-suspend-toggle -> toast suspendu + login API 403, réactivation -> toast + login 200 ; (6) mobile 390x844 : table masquée, users-mobile-list avec 7 user-card-{email}, manage-user-mobile-{email} ouvre le même dialogue scrollable (8 contrôles tous visibles/atteignables) et l'enregistrement fonctionne ; (7) stat-pharmacies défile (scrollY 0->767), stat-accounts ouvre section-content-sa-users, stat-active-accounts ouvre section-content-sa-logins (desktop ET mobile) ; (8) les 8 cartes de la Vue d'ensemble ouvrent metric-detail-dialog avec metric-row-ph1 et metric-row-ph_a89755dc, noms lisibles, aucun identifiant brut ; (9) création sans pharmacie -> toast « Une pharmacie doit être assignée… », isolation leo-test /api/hr-state = aucun marqueur ph1. NB : les sections superadmin sont repliées par défaut dans un nouveau contexte navigateur — cliquer section-toggle-sa-users ou stat-accounts avant de cibler superadmin-users-panel.",
+  "rca_of_the_issue": "Aucun défaut fonctionnel reproduit. Les 6 échecs pytest de l'itération 47 (fuite superadmin sur /profiles, /evaluations, /schedule/proposals, /trainings + license_scope) sont désormais tous verts."
+}

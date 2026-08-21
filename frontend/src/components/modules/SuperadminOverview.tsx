@@ -1,9 +1,10 @@
 import { useState, useEffect, FormEvent } from 'react';
 import axios from 'axios';
 import { useAuth } from '@/context/AuthContext';
-import { useHR } from '@/context/HRContext';
 import { OverviewPharmacy, OverviewAccount, EmailSettings } from '@/types';
+import type { ServerPharmacy } from '@/components/modules/SuperadminModule';
 import { StatCard } from '@/components/modules/shared';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -19,15 +20,64 @@ const ROLE_LABELS: Record<string, string> = {
   admin: 'Admin', manager: 'Gestionnaire', employee: 'Employé(e)', superadmin: 'Superadmin',
 };
 
-export const SuperadminOverview = (): JSX.Element => {
+interface MetricDef {
+  label: string;
+  description: string;
+  value: (p: OverviewPharmacy) => number;
+  format?: (v: number) => string;
+  extra?: (p: OverviewPharmacy) => string;
+}
+
+const METRICS: Record<string, MetricDef> = {
+  employees: {
+    label: 'Comptes employés', description: 'Comptes employés actifs par pharmacie (accès à l\'application).',
+    value: (p) => p.accounts.employees,
+    extra: (p) => `${p.accounts.total} compte(s) au total · ${p.accounts.admins} admin(s)`,
+  },
+  licenses: {
+    label: 'Licences suivies', description: 'Licences professionnelles suivies par pharmacie.',
+    value: (p) => p.licenses.total,
+  },
+  alerts: {
+    label: 'Alertes licences', description: 'Licences expirant sous 30 jours ou déjà expirées.',
+    value: (p) => p.licenses.expiring_30 + p.licenses.expired,
+    extra: (p) => `${p.licenses.expiring_30} ≤ 30 j · ${p.licenses.expired} expirée(s)`,
+  },
+  trainings: {
+    label: 'Formations publiées', description: 'Formations publiées par pharmacie.',
+    value: (p) => p.trainings.published,
+    extra: (p) => `${p.trainings.total} au total`,
+  },
+  shifts: {
+    label: 'Quarts à venir', description: 'Quarts planifiés à partir d\'aujourd\'hui.',
+    value: (p) => p.activity?.shifts_upcoming ?? 0,
+    extra: (p) => `${p.activity?.shifts_total ?? 0} quart(s) au total`,
+  },
+  punch: {
+    label: 'Heures punchées (30 j)', description: 'Heures pointées dans les 30 derniers jours.',
+    value: (p) => p.activity?.punch_hours_30d ?? 0,
+    format: (v) => `${v.toLocaleString('fr-CA')} h`,
+    extra: (p) => `${p.activity?.punches_30d ?? 0} punch(s)`,
+  },
+  leave: {
+    label: 'Congés en attente', description: 'Demandes de congé à approuver par pharmacie.',
+    value: (p) => p.activity?.leave_pending ?? 0,
+  },
+  messages: {
+    label: 'Messages d\'équipe (30 j)', description: 'Messages échangés dans les 30 derniers jours.',
+    value: (p) => p.activity?.messages_30d ?? 0,
+  },
+};
+
+export const SuperadminOverview = ({ pharmacies: clientPharmacies }: { pharmacies: ServerPharmacy[] }): JSX.Element => {
   const { token } = useAuth();
-  const { state } = useHR();
   const headers = { Authorization: `Bearer ${token ?? ''}` };
   const [pharmacies, setPharmacies] = useState<OverviewPharmacy[]>([]);
   const [accounts, setAccounts] = useState<OverviewAccount[]>([]);
   const [senderEmail, setSenderEmail] = useState('');
   const [senderName, setSenderName] = useState('Arrière Plan');
   const [defaultSender, setDefaultSender] = useState('');
+  const [detailMetric, setDetailMetric] = useState<string | null>(null);
 
   useEffect(() => {
     axios.get<{ pharmacies: OverviewPharmacy[]; accounts?: OverviewAccount[] }>(`${API}/superadmin/overview`, { headers })
@@ -46,7 +96,7 @@ export const SuperadminOverview = (): JSX.Element => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const pharmacyName = (id: string): string => state.pharmacies.find((p) => p.id === id)?.name ?? (id || '—');
+  const pharmacyName = (id: string): string => clientPharmacies.find((p) => p.id === id)?.name ?? (id || '—');
 
   const totalEmployees = pharmacies.reduce((s, p) => s + p.accounts.employees, 0);
   const totalLicenses = pharmacies.reduce((s, p) => s + p.licenses.total, 0);
@@ -70,17 +120,52 @@ export const SuperadminOverview = (): JSX.Element => {
   return (
     <>
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-4" data-testid="overview-stats">
-        <StatCard label="Employés gérés" value={String(totalEmployees)} icon={UsersRound} hint="Comptes employés réels" />
-        <StatCard label="Licences suivies" value={String(totalLicenses)} icon={BadgeCheck} hint="Toutes pharmacies" />
-        <StatCard label="Alertes licences" value={String(totalAlerts)} icon={AlertTriangle} hint="≤ 30 jours ou expirées" />
-        <StatCard label="Formations publiées" value={String(totalPublished)} icon={GraduationCap} hint="Générées par IA" />
+        <StatCard label="Employés gérés" value={String(totalEmployees)} icon={UsersRound} hint="Détail par pharmacie" testId="stat-employees" onClick={() => setDetailMetric('employees')} />
+        <StatCard label="Licences suivies" value={String(totalLicenses)} icon={BadgeCheck} hint="Détail par pharmacie" testId="stat-licenses" onClick={() => setDetailMetric('licenses')} />
+        <StatCard label="Alertes licences" value={String(totalAlerts)} icon={AlertTriangle} hint="≤ 30 jours ou expirées — détail" testId="stat-alerts" onClick={() => setDetailMetric('alerts')} />
+        <StatCard label="Formations publiées" value={String(totalPublished)} icon={GraduationCap} hint="Détail par pharmacie" testId="stat-trainings" onClick={() => setDetailMetric('trainings')} />
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-10" data-testid="overview-activity-stats">
-        <StatCard label="Quarts à venir" value={String(totalUpcomingShifts)} icon={CalendarClock} hint="Planifiés dès aujourd'hui" />
-        <StatCard label="Heures punchées" value={`${totalPunchHours.toLocaleString('fr-CA')} h`} icon={Fingerprint} hint="30 derniers jours" />
-        <StatCard label="Congés en attente" value={String(totalLeavePending)} icon={TreePalm} hint="À approuver" />
-        <StatCard label="Messages d'équipe" value={String(totalMessages)} icon={MessagesSquare} hint="30 derniers jours" />
+        <StatCard label="Quarts à venir" value={String(totalUpcomingShifts)} icon={CalendarClock} hint="Détail par pharmacie" testId="stat-shifts" onClick={() => setDetailMetric('shifts')} />
+        <StatCard label="Heures punchées" value={`${totalPunchHours.toLocaleString('fr-CA')} h`} icon={Fingerprint} hint="30 derniers jours — détail" testId="stat-punch" onClick={() => setDetailMetric('punch')} />
+        <StatCard label="Congés en attente" value={String(totalLeavePending)} icon={TreePalm} hint="À approuver — détail" testId="stat-leave" onClick={() => setDetailMetric('leave')} />
+        <StatCard label="Messages d'équipe" value={String(totalMessages)} icon={MessagesSquare} hint="30 derniers jours — détail" testId="stat-messages" onClick={() => setDetailMetric('messages')} />
       </div>
+
+      <Dialog open={detailMetric !== null} onOpenChange={(o) => !o && setDetailMetric(null)}>
+        <DialogContent data-testid="metric-detail-dialog" className="max-w-md max-h-[85vh] overflow-y-auto">
+          {detailMetric && METRICS[detailMetric] && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="font-heading">{METRICS[detailMetric].label}</DialogTitle>
+                <DialogDescription>{METRICS[detailMetric].description}</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-2">
+                {[...pharmacies]
+                  .sort((a, b) => METRICS[detailMetric].value(b) - METRICS[detailMetric].value(a))
+                  .map((p) => {
+                    const def = METRICS[detailMetric];
+                    const v = def.value(p);
+                    return (
+                      <div key={p.pharmacy_id} data-testid={`metric-row-${p.pharmacy_id}`} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-4 py-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-slate-800 truncate">{pharmacyName(p.pharmacy_id)}</p>
+                          {def.extra && <p className="text-xs text-slate-500 truncate">{def.extra(p)}</p>}
+                        </div>
+                        <span className={`shrink-0 font-heading text-lg font-extrabold ${v > 0 ? 'text-slate-900' : 'text-slate-300'}`}>
+                          {def.format ? def.format(v) : v}
+                        </span>
+                      </div>
+                    );
+                  })}
+                {pharmacies.length === 0 && (
+                  <p className="text-sm text-slate-500 text-center py-4">Aucune donnée pour le moment.</p>
+                )}
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <div className="bg-white rounded-xl border border-slate-200 p-7 mb-10" data-testid="superadmin-overview-panel">
         <h2 className="font-heading text-base font-bold text-slate-900 inline-flex items-center gap-2 mb-5">

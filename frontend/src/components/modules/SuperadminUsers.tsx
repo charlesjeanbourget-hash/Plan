@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { UserPlus, KeyRound, Trash2, Copy, LifeBuoy } from 'lucide-react';
+import { UserPlus, KeyRound, Trash2, Copy, LifeBuoy, Settings2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -48,6 +48,12 @@ export const SuperadminUsers = ({ pharmacies }: { pharmacies: ServerPharmacy[] }
   const [pharmacyId, setPharmacyId] = useState('');
   const [credentials, setCredentials] = useState<{ email: string; password: string } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ManagedUser | null>(null);
+  const [manageTarget, setManageTarget] = useState<ManagedUser | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editRole, setEditRole] = useState<Role>('admin');
+  const [editPharmacy, setEditPharmacy] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const refresh = useCallback(async (): Promise<void> => {
     try {
@@ -73,6 +79,39 @@ export const SuperadminUsers = ({ pharmacies }: { pharmacies: ServerPharmacy[] }
       await refresh();
     } catch (err) {
       toast.error(apiError(err));
+    }
+  };
+
+  const openManage = (u: ManagedUser): void => {
+    setManageTarget(u);
+    setEditName(u.name);
+    setEditEmail(u.email);
+    setEditRole(u.role);
+    setEditPharmacy(u.pharmacy_id ?? '');
+  };
+
+  const saveAccount = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
+    e.preventDefault();
+    if (!manageTarget) return;
+    if (editRole !== 'superadmin' && !editPharmacy) {
+      toast.error('Une pharmacie doit être assignée à ce compte (isolation des données).');
+      return;
+    }
+    setSaving(true);
+    try {
+      await axios.put(`${API}/admin/users/${manageTarget.id}`, {
+        name: editName,
+        email: editEmail,
+        role: editRole,
+        pharmacy_id: editRole === 'superadmin' ? null : editPharmacy,
+      }, { headers });
+      toast.success('Compte mis à jour.');
+      setManageTarget(null);
+      await refresh();
+    } catch (err) {
+      toast.error(apiError(err));
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -150,7 +189,37 @@ export const SuperadminUsers = ({ pharmacies }: { pharmacies: ServerPharmacy[] }
       <p className="text-xs text-slate-500 mb-5">
         Créez, suspendez ou supprimez des comptes et réinitialisez les mots de passe pour dépanner les admins à distance. Chaque action est journalisée.
       </p>
-      <div className="overflow-x-auto">
+      {/* Cartes mobiles */}
+      <div className="sm:hidden space-y-3" data-testid="users-mobile-list">
+        {users.map((u) => (
+          <div key={u.id} data-testid={`user-card-${u.email}`} className="rounded-xl border border-slate-200 p-4">
+            <div className="flex items-start justify-between gap-2 mb-2">
+              <div className="min-w-0">
+                <p className="font-semibold text-slate-800 truncate">{u.name}</p>
+                <p className="text-xs text-slate-500 truncate">{u.email}</p>
+              </div>
+              <span className={`shrink-0 inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${ROLE_STYLES[u.role]}`}>
+                {ROLE_LABELS[u.role]}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-2 text-xs text-slate-500 mb-3">
+              <span className="truncate">{u.role === 'superadmin' ? 'Plateforme' : pharmacyName(u.pharmacy_id)}</span>
+              <span className={u.suspended ? 'text-red-600 font-semibold' : 'text-emerald-700'}>
+                {u.suspended ? 'Suspendu' : 'Actif'}
+              </span>
+            </div>
+            <Button
+              data-testid={`manage-user-mobile-${u.email}`}
+              size="sm" variant="outline" className="w-full rounded-full text-xs"
+              onClick={() => openManage(u)}
+            >
+              <Settings2 className="w-3.5 h-3.5 mr-1" /> Gérer le compte
+            </Button>
+          </div>
+        ))}
+      </div>
+
+      <div className="hidden sm:block overflow-x-auto">
         <table className="w-full text-sm min-w-[900px]">
           <thead>
             <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-[0.15em] text-slate-500">
@@ -210,6 +279,13 @@ export const SuperadminUsers = ({ pharmacies }: { pharmacies: ServerPharmacy[] }
                 </td>
                 <td className="p-3 text-right">
                   <div className="flex justify-end gap-2">
+                    <Button
+                      data-testid={`manage-user-${u.email}`}
+                      size="sm" variant="outline" className="rounded-full text-xs"
+                      onClick={() => openManage(u)}
+                    >
+                      <Settings2 className="w-3.5 h-3.5 mr-1" /> Gérer
+                    </Button>
                     <Button
                       data-testid={`reset-password-${u.email}`}
                       size="sm" variant="outline" className="rounded-full text-xs"
@@ -296,6 +372,91 @@ export const SuperadminUsers = ({ pharmacies }: { pharmacies: ServerPharmacy[] }
           <Button data-testid="copy-credentials-button" onClick={copyCredentials} variant="outline" className="rounded-full">
             <Copy className="w-4 h-4 mr-1" /> Copier les identifiants
           </Button>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={manageTarget !== null} onOpenChange={(o) => !o && setManageTarget(null)}>
+        <DialogContent data-testid="manage-user-dialog" className="max-w-md max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-heading">Gérer le compte</DialogTitle>
+          </DialogHeader>
+          {manageTarget && (
+            <div className="space-y-5">
+              <form onSubmit={(e) => void saveAccount(e)} className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Nom complet</Label>
+                  <Input data-testid="edit-user-name-input" value={editName} onChange={(e) => setEditName(e.target.value)} required />
+                </div>
+                <div className="space-y-2">
+                  <Label>Courriel</Label>
+                  <Input data-testid="edit-user-email-input" type="email" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} required />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Rôle</Label>
+                    <Select value={editRole} onValueChange={(v) => setEditRole(v as Role)} disabled={manageTarget.id === currentUser?.id}>
+                      <SelectTrigger data-testid="edit-user-role-select"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="admin">Admin (propriétaire)</SelectItem>
+                        <SelectItem value="manager">Gestionnaire</SelectItem>
+                        <SelectItem value="employee">Employé(e)</SelectItem>
+                        <SelectItem value="superadmin">Superadmin</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {editRole !== 'superadmin' && (
+                    <div className="space-y-2">
+                      <Label>Pharmacie <span className="text-red-500">*</span></Label>
+                      <Select value={editPharmacy} onValueChange={setEditPharmacy}>
+                        <SelectTrigger data-testid="edit-user-pharmacy-select"><SelectValue placeholder="Choisir" /></SelectTrigger>
+                        <SelectContent>
+                          {pharmacies.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </div>
+                <Button data-testid="save-user-button" type="submit" disabled={saving} className="w-full rounded-full bg-emerald-600 hover:bg-emerald-700">
+                  {saving ? 'Enregistrement…' : 'Enregistrer les modifications'}
+                </Button>
+              </form>
+
+              <div className="border-t border-slate-200 pt-4 space-y-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">Support à distance</p>
+                <Button
+                  data-testid="manage-reset-password-button"
+                  variant="outline" className="w-full rounded-full text-sm"
+                  onClick={() => { void resetPassword(manageTarget); setManageTarget(null); }}
+                >
+                  <KeyRound className="w-4 h-4 mr-1.5" /> Réinitialiser le mot de passe
+                </Button>
+                <div className="flex items-center justify-between rounded-lg border border-slate-200 px-4 py-3">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-800">{manageTarget.suspended ? 'Compte suspendu' : 'Compte actif'}</p>
+                    <p className="text-xs text-slate-500">La suspension bloque immédiatement la connexion.</p>
+                  </div>
+                  <Switch
+                    data-testid="manage-suspend-toggle"
+                    checked={!manageTarget.suspended}
+                    disabled={manageTarget.id === currentUser?.id}
+                    onCheckedChange={(checked) => {
+                      void toggleSuspend(manageTarget, !checked);
+                      setManageTarget({ ...manageTarget, suspended: !checked });
+                    }}
+                  />
+                </div>
+                <Button
+                  data-testid="manage-delete-button"
+                  variant="outline"
+                  disabled={manageTarget.id === currentUser?.id}
+                  className="w-full rounded-full text-sm text-red-600 border-red-200 hover:bg-red-50"
+                  onClick={() => { setDeleteTarget(manageTarget); setManageTarget(null); }}
+                >
+                  <Trash2 className="w-4 h-4 mr-1.5" /> Supprimer ce compte
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 
