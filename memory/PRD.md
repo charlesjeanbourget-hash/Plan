@@ -574,3 +574,10 @@ Bug rapporté : « les données du superadmin se retrouvent dans les nouveaux co
 4. Correctif : noms de pharmacies de la Vue d'ensemble désormais depuis la collection serveur (prop pharmacies) — affichaient l'id brut depuis l'isolation ; DELETE /api/superadmin/pharmacies/{id} ajouté (400 si comptes rattachés) ; pharmacies de test purgées (base : ph1 + Pharmacie Test Léo, 7 comptes).
 - PROD : le client doit REDÉPLOYER pour recevoir ces changements + l'isolation (itération 48).
 
+
+
+## Itération 50 (22 août 2026) — Dossiers Employés : page de profil dédiée — testée (screenshots mobile 390px + desktop, tsc OK)
+- Le clic sur un employé ouvre désormais une PAGE de profil dédiée (employee-profile-page) au lieu d'afficher le profil sous la liste ; bouton « Revenir à la liste des employés » (back-to-employees-list) en haut.
+- Vue liste : pleine largeur, grille responsive (1/2/3 colonnes), chevron sur chaque carte ; le ModuleHeader (Succursales/Importer/Matricules/Nouvel employé) ne s'affiche que sur la liste.
+- Comportements : nouvel employé créé → ouvre sa page ; suppression → retour à la liste ; navigation croisée (consumeNavPayload employeeId) → ouvre directement la page du bon employé.
+- PROD : redéploiement requis pour pousser ce changement.

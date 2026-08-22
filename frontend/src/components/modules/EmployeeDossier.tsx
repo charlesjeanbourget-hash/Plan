@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, Mail, Phone, MapPin, Trash2, Hash, UserX, Pencil, FileSpreadsheet, ListPlus, KeySquare } from 'lucide-react';
+import { Plus, Mail, Phone, MapPin, Trash2, Hash, UserX, Pencil, FileSpreadsheet, ListPlus, KeySquare, ArrowLeft, ChevronRight } from 'lucide-react';
 import { CustomFieldsPanel } from '@/components/CustomFieldsPanel';
 import { ModuleAccessPanel } from '@/components/ModuleAccessPanel';
 import { IncompatibilitiesPanel } from '@/components/IncompatibilitiesPanel';
@@ -27,7 +27,7 @@ export default function EmployeeDossier(): JSX.Element {
   const { state, addEmployee, deleteEmployee, updateEmployee, anonymizeEmployee } = useHR();
   const { token } = useAuth();
   const [navPayload] = useState(() => consumeNavPayload());
-  const [selectedId, setSelectedId] = useState<string | null>(navPayload?.employeeId ?? state.employees[0]?.id ?? null);
+  const [selectedId, setSelectedId] = useState<string | null>(navPayload?.employeeId ?? null);
   const [branchFilter, setBranchFilter] = useState('all');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [anonymizeTarget, setAnonymizeTarget] = useState<Employee | null>(null);
@@ -120,7 +120,7 @@ export default function EmployeeDossier(): JSX.Element {
 
   const handleDelete = (id: string): void => {
     deleteEmployee(id);
-    setSelectedId(state.employees.find((e) => e.id !== id)?.id ?? null);
+    setSelectedId(null);
     toast.success('Employé retiré du dossier.');
   };
 
@@ -141,65 +141,45 @@ export default function EmployeeDossier(): JSX.Element {
 
   return (
     <div data-testid="employees-module">
-      <ModuleHeader
-        title="Dossiers Employés"
-        subtitle={`${state.employees.length} membres dans votre équipe.`}
-        action={
-          <div className="flex flex-wrap gap-2">
-            <Button data-testid="manage-branches-button" variant="outline" onClick={() => setBranchesOpen(true)} className="rounded-full border-bronze-300 text-bronze-800 hover:bg-bronze-50">
-              <MapPin className="w-4 h-4 mr-1" /> Succursales
-            </Button>
-            <Button data-testid="import-employees-button" variant="outline" onClick={() => setImportOpen(true)} className="rounded-full border-bronze-300 text-bronze-800 hover:bg-bronze-50">
-              <FileSpreadsheet className="w-4 h-4 mr-1" /> Importer (Excel)
-            </Button>
-            <Button data-testid="payroll-numbers-button" variant="outline" onClick={() => setPayrollNumbersOpen(true)} className="rounded-full border-bronze-300 text-bronze-800 hover:bg-bronze-50">
-              <Hash className="w-4 h-4 mr-1" /> Matricules paie
-            </Button>
-            <Button data-testid="add-employee-button" onClick={() => setDialogOpen(true)} className="rounded-full bg-emerald-600 hover:bg-emerald-700">
-              <Plus className="w-4 h-4 mr-1" /> Nouvel employé
-            </Button>
-          </div>
-        }
-      />
+      {!selected && (
+        <ModuleHeader
+          title="Dossiers Employés"
+          subtitle={`${state.employees.length} membres dans votre équipe.`}
+          action={
+            <div className="flex flex-wrap gap-2">
+              <Button data-testid="manage-branches-button" variant="outline" onClick={() => setBranchesOpen(true)} className="rounded-full border-bronze-300 text-bronze-800 hover:bg-bronze-50">
+                <MapPin className="w-4 h-4 mr-1" /> Succursales
+              </Button>
+              <Button data-testid="import-employees-button" variant="outline" onClick={() => setImportOpen(true)} className="rounded-full border-bronze-300 text-bronze-800 hover:bg-bronze-50">
+                <FileSpreadsheet className="w-4 h-4 mr-1" /> Importer (Excel)
+              </Button>
+              <Button data-testid="payroll-numbers-button" variant="outline" onClick={() => setPayrollNumbersOpen(true)} className="rounded-full border-bronze-300 text-bronze-800 hover:bg-bronze-50">
+                <Hash className="w-4 h-4 mr-1" /> Matricules paie
+              </Button>
+              <Button data-testid="add-employee-button" onClick={() => setDialogOpen(true)} className="rounded-full bg-emerald-600 hover:bg-emerald-700">
+                <Plus className="w-4 h-4 mr-1" /> Nouvel employé
+              </Button>
+            </div>
+          }
+        />
+      )}
       <PayrollNumbersDialog open={payrollNumbersOpen} onClose={() => setPayrollNumbersOpen(false)} />
       <BranchManagerDialog open={branchesOpen} onClose={() => setBranchesOpen(false)} />
       <EmployeeImportDialog open={importOpen} onClose={() => setImportOpen(false)} />
       {state.employees.length === 0 ? (
         <EmptyState text="Aucun employé. Ajoutez votre premier membre d'équipe." />
-      ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="space-y-2">
-            <Select value={branchFilter} onValueChange={setBranchFilter}>
-              <SelectTrigger data-testid="employees-branch-filter" className="w-full mb-2">
-                <SelectValue placeholder="Toutes les succursales" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Toutes les succursales</SelectItem>
-                {state.branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            {state.employees.filter((e) => branchFilter === 'all' || e.branchId === branchFilter || (e.branchIds ?? []).includes(branchFilter)).map((emp) => (
-              <button
-                key={emp.id}
-                data-testid={`employee-list-item-${emp.id}`}
-                onClick={() => setSelectedId(emp.id)}
-                className={`w-full flex items-center gap-3 p-4 rounded-xl border text-left transition-colors ${
-                  selectedId === emp.id ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white hover:border-slate-300'
-                }`}
-              >
-                <div className={`w-10 h-10 rounded-full ${emp.avatarColor} flex items-center justify-center text-white text-sm font-bold shrink-0`}>
-                  {emp.firstName[0]}{emp.lastName[0]}
-                </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-slate-900 truncate">{emp.firstName} {emp.lastName}</p>
-                  <p className="text-xs text-slate-500">{emp.position}</p>
-                </div>
-              </button>
-            ))}
-          </div>
-
-          {selected && (
-            <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 p-8" data-testid="employee-detail-panel">
+      ) : selected ? (
+        <div data-testid="employee-profile-page">
+          <Button
+            data-testid="back-to-employees-list"
+            variant="outline"
+            onClick={() => setSelectedId(null)}
+            className="rounded-full mb-6 border-slate-300 text-slate-700 hover:bg-slate-50"
+          >
+            <ArrowLeft className="w-4 h-4 mr-1.5" /> Revenir à la liste des employés
+          </Button>
+          <div className="space-y-6">
+            <div className="bg-white rounded-xl border border-slate-200 p-6 sm:p-8" data-testid="employee-detail-panel">
               <div className="flex items-start justify-between mb-8">
                 <div className="flex items-center gap-4">
                   <div className={`w-14 h-14 rounded-full ${selected.avatarColor} flex items-center justify-center text-white text-lg font-bold`}>
@@ -274,38 +254,49 @@ export default function EmployeeDossier(): JSX.Element {
                 )}
               </div>
             </div>
-          )}
-          {selected && (
-            <div className="lg:col-span-3">
-              <SalaryHistory employeeId={selected.id} currentRate={selected.hourlyRate} />
-            </div>
-          )}
-          {selected && (
-            <div className="lg:col-span-3">
-              <CollapsibleSection id="dossier-module-access" title="Accès aux modules (rôles personnalisés)" icon={KeySquare}>
-                <ModuleAccessPanel employeeId={selected.id} />
-              </CollapsibleSection>
-            </div>
-          )}
-          {selected && (
-            <div className="lg:col-span-3">
-              <CollapsibleSection id="dossier-custom-fields" title="Champs RH personnalisés" icon={ListPlus}>
-                <CustomFieldsPanel employeeId={selected.id} />
-              </CollapsibleSection>
-            </div>
-          )}
-          {selected && (
-            <div className="lg:col-span-3">
-              <CollapsibleSection id="dossier-incompat" title="Incompatibilités de travail" icon={UserX}>
-                <IncompatibilitiesPanel employeeId={selected.id} />
-              </CollapsibleSection>
-            </div>
-          )}
-          {selected && (
-            <div className="lg:col-span-3">
-              <ProfileEditor employeeId={selected.id} employeeName={`${selected.firstName} ${selected.lastName}`} canManageCode />
-            </div>
-          )}
+            <SalaryHistory employeeId={selected.id} currentRate={selected.hourlyRate} />
+            <CollapsibleSection id="dossier-module-access" title="Accès aux modules (rôles personnalisés)" icon={KeySquare}>
+              <ModuleAccessPanel employeeId={selected.id} />
+            </CollapsibleSection>
+            <CollapsibleSection id="dossier-custom-fields" title="Champs RH personnalisés" icon={ListPlus}>
+              <CustomFieldsPanel employeeId={selected.id} />
+            </CollapsibleSection>
+            <CollapsibleSection id="dossier-incompat" title="Incompatibilités de travail" icon={UserX}>
+              <IncompatibilitiesPanel employeeId={selected.id} />
+            </CollapsibleSection>
+            <ProfileEditor employeeId={selected.id} employeeName={`${selected.firstName} ${selected.lastName}`} canManageCode />
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <Select value={branchFilter} onValueChange={setBranchFilter}>
+            <SelectTrigger data-testid="employees-branch-filter" className="w-full sm:max-w-xs">
+              <SelectValue placeholder="Toutes les succursales" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Toutes les succursales</SelectItem>
+              {state.branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+            {state.employees.filter((e) => branchFilter === 'all' || e.branchId === branchFilter || (e.branchIds ?? []).includes(branchFilter)).map((emp) => (
+              <button
+                key={emp.id}
+                data-testid={`employee-list-item-${emp.id}`}
+                onClick={() => setSelectedId(emp.id)}
+                className="w-full flex items-center gap-3 p-4 rounded-xl border border-slate-200 bg-white text-left transition-all hover:border-emerald-400 hover:shadow-sm"
+              >
+                <div className={`w-10 h-10 rounded-full ${emp.avatarColor} flex items-center justify-center text-white text-sm font-bold shrink-0`}>
+                  {emp.firstName[0]}{emp.lastName[0]}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-slate-900 truncate">{emp.firstName} {emp.lastName}</p>
+                  <p className="text-xs text-slate-500">{emp.position}</p>
+                </div>
+                <ChevronRight className="w-4 h-4 text-slate-300 shrink-0" />
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
