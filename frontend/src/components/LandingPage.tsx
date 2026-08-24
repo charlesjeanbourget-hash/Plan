@@ -291,6 +291,7 @@ export default function LandingPage({ onNavigate }: Props): JSX.Element {
               <button data-testid="footer-privacy-link" onClick={() => onNavigate('privacy')} className="text-left hover:text-emerald-700 transition-colors">Politique de confidentialité</button>
               <button data-testid="footer-security-link" onClick={() => onNavigate('security')} className="text-left hover:text-emerald-700 transition-colors">Sécurité et confidentialité</button>
               <button data-testid="footer-testimonials-link" onClick={() => scrollToId('demo')} className="text-left hover:text-emerald-700 transition-colors">Nous joindre</button>
+              <a data-testid="footer-contact-email" href="mailto:info@arriereplanrh.com" className="text-left font-semibold text-emerald-700 hover:text-emerald-800 transition-colors">info@arriereplanrh.com</a>
             </div>
           </div>
         </div>

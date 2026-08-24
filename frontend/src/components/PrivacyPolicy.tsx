@@ -11,7 +11,7 @@ const SECTIONS: { title: string; body: string[] }[] = [
     title: '1. Responsable de la protection des renseignements personnels',
     body: [
       'Conformément à la Loi 25 (Loi modernisant des dispositions législatives en matière de protection des renseignements personnels), le responsable de la protection des renseignements personnels d\'Arrière Plan est :',
-      'Charles Jean-Bourget — charlesjeanbourget@gmail.com',
+      'Charles Jean-Bourget — info@arriereplanrh.com',
       'Toute question, demande d\'accès, de rectification ou de suppression de renseignements personnels peut lui être adressée à cette adresse.',
     ],
   },

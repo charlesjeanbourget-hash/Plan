@@ -97,7 +97,7 @@ card_table([
     ("Projet évalué", "Hébergement et exploitation de la plateforme Arrière Plan (système d'information de "
      "ressources humaines — SIRH — pour pharmacies) sur une infrastructure infonuagique située hors Québec."),
     ("Organisation", "Arrière Plan (arriereplanrh.com)"),
-    ("Responsable de la protection des renseignements personnels", "Charles Jean-Bourget — charlesjeanbourget@gmail.com"),
+    ("Responsable de la protection des renseignements personnels", "Charles Jean-Bourget — info@arriereplanrh.com"),
     ("Date de l'évaluation", "20 août 2026"),
     ("Déclencheur", "Article 17 de la Loi 25 : évaluation obligatoire avant toute communication de renseignements "
      "personnels à l'extérieur du Québec."),
