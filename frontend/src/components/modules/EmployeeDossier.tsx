@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, Mail, Phone, MapPin, Trash2, Hash, UserX, Pencil, FileSpreadsheet, ListPlus, KeySquare, ArrowLeft, ChevronRight } from 'lucide-react';
+import { Plus, Mail, Phone, MapPin, Trash2, Hash, UserX, Pencil, FileSpreadsheet, ListPlus, KeySquare, ArrowLeft, ChevronRight, Search } from 'lucide-react';
 import { CustomFieldsPanel } from '@/components/CustomFieldsPanel';
 import { ModuleAccessPanel } from '@/components/ModuleAccessPanel';
 import { IncompatibilitiesPanel } from '@/components/IncompatibilitiesPanel';
@@ -29,6 +29,15 @@ export default function EmployeeDossier(): JSX.Element {
   const [navPayload] = useState(() => consumeNavPayload());
   const [selectedId, setSelectedId] = useState<string | null>(navPayload?.employeeId ?? null);
   const [branchFilter, setBranchFilter] = useState('all');
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const norm = (s: string): string => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const filteredEmployees = state.employees.filter((e) => {
+    if (branchFilter !== 'all' && e.branchId !== branchFilter && !(e.branchIds ?? []).includes(branchFilter)) return false;
+    const q = norm(searchQuery.trim());
+    if (!q) return true;
+    return norm(`${e.firstName} ${e.lastName} ${e.position ?? ''} ${e.email ?? ''}`).includes(q);
+  });
   const [dialogOpen, setDialogOpen] = useState(false);
   const [anonymizeTarget, setAnonymizeTarget] = useState<Employee | null>(null);
   const [firstName, setFirstName] = useState('');
@@ -269,17 +278,29 @@ export default function EmployeeDossier(): JSX.Element {
         </div>
       ) : (
         <div className="space-y-4">
-          <Select value={branchFilter} onValueChange={setBranchFilter}>
-            <SelectTrigger data-testid="employees-branch-filter" className="w-full sm:max-w-xs">
-              <SelectValue placeholder="Toutes les succursales" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Toutes les succursales</SelectItem>
-              {state.branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <div className="relative flex-1 sm:max-w-md">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+              <Input
+                data-testid="employee-search-input"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Rechercher un employé par nom, poste ou courriel…"
+                className="pl-9"
+              />
+            </div>
+            <Select value={branchFilter} onValueChange={setBranchFilter}>
+              <SelectTrigger data-testid="employees-branch-filter" className="w-full sm:max-w-xs">
+                <SelectValue placeholder="Toutes les succursales" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Toutes les succursales</SelectItem>
+                {state.branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-            {state.employees.filter((e) => branchFilter === 'all' || e.branchId === branchFilter || (e.branchIds ?? []).includes(branchFilter)).map((emp) => (
+            {filteredEmployees.map((emp) => (
               <button
                 key={emp.id}
                 data-testid={`employee-list-item-${emp.id}`}
@@ -297,6 +318,11 @@ export default function EmployeeDossier(): JSX.Element {
               </button>
             ))}
           </div>
+          {filteredEmployees.length === 0 && (
+            <p data-testid="employee-search-empty" className="text-sm text-slate-500 text-center py-8">
+              Aucun employé ne correspond à « {searchQuery} ».
+            </p>
+          )}
         </div>
       )}
 
