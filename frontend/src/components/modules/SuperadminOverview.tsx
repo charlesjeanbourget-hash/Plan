@@ -78,6 +78,21 @@ export const SuperadminOverview = ({ pharmacies: clientPharmacies }: { pharmacie
   const [senderName, setSenderName] = useState('Arrière Plan');
   const [defaultSender, setDefaultSender] = useState('');
   const [detailMetric, setDetailMetric] = useState<string | null>(null);
+  const [testEmail, setTestEmail] = useState('');
+  const [sendingTest, setSendingTest] = useState(false);
+
+  const sendTest = async (): Promise<void> => {
+    setSendingTest(true);
+    try {
+      const res = await axios.post<{ sender: string; recipient: string }>(`${API}/superadmin/email-test`, { to: testEmail }, { headers });
+      toast.success(`Courriel de test envoyé à ${res.data.recipient} (expéditeur : ${res.data.sender}).`);
+    } catch (err) {
+      const detail = axios.isAxiosError(err) && err.response ? (err.response.data as { detail?: string }).detail : null;
+      toast.error(detail ?? 'Échec de l\'envoi du courriel de test.', { duration: 12000 });
+    } finally {
+      setSendingTest(false);
+    }
+  };
 
   useEffect(() => {
     axios.get<{ pharmacies: OverviewPharmacy[]; accounts?: OverviewAccount[] }>(`${API}/superadmin/overview`, { headers })
@@ -321,6 +336,27 @@ export const SuperadminOverview = ({ pharmacies: clientPharmacies }: { pharmacie
             Enregistrer
           </Button>
         </form>
+        {(!senderEmail || senderEmail.endsWith('resend.dev')) && (
+          <div data-testid="resend-test-mode-warning" className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+            <b>Mode test Resend :</b> avec l'expéditeur par défaut ({defaultSender || 'onboarding@resend.dev'}), les courriels
+            (réinitialisations de mot de passe, rapports, rappels) ne sont livrés qu'à l'adresse du propriétaire du compte Resend.
+            Vérifiez votre domaine sur resend.com/domains puis enregistrez un expéditeur de ce domaine ci-dessus.
+          </div>
+        )}
+        <div className="mt-5 pt-4 border-t border-slate-100 flex flex-col sm:flex-row gap-3 sm:items-end">
+          <div className="space-y-2 flex-1">
+            <Label>Tester l'envoi vers</Label>
+            <Input data-testid="test-email-input" type="email" placeholder="votre@courriel.ca" value={testEmail} onChange={(e) => setTestEmail(e.target.value)} />
+          </div>
+          <Button
+            data-testid="send-test-email-button"
+            type="button" variant="outline" disabled={sendingTest || !testEmail}
+            className="rounded-full"
+            onClick={() => void sendTest()}
+          >
+            {sendingTest ? 'Envoi…' : 'Envoyer un courriel de test'}
+          </Button>
+        </div>
       </div>
     </>
   );

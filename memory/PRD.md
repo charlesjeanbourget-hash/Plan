@@ -581,3 +581,9 @@ Bug rapporté : « les données du superadmin se retrouvent dans les nouveaux co
 - Vue liste : pleine largeur, grille responsive (1/2/3 colonnes), chevron sur chaque carte ; le ModuleHeader (Succursales/Importer/Matricules/Nouvel employé) ne s'affiche que sur la liste.
 - Comportements : nouvel employé créé → ouvre sa page ; suppression → retour à la liste ; navigation croisée (consumeNavPayload employeeId) → ouvre directement la page du bon employé.
 - PROD : redéploiement requis pour pousser ce changement.
+
+
+## Itération 51 (24 août 2026) — Diagnostic « courriels de réinitialisation non envoyés » — cause : Resend en MODE TEST (pas un bug de code)
+- Reproduit : POST /auth/forgot-password → Resend répond « You can only send testing emails to your own email address (charlesjeanbourget@gmail.com)… verify a domain at resend.com/domains ». L'envoi vers le proprio du compte Resend fonctionne (vérifié). L'erreur était avalée silencieusement (logger.warning).
+- Ajouts : POST /api/superadmin/email-test {to} (superadmin) — remonte l'erreur Resend EXACTE en 400 ; panneau expéditeur (Vue d'ensemble) : bannière « Mode test Resend » (visible si expéditeur vide ou @resend.dev) + champ « Tester l'envoi vers » + bouton avec toast détaillé (12 s).
+- ACTIONS UTILISATEUR (à faire côté Resend + app en PROD) : 1) resend.com/domains → ajouter arriereplanrh.com → poser les enregistrements DNS (SPF/DKIM) chez le registraire → attendre « Verified » ; 2) dans l'app, panneau expéditeur → enregistrer ex. nepasrepondre@arriereplanrh.com ; 3) bouton « Envoyer un courriel de test » pour valider. NB : l'expéditeur est stocké en DB (email_settings) — à configurer dans l'app de PROD aussi ; le bouton de test nécessite un redéploiement.

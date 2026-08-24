@@ -1054,6 +1054,31 @@ async def sa_delete_pharmacy(pharmacy_id: str, su: dict = Depends(require_supera
     return {"status": "supprimé"}
 
 
+class EmailTestIn(BaseModel):
+    to: str
+
+
+@api_router.post("/superadmin/email-test")
+async def sa_email_test(payload: EmailTestIn, su: dict = Depends(require_superadmin)):
+    to = payload.to.strip().lower()
+    if not to or "@" not in to:
+        raise HTTPException(status_code=400, detail="Adresse courriel invalide.")
+    api_key = os.environ.get("RESEND_API_KEY", "")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="Clé API Resend manquante (RESEND_API_KEY dans backend/.env).")
+    resend.api_key = api_key
+    sender = await get_sender()
+    try:
+        await asyncio.to_thread(resend.Emails.send, {
+            "from": sender, "to": [to],
+            "subject": "Courriel de test — Arrière Plan",
+            "html": "<p>Ceci est un courriel de test envoyé depuis Arrière Plan. "
+                    "Si vous le recevez, vos envois (réinitialisations de mot de passe, rapports, rappels) fonctionnent.</p>"})
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Échec de l'envoi (expéditeur {sender}) : {exc}")
+    return {"ok": True, "sender": sender, "recipient": to}
+
+
 # ==================== Synchronisation de l'état RH entre appareils ====================
 
 class HRStateIn(BaseModel):
