@@ -594,3 +594,9 @@ Bug rapporté : « les données du superadmin se retrouvent dans les nouveaux co
 - Expéditeur officiel configuré : email_settings DB (préversion) = info@arriereplanrh.com ; backend/.env SENDER_EMAIL=info@arriereplanrh.com (fallback DEFAULT_SENDER).
 - Adresse de contact affichée partout : PrivacyPolicy.tsx (responsable Loi 25 : Charles Jean-Bourget — info@arriereplanrh.com), footer landing (lien mailto footer-contact-email), ÉFVP PDF régénéré (scripts/gen_efvp_pdf.py — plus aucune adresse gmail).
 - PROD : après redéploiement le fallback sera info@ ; SI l'app prod a déjà un expéditeur enregistré en DB, le changer dans Superadmin → Adresse d'expéditeur (DB prod séparée).
+
+
+## Itération 53 (24 août 2026) — Courriel de bienvenue automatique + vérification déploiement — testé E2E (email_sent=True création + reset ; deployment_agent = PASS)
+- `send_credentials_email()` + `welcome_email_html()` : à la CRÉATION d'un compte (POST /admin/users) ET à la RÉINITIALISATION support (POST /admin/users/{id}/reset-password), le mot de passe temporaire + identifiant + lien de connexion (APP_PUBLIC_URL, défaut https://arriereplanrh.com) sont envoyés automatiquement par courriel depuis info@arriereplanrh.com. Réponse API : champ `email_sent` (best-effort, log warning si échec).
+- UI : dialogue « Identifiants temporaires » affiche « envoyés automatiquement par courriel à X » (credentials-email-sent) ou un avertissement si l'envoi a échoué (credentials-email-failed).
+- deployment_agent : PASS — aucune valeur codée en dur, .env sains, prêt pour le déploiement. L'utilisateur doit cliquer Déployer lui-même.

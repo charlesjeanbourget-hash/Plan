@@ -547,6 +547,44 @@ def reset_email_html(name: str, email: str, code: str) -> str:
     )
 
 
+APP_PUBLIC_URL = os.environ.get("APP_PUBLIC_URL", "https://arriereplanrh.com")
+
+
+def welcome_email_html(name: str, email: str, temp_password: str, reset: bool = False) -> str:
+    intro = ("Votre mot de passe a été réinitialisé par un administrateur de la plateforme."
+             if reset else "Votre compte Arrière Plan vient d'être créé.")
+    return (
+        "<div style='font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#0f172a'>"
+        f"<h2 style='color:#059669'>{'Arrière Plan — Nouveau mot de passe' if reset else 'Bienvenue sur Arrière Plan'}</h2>"
+        f"<p>Bonjour {name or ''},</p>"
+        f"<p>{intro} Voici vos informations de connexion :</p>"
+        "<table style='background:#f8fafc;border-radius:8px;width:100%;border-collapse:collapse'>"
+        f"<tr><td style='padding:10px 14px;color:#64748b'>Identifiant</td><td style='padding:10px 14px'><b>{email}</b></td></tr>"
+        f"<tr><td style='padding:10px 14px;color:#64748b'>Mot de passe temporaire</td>"
+        f"<td style='padding:10px 14px;font-family:monospace;font-size:16px'><b>{temp_password}</b></td></tr></table>"
+        f"<p>Connectez-vous sur <a href='{APP_PUBLIC_URL}' style='color:#059669'><b>{APP_PUBLIC_URL.replace('https://', '')}</b></a> — "
+        "vous devrez choisir votre propre mot de passe à la première connexion.</p>"
+        "<p style='font-size:12px;color:#94a3b8;margin-top:20px'>Si vous n'êtes pas à l'origine de cette demande, "
+        "contactez-nous à info@arriereplanrh.com.</p></div>"
+    )
+
+
+async def send_credentials_email(name: str, email: str, temp_password: str, reset: bool = False) -> bool:
+    api_key = os.environ.get("RESEND_API_KEY", "")
+    if not api_key:
+        return False
+    resend.api_key = api_key
+    try:
+        await asyncio.to_thread(resend.Emails.send, {
+            "from": await get_sender(), "to": [email],
+            "subject": "Votre nouveau mot de passe temporaire — Arrière Plan" if reset else "Vos accès Arrière Plan — Bienvenue !",
+            "html": welcome_email_html(name, email, temp_password, reset)})
+        return True
+    except Exception as exc:
+        logger.warning(f"Courriel d'accès non envoyé à {email} : {exc}")
+        return False
+
+
 @api_router.post("/auth/forgot-password")
 async def auth_forgot_password(payload: ForgotPasswordIn, request: Request):
     email = payload.email.strip().lower()
@@ -734,7 +772,8 @@ async def admin_create_user(payload: UserCreateIn, su: dict = Depends(require_su
     await db.users.insert_one(doc)
     await log_audit(su["email"], su["role"], "CREATION_COMPTE", "utilisateur", doc["id"],
                     f"Compte {payload.role} créé pour {email}", payload.pharmacy_id or "")
-    return {"user": user_public(doc), "temporary_password": temp}
+    email_sent = await send_credentials_email(payload.name, email, temp)
+    return {"user": user_public(doc), "temporary_password": temp, "email_sent": email_sent}
 
 
 @api_router.put("/admin/users/{user_id}")
@@ -780,7 +819,8 @@ async def admin_reset_password(user_id: str, su: dict = Depends(require_superadm
     await log_audit(su["email"], su["role"], "REINITIALISATION_MDP", "utilisateur", user_id,
                     f"Mot de passe temporaire généré pour {target['email']} (support à distance)",
                     target.get("pharmacy_id") or "")
-    return {"temporary_password": temp, "email": target["email"]}
+    email_sent = await send_credentials_email(target.get("name", ""), target["email"], temp, reset=True)
+    return {"temporary_password": temp, "email": target["email"], "email_sent": email_sent}
 
 
 @api_router.delete("/admin/users/{user_id}")

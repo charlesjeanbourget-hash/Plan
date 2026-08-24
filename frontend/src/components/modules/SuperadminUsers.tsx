@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { UserPlus, KeyRound, Trash2, Copy, LifeBuoy, Settings2 } from 'lucide-react';
+import { UserPlus, KeyRound, Trash2, Copy, LifeBuoy, Settings2, Mail } from 'lucide-react';
 import { toast } from 'sonner';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -46,7 +46,7 @@ export const SuperadminUsers = ({ pharmacies }: { pharmacies: ServerPharmacy[] }
   const [name, setName] = useState('');
   const [role, setRole] = useState<Role>('admin');
   const [pharmacyId, setPharmacyId] = useState('');
-  const [credentials, setCredentials] = useState<{ email: string; password: string } | null>(null);
+  const [credentials, setCredentials] = useState<{ email: string; password: string; emailSent?: boolean } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ManagedUser | null>(null);
   const [manageTarget, setManageTarget] = useState<ManagedUser | null>(null);
   const [editName, setEditName] = useState('');
@@ -122,13 +122,13 @@ export const SuperadminUsers = ({ pharmacies }: { pharmacies: ServerPharmacy[] }
       return;
     }
     try {
-      const res = await axios.post<{ user: ManagedUser; temporary_password: string }>(
+      const res = await axios.post<{ user: ManagedUser; temporary_password: string; email_sent?: boolean }>(
         `${API}/admin/users`,
         { email, name, role, pharmacy_id: role === 'superadmin' ? null : pharmacyId },
         { headers }
       );
       setCreateOpen(false);
-      setCredentials({ email: res.data.user.email, password: res.data.temporary_password });
+      setCredentials({ email: res.data.user.email, password: res.data.temporary_password, emailSent: res.data.email_sent });
       setEmail(''); setName('');
       await refresh();
     } catch (err) {
@@ -148,10 +148,10 @@ export const SuperadminUsers = ({ pharmacies }: { pharmacies: ServerPharmacy[] }
 
   const resetPassword = async (user: ManagedUser): Promise<void> => {
     try {
-      const res = await axios.post<{ temporary_password: string; email: string }>(
+      const res = await axios.post<{ temporary_password: string; email: string; email_sent?: boolean }>(
         `${API}/admin/users/${user.id}/reset-password`, {}, { headers }
       );
-      setCredentials({ email: res.data.email, password: res.data.temporary_password });
+      setCredentials({ email: res.data.email, password: res.data.temporary_password, emailSent: res.data.email_sent });
       await refresh();
     } catch (err) {
       toast.error(apiError(err));
@@ -369,6 +369,15 @@ export const SuperadminUsers = ({ pharmacies }: { pharmacies: ServerPharmacy[] }
             <p className="text-slate-700">{credentials?.email}</p>
             <p data-testid="temp-password-value" className="text-emerald-700 font-bold">{credentials?.password}</p>
           </div>
+          {credentials?.emailSent ? (
+            <p data-testid="credentials-email-sent" className="text-xs font-semibold text-emerald-700 inline-flex items-center gap-1.5">
+              <Mail className="w-3.5 h-3.5" /> Ces identifiants ont aussi été envoyés automatiquement par courriel à {credentials.email}.
+            </p>
+          ) : (
+            <p data-testid="credentials-email-failed" className="text-xs text-amber-700">
+              Le courriel automatique n'a pas pu être envoyé — transmettez ces identifiants manuellement.
+            </p>
+          )}
           <Button data-testid="copy-credentials-button" onClick={copyCredentials} variant="outline" className="rounded-full">
             <Copy className="w-4 h-4 mr-1" /> Copier les identifiants
           </Button>
