@@ -644,3 +644,8 @@ Bug rapporté : « les données du superadmin se retrouvent dans les nouveaux co
 - Corrigés et validés en UI : shift-branch-select (succursale du quart, multi-succursales), employee-branches-label (profil employé, séparateur « · »), colonne Succursale du Registre des licences, FillGapDialog (sous-titre), contraste adresse MultiBranchView (slate-500/11px), infobulle title=branchLabel sur les puces « Succursales additionnelles ».
 - Test complet : 7/7 sélecteurs + wizard + régressions = 100 %, aucune erreur console. Données ph1 restaurées après test.
 - PROD : redéploiement requis.
+
+## Itération 55 (25 août 2026) — Panneau Incompatibilités de travail amélioré — testé (screenshots + curl)
+- Signalement utilisateur : sélections invisibles/perdues après refresh. REPRODUIT EN PRÉVERSION : la persistance FONCTIONNE (toggle → relogin/refresh → sélection conservée, réciprocité OK). Le bogue vu par l'utilisateur est en PRODUCTION (build plus ancien) → REDÉPLOIEMENT REQUIS.
+- Améliorations UX livrées (IncompatibilitiesPanel.tsx réécrit) : encadré « Sélectionnés (X) » en haut (puces rouges, ✕ pour retirer), barre de recherche par nom (insensible aux accents), confirmation visuelle « ✓ Enregistré — appliqué aux deux employés » (4 s) + indicateur « Enregistrement… », liste du bas = employés non sélectionnés uniquement, max-h avec défilement.
+- data-testids : incompat-selected-box, incompat-selected-{id}, incompat-search-input, incompat-saved, incompat-saving, incompat-count, incompat-no-results.
