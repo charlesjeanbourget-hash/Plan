@@ -16,7 +16,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { Building2, Users, ShieldCheck, Plus, LayoutDashboard, MessagesSquare, AlertTriangle, KeyRound, Handshake } from 'lucide-react';
+import { Building2, Users, ShieldCheck, Plus, LayoutDashboard, MessagesSquare, AlertTriangle, KeyRound, Handshake, Trash2, Mail } from 'lucide-react';
 import { toast } from 'sonner';
 
 const PLAN_STYLES: Record<PharmacyPlan, string> = {
@@ -34,12 +34,16 @@ export interface ServerPharmacy {
   city: string;
   owner_name: string;
   admin_email: string;
-  plan: PharmacyPlan;
+  plan: PharmacyPlan | string;
   active: boolean;
   accounts_count: number;
+  plan_status?: string;
+  trial_ends_at?: string;
 }
 
 interface LiveStats { pharmacies: number; accounts: number; employees: number; managers: number; suspended: number }
+
+interface CreatedCredentials { pharmacyName: string; email: string; tempPassword: string; emailSent: boolean }
 
 export default function SuperadminModule(): JSX.Element {
   const { currentUser, token } = useAuth();
@@ -49,8 +53,13 @@ export default function SuperadminModule(): JSX.Element {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [name, setName] = useState('');
   const [city, setCity] = useState('');
-  const [ownerName, setOwnerName] = useState('');
+  const [adminName, setAdminName] = useState('');
+  const [adminEmail, setAdminEmail] = useState('');
   const [plan, setPlan] = useState<PharmacyPlan>('Essentiel');
+  const [created, setCreated] = useState<CreatedCredentials | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ServerPharmacy | null>(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deleting, setDeleting] = useState(false);
   const pharmaciesTableRef = useRef<HTMLDivElement | null>(null);
 
   const refreshPharmacies = useCallback(async (): Promise<void> => {
@@ -63,22 +72,29 @@ export default function SuperadminModule(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const refreshStats = useCallback(async (): Promise<void> => {
+    try {
+      const r = await axios.get<{ pharmacies: { pharmacy_id: string }[]; accounts?: OverviewAccount[] }>(
+        `${API}/superadmin/overview`, { headers: { Authorization: `Bearer ${token ?? ''}` } });
+      const accounts = r.data.accounts ?? [];
+      const clients = accounts.filter((a) => a.role !== 'superadmin');
+      setLive({
+        pharmacies: r.data.pharmacies.length,
+        accounts: clients.length,
+        employees: clients.filter((a) => a.role === 'employee').length,
+        managers: clients.filter((a) => a.role === 'admin' || a.role === 'manager').length,
+        suspended: clients.filter((a) => a.suspended).length,
+      });
+    } catch {
+      /* silencieux */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
   useEffect(() => {
     if (currentUser?.role !== 'superadmin' || !token) return;
     void refreshPharmacies();
-    axios.get<{ pharmacies: { pharmacy_id: string }[]; accounts?: OverviewAccount[] }>(`${API}/superadmin/overview`, { headers: { Authorization: `Bearer ${token}` } })
-      .then((r) => {
-        const accounts = r.data.accounts ?? [];
-        const clients = accounts.filter((a) => a.role !== 'superadmin');
-        setLive({
-          pharmacies: r.data.pharmacies.length,
-          accounts: clients.length,
-          employees: clients.filter((a) => a.role === 'employee').length,
-          managers: clients.filter((a) => a.role === 'admin' || a.role === 'manager').length,
-          suspended: clients.filter((a) => a.suspended).length,
-        });
-      })
-      .catch(() => undefined);
+    void refreshStats();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.role, token]);
 
@@ -94,24 +110,60 @@ export default function SuperadminModule(): JSX.Element {
   const handleAdd = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
     try {
-      await axios.post(`${API}/superadmin/pharmacies`, { name, city, owner_name: ownerName, plan }, { headers });
-      toast.success('Pharmacie cliente créée. Vous pouvez maintenant lui créer des comptes.');
+      const res = await axios.post<ServerPharmacy & { temporary_password: string; email_sent: boolean }>(
+        `${API}/superadmin/pharmacies`,
+        { name, city, owner_name: adminName, admin_name: adminName, admin_email: adminEmail, plan },
+        { headers }
+      );
       setDialogOpen(false);
-      setName(''); setCity(''); setOwnerName('');
-      await refreshPharmacies();
+      setCreated({ pharmacyName: name, email: adminEmail.trim().toLowerCase(), tempPassword: res.data.temporary_password, emailSent: res.data.email_sent });
+      setName(''); setCity(''); setAdminName(''); setAdminEmail('');
+      await Promise.all([refreshPharmacies(), refreshStats()]);
     } catch (err) {
       const detail = axios.isAxiosError(err) && err.response ? (err.response.data as { detail?: string }).detail : null;
-      toast.error(detail ?? 'Impossible de créer la pharmacie.');
+      toast.error(detail ?? 'Impossible de créer la pharmacie.', { duration: 8000 });
     }
   };
 
   const toggleActive = async (p: ServerPharmacy, active: boolean): Promise<void> => {
     try {
       await axios.put(`${API}/superadmin/pharmacies/${p.id}`, { active }, { headers });
-      toast.success(active ? 'Pharmacie activée.' : 'Pharmacie suspendue.');
+      toast.success(active ? 'Pharmacie activée.' : 'Pharmacie suspendue — la connexion de ses comptes est bloquée.');
       await refreshPharmacies();
     } catch {
       toast.error('Modification impossible.');
+    }
+  };
+
+  const trialDaysLeft = (p: ServerPharmacy): number => {
+    if (!p.trial_ends_at) return 0;
+    return Math.max(0, Math.ceil((new Date(p.trial_ends_at).getTime() - Date.now()) / 86400000));
+  };
+
+  const grantFullAccess = async (p: ServerPharmacy): Promise<void> => {
+    try {
+      await axios.put(`${API}/superadmin/pharmacies/${p.id}`, { plan_status: 'full' }, { headers });
+      toast.success(`« ${p.name} » a maintenant l'accès complet.`);
+      await refreshPharmacies();
+    } catch {
+      toast.error('Modification impossible.');
+    }
+  };
+
+  const confirmDelete = async (): Promise<void> => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      const res = await axios.delete<{ accounts_deleted: number }>(`${API}/superadmin/pharmacies/${deleteTarget.id}`, { headers });
+      toast.success(`« ${deleteTarget.name} » supprimée définitivement (${res.data.accounts_deleted} compte(s) et toutes les données).`, { duration: 8000 });
+      setDeleteTarget(null);
+      setDeleteConfirmText('');
+      await Promise.all([refreshPharmacies(), refreshStats()]);
+    } catch (err) {
+      const detail = axios.isAxiosError(err) && err.response ? (err.response.data as { detail?: string }).detail : null;
+      toast.error(detail ?? 'Suppression impossible.');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -149,7 +201,7 @@ export default function SuperadminModule(): JSX.Element {
       </div>
 
       <div ref={pharmaciesTableRef} className="bg-white rounded-xl border border-slate-200 overflow-x-auto mb-6 scroll-mt-4" data-testid="pharmacies-table">
-        <table className="w-full text-sm min-w-[800px]">
+        <table className="w-full text-sm min-w-[860px]">
           <thead>
             <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-[0.15em] text-slate-500">
               <th className="p-4">Pharmacie</th>
@@ -157,7 +209,9 @@ export default function SuperadminModule(): JSX.Element {
               <th className="p-4">Ville</th>
               <th className="p-4 text-right">Comptes</th>
               <th className="p-4">Forfait</th>
+              <th className="p-4">Accès</th>
               <th className="p-4">Statut</th>
+              <th className="p-4 text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -171,7 +225,31 @@ export default function SuperadminModule(): JSX.Element {
                 <td className="p-4 text-slate-600">{p.city || '—'}</td>
                 <td className="p-4 text-right text-slate-600">{p.accounts_count}</td>
                 <td className="p-4">
-                  <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${PLAN_STYLES[p.plan] ?? PLAN_STYLES.Essentiel}`}>{p.plan}</span>
+                  <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${PLAN_STYLES[p.plan as PharmacyPlan] ?? PLAN_STYLES.Essentiel}`}>{p.plan}</span>
+                </td>
+                <td className="p-4">
+                  {p.plan_status === 'trial' ? (
+                    <div className="flex items-center gap-2">
+                      <span
+                        data-testid={`trial-badge-${p.id}`}
+                        className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${trialDaysLeft(p) > 0 ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-700'}`}
+                      >
+                        {trialDaysLeft(p) > 0 ? `Essai · ${trialDaysLeft(p)} j restants` : 'Essai expiré — bloqué'}
+                      </span>
+                      <Button
+                        data-testid={`grant-full-access-${p.id}`}
+                        size="sm" variant="outline"
+                        className="rounded-full text-xs border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                        onClick={() => void grantFullAccess(p)}
+                      >
+                        Accès complet
+                      </Button>
+                    </div>
+                  ) : (
+                    <span data-testid={`full-access-badge-${p.id}`} className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">
+                      Accès complet
+                    </span>
+                  )}
                 </td>
                 <td className="p-4">
                   <div className="flex items-center gap-2">
@@ -183,10 +261,20 @@ export default function SuperadminModule(): JSX.Element {
                     <span className="text-xs text-slate-500">{p.active ? 'Actif' : 'Suspendu'}</span>
                   </div>
                 </td>
+                <td className="p-4 text-right">
+                  <Button
+                    data-testid={`delete-pharmacy-${p.id}`}
+                    size="sm" variant="outline"
+                    className="rounded-full text-xs text-red-600 border-red-200 hover:bg-red-50"
+                    onClick={() => { setDeleteTarget(p); setDeleteConfirmText(''); }}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </Button>
+                </td>
               </tr>
             ))}
             {pharmacies.length === 0 && (
-              <tr><td colSpan={6} className="p-6 text-center text-sm text-slate-500">Aucune pharmacie cliente.</td></tr>
+              <tr><td colSpan={8} className="p-6 text-center text-sm text-slate-500">Aucune pharmacie cliente.</td></tr>
             )}
           </tbody>
         </table>
@@ -225,7 +313,7 @@ export default function SuperadminModule(): JSX.Element {
           <DialogHeader>
             <DialogTitle className="font-heading">Nouvelle pharmacie cliente</DialogTitle>
             <DialogDescription>
-              Chaque pharmacie possède son propre espace de données, complètement isolé des autres.
+              Chaque pharmacie possède son espace de données isolé. Un compte administrateur est créé en même temps — ses identifiants temporaires lui sont envoyés par courriel.
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={(e) => void handleAdd(e)} className="space-y-4">
@@ -239,25 +327,98 @@ export default function SuperadminModule(): JSX.Element {
                 <Input data-testid="pharmacy-city-input" value={city} onChange={(e) => setCity(e.target.value)} />
               </div>
               <div className="space-y-2">
-                <Label>Propriétaire</Label>
-                <Input data-testid="pharmacy-owner-input" value={ownerName} onChange={(e) => setOwnerName(e.target.value)} />
+                <Label>Forfait</Label>
+                <Select value={plan} onValueChange={(v) => setPlan(v as PharmacyPlan)}>
+                  <SelectTrigger data-testid="pharmacy-plan-select"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Essentiel">Essentiel</SelectItem>
+                    <SelectItem value="Pro">Pro</SelectItem>
+                    <SelectItem value="Entreprise">Entreprise</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
-            <div className="space-y-2">
-              <Label>Forfait</Label>
-              <Select value={plan} onValueChange={(v) => setPlan(v as PharmacyPlan)}>
-                <SelectTrigger data-testid="pharmacy-plan-select"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Essentiel">Essentiel</SelectItem>
-                  <SelectItem value="Pro">Pro</SelectItem>
-                  <SelectItem value="Entreprise">Entreprise</SelectItem>
-                </SelectContent>
-              </Select>
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-4 space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.15em] text-emerald-700">Compte administrateur (obligatoire)</p>
+              <div className="space-y-2">
+                <Label>Nom de l'administrateur</Label>
+                <Input data-testid="pharmacy-admin-name-input" value={adminName} onChange={(e) => setAdminName(e.target.value)} placeholder="Prénom Nom" required />
+              </div>
+              <div className="space-y-2">
+                <Label>Courriel de l'administrateur</Label>
+                <Input data-testid="pharmacy-admin-email-input" type="email" value={adminEmail} onChange={(e) => setAdminEmail(e.target.value)} placeholder="admin@pharmacie.ca" required />
+              </div>
             </div>
             <Button data-testid="pharmacy-submit-button" type="submit" className="w-full rounded-full bg-emerald-600 hover:bg-emerald-700">
-              Créer la pharmacie
+              Créer la pharmacie et son compte admin
             </Button>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!created} onOpenChange={(o) => !o && setCreated(null)}>
+        <DialogContent data-testid="pharmacy-created-dialog">
+          <DialogHeader>
+            <DialogTitle className="font-heading">Pharmacie « {created?.pharmacyName} » créée</DialogTitle>
+            <DialogDescription>Identifiants temporaires du compte administrateur.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="rounded-lg bg-slate-50 border border-slate-200 p-4 space-y-1 text-sm">
+              <p><span className="text-slate-500">Courriel :</span> <span className="font-semibold text-slate-800" data-testid="created-admin-email">{created?.email}</span></p>
+              <p><span className="text-slate-500">Mot de passe temporaire :</span> <span className="font-mono font-semibold text-slate-800" data-testid="created-admin-password">{created?.tempPassword}</span></p>
+            </div>
+            {created?.emailSent ? (
+              <p className="text-sm text-emerald-700 flex items-center gap-2" data-testid="credentials-email-sent">
+                <Mail className="w-4 h-4" /> Identifiants envoyés automatiquement par courriel à {created.email}.
+              </p>
+            ) : (
+              <p className="text-sm text-amber-700 flex items-center gap-2" data-testid="credentials-email-failed">
+                <AlertTriangle className="w-4 h-4" /> L'envoi du courriel a échoué — transmettez ces identifiants manuellement.
+              </p>
+            )}
+            <p className="text-xs text-slate-500">L'administrateur devra choisir un nouveau mot de passe à sa première connexion.</p>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!deleteTarget} onOpenChange={(o) => { if (!o) { setDeleteTarget(null); setDeleteConfirmText(''); } }}>
+        <DialogContent data-testid="delete-pharmacy-dialog">
+          <DialogHeader>
+            <DialogTitle className="font-heading flex items-center gap-2 text-red-700">
+              <AlertTriangle className="w-5 h-5" /> Supprimer définitivement « {deleteTarget?.name} » ?
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 text-sm">
+            <p className="font-semibold text-slate-800">Cette action supprimera de façon irréversible :</p>
+            <ul className="list-disc pl-5 text-slate-600 space-y-1">
+              <li>{deleteTarget?.accounts_count ?? 0} compte(s) utilisateur (connexion immédiatement impossible)</li>
+              <li>Toutes les données RH : employés, horaires, punchs, congés, paie, documents, formations…</li>
+            </ul>
+          </div>
+          <div className="space-y-3">
+            <div className="space-y-2">
+              <Label>Pour confirmer, tapez le nom exact de la pharmacie : <span className="font-mono font-semibold">{deleteTarget?.name}</span></Label>
+              <Input
+                data-testid="delete-pharmacy-confirm-input"
+                value={deleteConfirmText}
+                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                placeholder={deleteTarget?.name}
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" className="rounded-full" onClick={() => { setDeleteTarget(null); setDeleteConfirmText(''); }} data-testid="delete-pharmacy-cancel">
+                Annuler
+              </Button>
+              <Button
+                data-testid="delete-pharmacy-confirm"
+                disabled={deleting || deleteConfirmText.trim() !== (deleteTarget?.name ?? '')}
+                onClick={() => void confirmDelete()}
+                className="rounded-full bg-red-600 hover:bg-red-700 text-white"
+              >
+                {deleting ? 'Suppression…' : 'Supprimer définitivement'}
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

@@ -39,6 +39,8 @@ import TeamModule from '@/components/modules/TeamModule';
 import SstModule from '@/components/modules/SstModule';
 import ReportsModule from '@/components/modules/ReportsModule';
 import { NotificationBell } from '@/components/NotificationBell';
+import { TrialBanner } from '@/components/TrialBanner';
+import TrialOnboarding from '@/components/TrialOnboarding';
 
 const MODULES: Record<ModuleKey, () => JSX.Element> = {
   dashboard: DashboardModule,
@@ -156,12 +158,20 @@ function App(): JSX.Element {
         </div>
       );
     }
+    if (currentUser.onboardingPending && currentUser.role === 'admin') {
+      return (
+        <div className="App">
+          <TrialOnboarding />
+        </div>
+      );
+    }
     const ActiveModule = MODULES[activeModule];
     return (
       <div className="App flex min-h-screen bg-slate-50" data-testid="dashboard-layout">
         <Sidebar active={activeModule} onSelect={setActiveModule} onLogout={handleLogout} />
         <NotificationBell onNavigate={setActiveModule} />
         <main className="flex-1 min-w-0 lg:ml-64 p-4 pt-20 sm:p-6 sm:pt-20 md:p-10 md:pt-20 lg:pt-10">
+          <TrialBanner />
           <ActiveModule />
         </main>
         <ChatWidget />

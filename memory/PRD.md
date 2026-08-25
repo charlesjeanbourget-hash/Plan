@@ -616,3 +616,21 @@ Bug rapporté : « les données du superadmin se retrouvent dans les nouveaux co
 - Vérifié : connexion (courriel → mdp → bouton → soumission) + dialogue Nouvel employé (Prénom → Nom, dialogue non soumis).
 - PROD (même conversation) : le client a corrigé l'expéditeur en prod (faute de frappe arrireplanrh → arriereplanrh) — envois confirmés fonctionnels en production (« ok ça marche »).
 
+
+## Itération 57 (26 août 2026) — Essai gratuit self-service 30 jours + correctif demande de démo — testé 100 % (iteration_49.json : backend 15/15 + régression 130, frontend 10/10 ; correctifs mineurs auto-testés)
+1. **Bug démo corrigé** : la notification des demandes de démo part vers DEMO_NOTIFY_EMAIL (défaut robuste info@arriereplanrh.com — avant : charlesjeanbourget@gmail.com). email_sent:true vérifié.
+2. **Inscription essai gratuit** : POST /api/auth/signup-trial (nom pharmacie + nom + courriel + mdp conforme à la politique) → crée pharmacie {plan:'Essai gratuit', plan_status:'trial', trial_ends_at:+30 j} + compte admin, connexion automatique (adoptSession), courriel de bienvenue essai, audit INSCRIPTION_ESSAI, rate-limit 3/h/IP (db.signup_events).
+3. **Blocage automatique** : pharmacy_access_error() (cache 60 s, invalidé par PUT/DELETE pharmacies) bloque login + toutes requêtes API si essai expiré (« contactez info@arriereplanrh.com ») ou pharmacie active=false (suspension réelle désormais). Pharmacies sans plan_status (ph1, Léo, prod existante) = accès complet grandfathered.
+4. **Superadmin** : colonne « Accès » (trial-badge-{pid} « Essai · X j » / « Essai expiré — bloqué », full-access-badge-{pid}) + bouton grant-full-access-{pid} (1 clic → plan_status='full', forfait non modifié). GET /auth/me → trial_days_left (math.ceil, 30 le jour 1) → bannière TrialBanner côté client (jours restants + mailto info@).
+5. **Landing** : hero-cta-trial « Essai gratuit 30 jours » (remplace le CTA login du hero), header-trial-button, time-value-cta → TrialSignupDialog ; « Sans carte de crédit ».
+6. Cascade : DELETE pharmacie purge hr_states + cache. Fichiers : TrialSignupDialog.tsx, TrialBanner.tsx, AuthContext.adoptSession, tests /app/backend/tests/test_iteration49.py (rejouer avec -n0 ; fixture nécessite une pharmacie « Pharmacie E2E Test »).
+- PROD : redéploiement requis. Paiements gérés hors-app (choix client) — activation manuelle par le superadmin.
+
+
+
+## Itération 52 (25 août 2026) — Assistant de configuration essai gratuit + suppression complète de comptes — testée 100 % (iteration_50.json : backend 12/12, frontend 8/8)
+- **Assistant de configuration (onboarding wizard)** : après l'inscription à l'essai gratuit, page plein écran avec questions UNE À UNE (adresse/ville, nombre de succursales, nom+adresse par succursale si >1, nombre approximatif d'employés, heures d'ouverture, récapitulatif). « Configurer plus tard → » toujours visible (coin supérieur droit). Les succursales sont créées automatiquement à la fin. Backend : flag `onboarding_pending` sur la pharmacie (posé par signup-trial, renvoyé par /auth/me) + `POST /api/onboarding` (admin seulement, enregistre adresse/ville/employee_count_estimate/opening_hours sur le doc pharmacie). Fichiers : `TrialOnboarding.tsx` (nouveau), `App.tsx`, `server.py`. NB : le consentement Loi 25 s'affiche AVANT le wizard (voulu, conformité d'abord).
+- **Création pharmacie superadmin = compte admin OBLIGATOIRE** : impossible de créer une pharmacie sans compte (400 sinon). Le dialogue exige nom + courriel de l'admin ; mot de passe temporaire affiché dans un dialogue + envoyé automatiquement par courriel (Resend). `plan_status='full'` explicite.
+- **Suppression complète d'un compte (superadmin)** : bouton 🗑 sur chaque ligne du tableau des pharmacies → confirmation en TAPANT LE NOM EXACT → cascade totale : comptes users, hr_states, ~50 collections scoped pharmacy_id, login_attempts, password_resets, cache d'accès. Audit SUPPRESSION_PHARMACIE conservé.
+- **Suppression de succursale par l'admin** (dialogue Succursales) : avertissement détaillé (X employés détachés, Y quarts supprimés, irréversible) au lieu de l'ancien blocage ; deleteBranch (HRContext) fait maintenant la cascade locale (détache employés, purge shifts) + DELETE serveur des quarts.
+- PROD : redéploiement requis pour recevoir ces changements.

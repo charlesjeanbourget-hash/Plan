@@ -1,0 +1,38 @@
+{
+  "summary": "Iteration 50 — full backend + frontend E2E validation of the trial onboarding wizard, superadmin pharmacy creation with mandatory admin account, cascade pharmacy deletion, and the new branch-deletion warning. Backend: 12/12 pytest tests pass (/app/backend/tests/test_iteration50.py). Frontend: all 8 requested flows pass (trial signup -> wizard, full 7-step wizard with 2 branches, branch persistence after re-login, 'Configurer plus tard' skip, no wizard on re-login, superadmin create-with-admin dialog + temp password display, delete-pharmacy typed confirmation, admin ph1 branch delete warning + cancel + confirm). No blocking defects found. All test pharmacies created during testing were deleted; only ph1 and ph_a89755dc remain in the table.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/superadmin/pharmacies", "issue": "No plan_status is set on superadmin-created pharmacies, so they render as « Accès complet » immediately (no trial badge). Confirm this is the intended default vs. explicit plan_status='full'."},
+      {"endpoint": "POST /api/onboarding", "issue": "Idempotency/no-op: calling it again after completion silently returns ok:true and can overwrite address/city/hours. Low risk (admin-only), but no guard on already-completed onboarding."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Onboarding wizard", "issues": ["Progress label reads « question 1 de 5 » on step 1 and jumps to 7 total steps once 2+ branches are chosen — the denominator changes mid-flow, which can feel inconsistent (cosmetic).", "The Loi-25 privacy consent dialog (privacy-consent-dialog) appears BEFORE the wizard right after trial signup; the wizard only renders after « J'ai lu et j'accepte ». Expected order per spec was wizard-first — automated flows must accept consent first (documented for next agent)."]},
+      {"screen": "Succursales dialog (nested delete confirm)", "issues": ["The nested branch-delete-confirm-dialog overlaps the parent branch-manager-dialog; during the open animation (~first 500ms) the two dialogs are visually superimposed and text is unreadable. Settled state is fine (opacity 1, opaque bg). Cosmetic only."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iteration50.py", "/app/backend/tests/cleanup_iteration50.py", "/app/test_reports/pytest/it50.xml"],
+  "action_items": [
+    "Optional: decide whether the privacy consent gate should be shown before or after the onboarding wizard for new trial signups.",
+    "Optional: keep the wizard step count stable (or show « question X » without a total) since the total changes when branch count > 1.",
+    "Optional: set an explicit plan_status on superadmin-created pharmacies instead of relying on the absence of the field."
+  ],
+  "critical_code_review_comments": [
+    "TrialOnboarding.finalize(): if POST /api/onboarding succeeds but addBranch/refreshUser throws, the catch shows a generic error while onboarding is already marked complete server-side — branches would be silently lost. Consider creating branches first (or retry) and separating error messages.",
+    "TrialOnboarding: no validation on the address/city/hours steps — a user can click « Continuer » through every step with empty inputs and reach the summary (server accepts empty strings). Add light required-field validation if the data matters.",
+    "server.py is 8912 lines — well beyond the 700-line guideline; split superadmin/auth/onboarding routers into modules.",
+    "POST /api/onboarding does not verify the pharmacy exists (update_one with no upsert silently no-ops if pharmacy_id is stale) — returning ok:true regardless hides the failure."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration50.py", "/app/backend/tests/cleanup_iteration50.py"],
+  "success_rate": {"backend": "100% (12/12)", "frontend": "100% of requested flows (8/8)"},
+  "seed_data_creation": "Created and then fully deleted: trial signups wiz_*/skip_* accounts, pharmacies « Pharmacie Wizard Test » x2, « Pharmacie Skip Test », TEST_Pharmacie Onboarding/Skip/SA, « Test E2E QA <tag> » (deleted via UI delete flow). Created and deleted a disposable ph1 branch « QA Succursale Jetable ». db.signup_events cleared (rate limit reset). ph1, ph_a89755dc untouched — remaining pharmacies: ph1 + ph_a89755dc only.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "Used /app/memory/test_credentials.md: superadmin jeffmenard78@hotmail.com / JeffSecure2026!x, admin ph1 admin@luminahr.ca / Nlpx!tTE3Aw27, employee julie@luminahr.ca (403 check).",
+  "context_for_next_testing_agent": "1) After trial signup the privacy consent dialog appears first — click [data-testid=privacy-consent-accept] then wait for [data-testid=onboarding-page]. 2) There is no /login route: click [data-testid=footer-login-link] on the landing page to reach the login form. 3) Sidebar nav label is « Employés » (page title « Dossiers Employés »); the Succursales button is a role=button named « Succursales ». 4) Trial signup rate limit is 3/h/IP — clear db.signup_events (MONGO_URL/DB_NAME from backend/.env) before frontend signup tests. 5) Run backend suite with: pytest tests/test_iteration50.py -p no:randomly -n0 (tests share state via pytest attributes, order matters). 6) Cleanup helper: python /app/backend/tests/cleanup_iteration50.py deletes only TEST_/Test E2E/Wizard/Skip pharmacies and protects ph1 + ph_a89755dc. 7) Branch add/delete persists server-side (verified in a fresh browser session).",
+  "rca_of_the_issue": "No functional defect reproduced. Two initial test failures were test-side only (server lowercases emails; user payload uses snake_case pharmacy_id) and were fixed in the test file. The first frontend run failed because the Loi-25 privacy consent dialog gates the wizard — handled by accepting consent, not an app bug."
+}

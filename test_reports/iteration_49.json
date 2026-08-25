@@ -1,0 +1,42 @@
+{
+  "summary": "Itération 49 — Test complet du bug « demande de démo » et de l'essai gratuit self-service. Backend : nouveau fichier /app/backend/tests/test_iteration49.py (15 tests, 15 réussis) couvrant POST /api/demo-requests (ok:true, email_sent:true, apparition dans GET superadmin, DELETE), validations de POST /api/auth/signup-trial (courriel dupliqué, mot de passe court, pharmacie vide, courriel invalide, aucun compte orphelin), compte d'essai (login, trial_days_left, isolation hr-state + écriture d'un employé), blocage 403 à l'expiration avec message contenant info@arriereplanrh.com, refus d'un plan_status invalide, non-régression ph1/leo. Frontend (Playwright 1920x1080) : formulaire de démo de la landing → demo-success ; hero-cta-trial → trial-signup-dialog → inscription → connexion AUTOMATIQUE au tableau de bord (sidebar complète, espace VIDE, aucune donnée Sophie/Julie/Karim) + trial-banner avec lien mailto info@arriereplanrh.com ; page de connexion affiche le message d'essai terminé ; superadmin : trial-badge « Essai expiré — bloqué » → grant-full-access → full-access-badge → login essai à nouveau OK et plus aucune bannière ; pharmacy-toggle → « suspendu » (login 403 avec message) → réactivation → login OK. Régression : login admin@luminahr.ca et leo-test OK sans bannière, colonne Accès présente, pytest test_iteration45/46/47 = 130 réussis / 4 ignorés / 0 échec. TOUS les scénarios demandés PASSENT. Nettoyage complet effectué (compte + pharmacie d'essai + hr_state orphelin + demandes de démo de test + résidu TEST_Pharmacie47_off).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/auth/me (trial_days_left)", "issue": "Calcul par timedelta.days (troncature) : juste après l'inscription, trial_days_left = 29 alors que l'essai vient de démarrer pour 30 jours. La bannière affiche donc « il vous reste 29 jours » dès la première seconde. Utiliser math.ceil du delta (ou comparer les dates) pour afficher 30."},
+      {"endpoint": "DELETE /api/superadmin/pharmacies/{id}", "issue": "La suppression d'une pharmacie ne purge pas son document hr_states (ni les collections rattachées) : 1 document hr_states orphelin restait pour ph_40580213 (supprimé manuellement en Mongo). Prévoir un nettoyage en cascade."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Superadmin — colonne Accès / Forfait", "issues": ["Le clic sur grant-full-access change aussi le FORFAIT de « Essai gratuit » à « Pro » (voir capture) : le forfait facturé est décidé automatiquement alors qu'il devrait probablement rester à choisir (Essentiel/Pro/Entreprise). À confirmer avec le client."]},
+      {"screen": "Bannière d'essai (dashboard)", "issues": ["Affiche « il vous reste 29 jours » immédiatement après l'inscription (voir problème backend trial_days_left) — perception négative pour un nouveau client."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration49.py",
+    "/app/backend/tests/cleanup_iteration49.py",
+    "/app/test_reports/pytest/iteration_49.xml"
+  ],
+  "action_items": [
+    "Corriger le calcul de trial_days_left (arrondi supérieur) pour afficher « 30 jours » le jour de l'inscription — server.py ~ligne 545.",
+    "Décider si « Accès complet » doit forcer le forfait à « Pro » ou laisser le forfait inchangé/à choisir (SuperadminModule.grantFullAccess).",
+    "Optionnel : purger hr_states (et données rattachées) à la suppression d'une pharmacie.",
+    "Hygiène de tests (récurrent) : test_iteration47 recrée à chaque exécution une pharmacie TEST_Pharmacie47_off jamais supprimée — ajouter un teardown DELETE /api/superadmin/pharmacies (je l'ai purgée)."
+  ],
+  "critical_code_review_comments": [
+    "pharmacy_access_error() met en cache le document pharmacie 60 s : le cache est bien invalidé par PUT /superadmin/pharmacies, mais PAS par une modification directe en base ni par le job de rappel — documenté et acceptable, garder à l'esprit pour le support.",
+    "TrialBanner.tsx refait un GET /auth/me à chaque montage en plus de l'appel d'authentification ; on pourrait exposer trial_days_left dans la réponse de login/adoptSession pour éviter un aller-retour.",
+    "signup-trial ne throttle pas par IP (contrairement à /demo-requests qui est limité à 5/h) : un script pourrait créer des pharmacies d'essai en masse (chacune envoyant un courriel Resend). Ajouter une limite de débit par IP/domaine."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration49.py", "/app/backend/tests/cleanup_iteration49.py"],
+  "success_rate": {"backend": "100% (15/15 iteration 49 + 130/130 régression 45-47)", "frontend": "100% (10 scénarios demandés)"},
+  "seed_data_creation": "Créés puis SUPPRIMÉS : compte essai-e2e@exemple.ca + pharmacie « Pharmacie E2E Test » (ph_40580213) + son hr_state (dont l'employé TEST_Employe Essai), demandes de démo demo-e2e@exemple.ca (UI) et demo-api-e2e@exemple.ca (API), pharmacie résiduelle TEST_Pharmacie47_off. État final vérifié : 2 pharmacies (ph1, ph_a89755dc, toutes deux sans plan_status = accès complet grandfathered), 7 comptes d'origine, 1 seule demande de démo de démonstration (sophie.demo@test.ca, préexistante). Login essai-e2e = 401 (compte bien supprimé).",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "/app/memory/test_credentials.md — inchangés et vérifiés (superadmin jeffmenard78, admin@luminahr.ca, leo-test). Aucun compte verrouillé, mfa_required resté false.",
+  "context_for_next_testing_agent": "Le compte d'essai a été SUPPRIMÉ après les tests : pour rejouer test_iteration49.py, recréer d'abord la pharmacie « Pharmacie E2E Test » via le flux d'inscription frontend (hero-cta-trial), sinon les classes TestTrialAccountAccess/TestTrialExpiryBlocking sont SKIP (fixture trial_pid). Lancer test_iteration49.py avec -n0 (les classes d'accès et d'expiration modifient la même pharmacie et se marchent dessus en xdist). Astuce Playwright : vider localStorage puis reload NE déconnecte PAS toujours (course avec la réécriture du jeton) — cliquer « Déconnexion » dans la sidebar est fiable. Le dialogue privacy-consent-accept apparaît à la première connexion d'un nouveau contexte. Le script de nettoyage réutilisable est /app/backend/tests/cleanup_iteration49.py.",
+  "rca_of_the_issue": "Aucun défaut bloquant reproduit. Seul écart constaté : trial_days_left = 29 au lieu de 30 le jour J, causé par la troncature de timedelta.days sur (trial_ends_at - now) dans GET /auth/me (server.py ~545) — même logique côté SuperadminModule.trialDaysLeft."
+}

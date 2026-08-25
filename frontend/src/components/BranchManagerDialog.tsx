@@ -5,7 +5,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import { Plus, MapPin, Trash2 } from 'lucide-react';
+import { Plus, MapPin, Trash2, AlertTriangle } from 'lucide-react';
+import { Branch } from '@/types';
 import { toast } from 'sonner';
 
 interface Props {
@@ -18,6 +19,7 @@ export const BranchManagerDialog = ({ open, onClose }: Props): JSX.Element => {
   const { currentUser } = useAuth();
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
+  const [toDelete, setToDelete] = useState<Branch | null>(null);
 
   const submit = (e: FormEvent<HTMLFormElement>): void => {
     e.preventDefault();
@@ -28,14 +30,15 @@ export const BranchManagerDialog = ({ open, onClose }: Props): JSX.Element => {
     setAddress('');
   };
 
-  const remove = (id: string): void => {
-    const assigned = state.employees.filter((emp) => emp.branchId === id).length;
-    if (assigned > 0) {
-      toast.error(`Impossible : ${assigned} employé(s) rattaché(s) à cette succursale.`);
-      return;
-    }
-    deleteBranch(id);
-    toast.success('Succursale supprimée.');
+  const assignedCount = (id: string): number =>
+    state.employees.filter((emp) => emp.branchId === id || emp.branchIds?.includes(id)).length;
+  const shiftsCount = (id: string): number => state.shifts.filter((s) => s.branchId === id).length;
+
+  const confirmDelete = (): void => {
+    if (!toDelete) return;
+    deleteBranch(toDelete.id);
+    toast.success(`Succursale « ${toDelete.name} » supprimée définitivement.`);
+    setToDelete(null);
   };
 
   return (
@@ -49,7 +52,7 @@ export const BranchManagerDialog = ({ open, onClose }: Props): JSX.Element => {
         </DialogHeader>
         <div className="space-y-2 max-h-64 overflow-y-auto">
           {state.branches.map((b) => {
-            const assigned = state.employees.filter((emp) => emp.branchId === b.id).length;
+            const assigned = assignedCount(b.id);
             return (
               <div key={b.id} data-testid={`branch-item-${b.id}`} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-4 py-2.5">
                 <div className="min-w-0">
@@ -62,7 +65,7 @@ export const BranchManagerDialog = ({ open, onClose }: Props): JSX.Element => {
                   data-testid={`branch-delete-${b.id}`}
                   size="sm" variant="outline"
                   className="rounded-full text-xs text-red-600 border-red-200 hover:bg-red-50 shrink-0"
-                  onClick={() => remove(b.id)}
+                  onClick={() => setToDelete(b)}
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </Button>
@@ -88,6 +91,38 @@ export const BranchManagerDialog = ({ open, onClose }: Props): JSX.Element => {
             <Plus className="w-3.5 h-3.5 mr-1" /> Ajouter la succursale
           </Button>
         </form>
+
+        <Dialog open={!!toDelete} onOpenChange={(o) => !o && setToDelete(null)}>
+          <DialogContent data-testid="branch-delete-confirm-dialog">
+            <DialogHeader>
+              <DialogTitle className="font-heading flex items-center gap-2 text-red-700">
+                <AlertTriangle className="w-5 h-5" /> Supprimer la succursale « {toDelete?.name} » ?
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-2 text-sm">
+              <p className="font-semibold text-slate-800">
+                Vous êtes sur le point de perdre toutes les données associées à cette succursale :
+              </p>
+              <ul className="list-disc pl-5 text-slate-600 space-y-1">
+                <li>{toDelete ? assignedCount(toDelete.id) : 0} employé(s) rattaché(s) seront détachés de la succursale</li>
+                <li>{toDelete ? shiftsCount(toDelete.id) : 0} quart(s) de travail planifiés seront supprimés</li>
+              </ul>
+              <p className="text-red-600 font-semibold">Cette action est irréversible.</p>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" className="rounded-full" data-testid="branch-delete-cancel" onClick={() => setToDelete(null)}>
+                Annuler
+              </Button>
+              <Button
+                data-testid="branch-delete-confirm"
+                onClick={confirmDelete}
+                className="rounded-full bg-red-600 hover:bg-red-700 text-white"
+              >
+                Supprimer définitivement
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </DialogContent>
     </Dialog>
   );

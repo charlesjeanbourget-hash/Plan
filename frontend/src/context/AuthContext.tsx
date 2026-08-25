@@ -5,7 +5,7 @@ import { User } from '@/types';
 const AUTH_KEY = 'luminahr_auth_v3';
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
-interface BackendUser {
+export interface BackendUser {
   id: string;
   email: string;
   name: string;
@@ -18,6 +18,7 @@ interface BackendUser {
   privacy_accepted_at?: string | null;
   mfa_enabled?: boolean;
   module_overrides?: Record<string, boolean>;
+  onboarding_pending?: boolean;
 }
 
 interface StoredAuth {
@@ -38,6 +39,7 @@ const mapUser = (u: BackendUser): User => ({
   privacyAcceptedAt: u.privacy_accepted_at ?? null,
   mfaEnabled: u.mfa_enabled ?? false,
   moduleOverrides: u.module_overrides ?? {},
+  onboardingPending: u.onboarding_pending ?? false,
 });
 
 export const formatApiError = (detail: unknown): string => {
@@ -60,6 +62,7 @@ interface AuthContextValue {
   changePassword: (currentPassword: string, newPassword: string) => Promise<string | null>;
   refreshUser: () => Promise<void>;
   acceptPrivacy: () => Promise<void>;
+  adoptSession: (token: string, user: BackendUser) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -176,9 +179,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  const adoptSession = (token: string, backendUser: BackendUser): void => {
+    const next = { token, user: mapUser(backendUser) };
+    localStorage.setItem(AUTH_KEY, JSON.stringify(next));
+    setAuth(next);
+  };
+
   return (
     <AuthContext.Provider
-      value={{ currentUser: auth?.user ?? null, token: auth?.token ?? null, login, verifyMfa, logout, changePassword, refreshUser, acceptPrivacy }}
+      value={{ currentUser: auth?.user ?? null, token: auth?.token ?? null, login, verifyMfa, logout, changePassword, refreshUser, acceptPrivacy, adoptSession }}
     >
       {children}
     </AuthContext.Provider>

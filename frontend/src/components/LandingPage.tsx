@@ -7,7 +7,9 @@ import { ComparisonSection } from '@/components/ComparisonSection';
 import { TestimonialsSection } from '@/components/TestimonialsSection';
 import { DemoSection } from '@/components/DemoSection';
 import { FaqSection } from '@/components/FaqSection';
-import { Users, Briefcase, Building2, ArrowRight, CheckCircle2, ShieldCheck, Leaf, PlayCircle } from 'lucide-react';
+import { Users, Briefcase, Building2, ArrowRight, CheckCircle2, ShieldCheck, Leaf, PlayCircle, Sparkles } from 'lucide-react';
+import { useState } from 'react';
+import { TrialSignupDialog } from '@/components/TrialSignupDialog';
 
 interface Props {
   onNavigate: (view: View) => void;
@@ -25,6 +27,7 @@ const TIME_BULLETS = [
 ];
 
 export default function LandingPage({ onNavigate }: Props): JSX.Element {
+  const [trialOpen, setTrialOpen] = useState(false);
   return (
     <div className="min-h-screen bg-white" data-testid="landing-page">
       <header className="sticky top-0 z-40 bg-white border-b border-slate-200">
@@ -53,6 +56,13 @@ export default function LandingPage({ onNavigate }: Props): JSX.Element {
               Borne de punch
             </button>
             <button
+              data-testid="header-trial-button"
+              onClick={() => setTrialOpen(true)}
+              className="hidden sm:inline-flex px-3.5 sm:px-5 py-2 rounded-full border border-emerald-600 text-emerald-700 text-xs sm:text-sm font-semibold whitespace-nowrap hover:bg-emerald-50 transition-colors"
+            >
+              Essai gratuit
+            </button>
+            <button
               data-testid="header-login-button"
               onClick={() => onNavigate('login')}
               className="px-3.5 sm:px-5 py-2 rounded-full bg-emerald-600 text-white text-xs sm:text-sm font-semibold whitespace-nowrap hover:bg-emerald-700 transition-colors"
@@ -76,11 +86,11 @@ export default function LandingPage({ onNavigate }: Props): JSX.Element {
             </p>
             <div className="mt-8 flex flex-wrap gap-4">
               <button
-                data-testid="hero-cta-login"
-                onClick={() => onNavigate('login')}
+                data-testid="hero-cta-trial"
+                onClick={() => setTrialOpen(true)}
                 className="px-7 py-3.5 rounded-full bg-emerald-600 text-white font-semibold text-sm hover:bg-emerald-700 transition-colors inline-flex items-center gap-2"
               >
-                Accéder à la plateforme <ArrowRight className="w-4 h-4" />
+                <Sparkles className="w-4 h-4" /> Essai gratuit 30 jours
               </button>
               <button
                 data-testid="hero-cta-tour"
@@ -97,6 +107,9 @@ export default function LandingPage({ onNavigate }: Props): JSX.Element {
                 Voir les offres d'emploi
               </button>
             </div>
+            <p className="mt-3 text-xs text-slate-500">
+              Sans carte de crédit · toutes les fonctionnalités · vos données restent privées
+            </p>
           </div>
           <div className="md:col-span-5 animate-fade-up" style={{ animationDelay: '120ms' }}>
             <div className="relative rounded-2xl overflow-hidden border border-bronze-200 shadow-lg">
@@ -169,10 +182,10 @@ export default function LandingPage({ onNavigate }: Props): JSX.Element {
             </p>
             <button
               data-testid="time-value-cta"
-              onClick={() => onNavigate('login')}
+              onClick={() => setTrialOpen(true)}
               className="px-7 py-3 rounded-full bg-white text-emerald-700 font-semibold text-sm hover:bg-emerald-50 transition-colors inline-flex items-center gap-2"
             >
-              Commencer maintenant <ArrowRight className="w-4 h-4" />
+              Commencer mon essai gratuit <ArrowRight className="w-4 h-4" />
             </button>
           </div>
         </div>
@@ -309,6 +322,7 @@ export default function LandingPage({ onNavigate }: Props): JSX.Element {
           </div>
         </div>
       </footer>
+      <TrialSignupDialog open={trialOpen} onClose={() => setTrialOpen(false)} onSuccess={() => onNavigate('dashboard')} />
     </div>
   );
 }

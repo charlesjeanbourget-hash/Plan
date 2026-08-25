@@ -40,6 +40,7 @@ export interface User {
   privacyAcceptedAt?: string | null;
   mfaEnabled?: boolean;
   moduleOverrides?: Record<string, boolean>;
+  onboardingPending?: boolean;
 }
 
 export type Position =

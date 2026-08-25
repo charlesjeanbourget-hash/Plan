@@ -206,6 +206,10 @@ async def get_current_user(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Utilisateur introuvable.")
     if user.get("suspended"):
         raise HTTPException(status_code=403, detail="Compte suspendu. Contactez votre superadministrateur.")
+    if user.get("role") != "superadmin":
+        trial_err = await pharmacy_access_error(user.get("pharmacy_id") or "")
+        if trial_err:
+            raise HTTPException(status_code=403, detail=trial_err)
     if user.get("is_temporary_password") and request.url.path not in (
             "/api/auth/change-password", "/api/auth/me"):
         raise HTTPException(status_code=403,
@@ -249,6 +253,10 @@ async def auth_login(payload: LoginIn, request: Request):
         raise HTTPException(status_code=401, detail="Courriel ou mot de passe invalide.")
     if user.get("suspended"):
         raise HTTPException(status_code=403, detail="Compte suspendu. Contactez votre superadministrateur.")
+    if user.get("role") != "superadmin":
+        trial_err = await pharmacy_access_error(user.get("pharmacy_id") or "")
+        if trial_err:
+            raise HTTPException(status_code=403, detail=trial_err)
     await db.login_attempts.delete_one({"identifier": identifier})
     if user.get("mfa_enabled"):
         mfa_token = jwt.encode({"sub": user["id"],
@@ -264,6 +272,139 @@ async def auth_login(payload: LoginIn, request: Request):
 
 class MfaCodeIn(BaseModel):
     code: str
+
+
+_pharmacy_access_cache: dict = {}
+
+
+async def pharmacy_access_error(pid: str) -> Optional[str]:
+    """Retourne un message de blocage si la pharmacie est suspendue ou si son essai gratuit est expiré."""
+    if not pid:
+        return None
+    now = datetime.now(timezone.utc)
+    cached = _pharmacy_access_cache.get(pid)
+    if cached and (now.timestamp() - cached[1]) < 60:
+        doc = cached[0]
+    else:
+        doc = await db.pharmacies.find_one({"id": pid}, {"_id": 0, "active": 1, "plan_status": 1, "trial_ends_at": 1})
+        _pharmacy_access_cache[pid] = (doc, now.timestamp())
+    if not doc:
+        return None
+    if doc.get("active") is False:
+        return "L'accès de votre pharmacie est suspendu. Contactez-nous à info@arriereplanrh.com."
+    if doc.get("plan_status") == "trial":
+        ends = doc.get("trial_ends_at") or ""
+        try:
+            if ends and datetime.fromisoformat(ends) < now:
+                return ("Votre essai gratuit de 30 jours est terminé. "
+                        "Contactez-nous à info@arriereplanrh.com pour activer votre accès complet.")
+        except ValueError:
+            return None
+    return None
+
+
+class TrialSignupIn(BaseModel):
+    pharmacy_name: str
+    name: str
+    email: str
+    password: str
+
+
+async def send_trial_welcome_email(name: str, email: str, pharmacy_name: str, trial_ends_at: str) -> None:
+    api_key = os.environ.get("RESEND_API_KEY", "")
+    if not api_key:
+        return
+    resend.api_key = api_key
+    end_date = trial_ends_at[:10]
+    try:
+        await asyncio.to_thread(resend.Emails.send, {
+            "from": await get_sender(), "to": [email],
+            "subject": "Votre essai gratuit de 30 jours est actif — Arrière Plan",
+            "html": (
+                "<div style='font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#0f172a'>"
+                "<h2 style='color:#059669'>Bienvenue sur Arrière Plan !</h2>"
+                f"<p>Bonjour {name},</p>"
+                f"<p>Votre espace « <b>{pharmacy_name}</b> » est prêt. Vous profitez de <b>toutes les fonctionnalités "
+                f"gratuitement jusqu'au {end_date}</b> : horaires IA, punch, paie, tâches, congés, formations et plus.</p>"
+                f"<p>Connectez-vous sur <a href='{APP_PUBLIC_URL}' style='color:#059669'><b>{APP_PUBLIC_URL.replace('https://', '')}</b></a> "
+                "avec le courriel et le mot de passe que vous venez de choisir.</p>"
+                "<p>Des questions ? Écrivez-nous à info@arriereplanrh.com — nous vous accompagnons dans la mise en place.</p>"
+                "<p style='font-size:12px;color:#94a3b8;margin-top:20px'>À la fin de l'essai, contactez-nous pour activer votre accès complet.</p></div>"
+            )})
+    except Exception as exc:
+        logger.warning(f"Courriel d'essai non envoyé à {email} : {exc}")
+
+
+@api_router.post("/auth/signup-trial")
+async def auth_signup_trial(payload: TrialSignupIn, request: Request):
+    email = payload.email.strip().lower()
+    pharmacy_name = payload.pharmacy_name.strip()
+    full_name = payload.name.strip()
+    if len(pharmacy_name) < 2:
+        raise HTTPException(status_code=400, detail="Le nom de votre pharmacie est requis.")
+    if not full_name:
+        raise HTTPException(status_code=400, detail="Votre nom complet est requis.")
+    if "@" not in email or "." not in email.split("@")[-1]:
+        raise HTTPException(status_code=400, detail="Courriel invalide.")
+    if await db.users.find_one({"email": email}):
+        raise HTTPException(status_code=400, detail="Un compte existe déjà avec ce courriel. Utilisez « Mot de passe oublié » pour le récupérer.")
+    ip = client_ip(request)
+    since = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    if await db.signup_events.count_documents({"ip": ip, "created_at": {"$gte": since}}) >= 3:
+        raise HTTPException(status_code=429, detail="Trop d'inscriptions depuis cette adresse. Réessayez dans une heure ou contactez info@arriereplanrh.com.")
+    err = await validate_password_strength(payload.password.strip(), "")
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    now = datetime.now(timezone.utc)
+    await db.signup_events.insert_one({"ip": ip, "email": email, "created_at": now.isoformat()})
+    trial_ends_at = (now + timedelta(days=30)).isoformat()
+    pid = "ph_" + uuid.uuid4().hex[:8]
+    await db.pharmacies.insert_one({
+        "id": pid, "name": pharmacy_name[:120], "address": "", "city": "",
+        "owner_name": full_name[:120], "admin_email": email, "plan": "Essai gratuit",
+        "active": True, "plan_status": "trial", "trial_ends_at": trial_ends_at,
+        "onboarding_pending": True, "created_at": now.isoformat()})
+    doc = {"id": str(uuid.uuid4()), "email": email, "password_hash": hash_password(payload.password.strip()),
+           "name": full_name[:120], "role": "admin", "pharmacy_id": pid, "employee_id": None,
+           "suspended": False, "created_at": now.isoformat()}
+    await db.users.insert_one(doc)
+    doc.pop("_id", None)
+    await log_audit(email, "admin", "INSCRIPTION_ESSAI", "pharmacie", pid,
+                    f"Essai gratuit 30 jours démarré pour « {pharmacy_name} »", pid)
+    await record_login_event(doc, "CONNEXION", request)
+    asyncio.create_task(send_trial_welcome_email(full_name, email, pharmacy_name, trial_ends_at))
+    return {"access_token": create_access_token(doc),
+            "user": {**user_public(doc), **(await auth_flags(doc)), "onboarding_pending": True},
+            "trial_ends_at": trial_ends_at}
+
+
+class OnboardingIn(BaseModel):
+    address: str = ""
+    city: str = ""
+    employee_count: str = ""
+    opening_hours: str = ""
+    skipped: bool = False
+
+
+@api_router.post("/onboarding")
+async def complete_onboarding(payload: OnboardingIn, user: dict = Depends(get_current_user)):
+    if user.get("role") != "admin" or not user.get("pharmacy_id"):
+        raise HTTPException(status_code=403, detail="Réservé aux administrateurs de pharmacie.")
+    pid = user["pharmacy_id"]
+    patch: dict = {"onboarding_pending": False}
+    if not payload.skipped:
+        if payload.address.strip():
+            patch["address"] = payload.address.strip()[:200]
+        if payload.city.strip():
+            patch["city"] = payload.city.strip()[:80]
+        if payload.employee_count.strip():
+            patch["employee_count_estimate"] = payload.employee_count.strip()[:40]
+        if payload.opening_hours.strip():
+            patch["opening_hours"] = payload.opening_hours.strip()[:200]
+    await db.pharmacies.update_one({"id": pid}, {"$set": patch})
+    await log_audit(user["email"], user["role"], "CONFIGURATION_INITIALE", "pharmacie", pid,
+                    "Configuration initiale reportée" if payload.skipped else "Configuration initiale complétée", pid)
+    return {"ok": True}
 
 
 class MfaVerifyIn(BaseModel):
@@ -430,7 +571,20 @@ async def auth_accept_privacy(user: dict = Depends(get_current_user)):
 
 @api_router.get("/auth/me")
 async def auth_me(user: dict = Depends(get_current_user)):
-    return {**user_public(user), **(await auth_flags(user))}
+    out = {**user_public(user), **(await auth_flags(user))}
+    if user.get("role") != "superadmin" and user.get("pharmacy_id"):
+        ph = await db.pharmacies.find_one({"id": user["pharmacy_id"]},
+                                          {"_id": 0, "plan_status": 1, "trial_ends_at": 1, "onboarding_pending": 1})
+        if ph and ph.get("onboarding_pending") and user.get("role") == "admin":
+            out["onboarding_pending"] = True
+        if ph and ph.get("plan_status") == "trial" and ph.get("trial_ends_at"):
+            try:
+                secs = (datetime.fromisoformat(ph["trial_ends_at"]) - datetime.now(timezone.utc)).total_seconds()
+                out["trial_ends_at"] = ph["trial_ends_at"]
+                out["trial_days_left"] = max(0, math.ceil(secs / 86400))
+            except ValueError:
+                pass
+    return out
 
 
 DEFAULT_SECURITY_SETTINGS = {
@@ -1003,6 +1157,7 @@ class PharmacyIn(BaseModel):
     city: str = ""
     owner_name: str = ""
     admin_email: str = ""
+    admin_name: str = ""
     plan: str = "Essentiel"
 
 
@@ -1014,6 +1169,8 @@ class PharmacyPatchIn(BaseModel):
     admin_email: Optional[str] = None
     plan: Optional[str] = None
     active: Optional[bool] = None
+    plan_status: Optional[str] = None
+    trial_ends_at: Optional[str] = None
 
 
 async def ensure_pharmacies_seeded() -> None:
@@ -1050,16 +1207,32 @@ async def sa_create_pharmacy(payload: PharmacyIn, su: dict = Depends(require_sup
     name = payload.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="Le nom de la pharmacie est requis.")
+    admin_name = payload.admin_name.strip()
+    admin_email = payload.admin_email.strip().lower()
+    if not admin_name or "@" not in admin_email or "." not in admin_email.split("@")[-1]:
+        raise HTTPException(status_code=400,
+                            detail="Un compte administrateur est obligatoire : indiquez le nom et un courriel valide.")
+    if await db.users.find_one({"email": admin_email}):
+        raise HTTPException(status_code=400, detail="Un compte existe déjà avec ce courriel.")
     doc = {"id": "ph_" + uuid.uuid4().hex[:8], "name": name[:120],
            "address": payload.address.strip()[:200], "city": payload.city.strip()[:80],
-           "owner_name": payload.owner_name.strip()[:120], "admin_email": payload.admin_email.strip()[:120],
+           "owner_name": (payload.owner_name.strip() or admin_name)[:120], "admin_email": admin_email[:120],
            "plan": payload.plan if payload.plan in ("Essentiel", "Pro", "Entreprise") else "Essentiel",
-           "active": True, "created_at": datetime.now(timezone.utc).isoformat()}
+           "active": True, "plan_status": "full", "created_at": datetime.now(timezone.utc).isoformat()}
     await db.pharmacies.insert_one(doc)
     doc.pop("_id", None)
+    temp = gen_temp_password()
+    user_doc = {
+        "id": str(uuid.uuid4()), "email": admin_email, "password_hash": hash_password(temp),
+        "name": admin_name[:120], "role": "admin", "pharmacy_id": doc["id"], "employee_id": None,
+        "is_temporary_password": True, "suspended": False,
+        "created_at": datetime.now(timezone.utc).isoformat()}
+    await db.users.insert_one(user_doc)
     await log_audit(su["email"], su["role"], "CREATION_PHARMACIE", "pharmacie", doc["id"],
-                    f"Pharmacie cliente « {name} » créée", doc["id"])
-    return doc
+                    f"Pharmacie cliente « {name} » créée avec le compte admin {admin_email}", doc["id"])
+    email_sent = await send_credentials_email(admin_name, admin_email, temp)
+    return {**doc, "accounts_count": 1, "admin_user": user_public(user_doc),
+            "temporary_password": temp, "email_sent": email_sent}
 
 
 @api_router.put("/superadmin/pharmacies/{pharmacy_id}")
@@ -1070,13 +1243,30 @@ async def sa_update_pharmacy(pharmacy_id: str, payload: PharmacyPatchIn, su: dic
     patch = {k: v for k, v in payload.model_dump().items() if v is not None}
     if "name" in patch and not patch["name"].strip():
         raise HTTPException(status_code=400, detail="Le nom ne peut pas être vide.")
-    if "plan" in patch and patch["plan"] not in ("Essentiel", "Pro", "Entreprise"):
+    if "plan" in patch and patch["plan"] not in ("Essentiel", "Pro", "Entreprise", "Essai gratuit"):
         patch["plan"] = doc.get("plan", "Essentiel")
+    if "plan_status" in patch and patch["plan_status"] not in ("trial", "full"):
+        raise HTTPException(status_code=400, detail="Statut d'accès invalide (trial ou full).")
     if patch:
         await db.pharmacies.update_one({"id": pharmacy_id}, {"$set": patch})
+        _pharmacy_access_cache.pop(pharmacy_id, None)
         await log_audit(su["email"], su["role"], "MODIF_PHARMACIE", "pharmacie", pharmacy_id,
                         f"Pharmacie « {doc['name']} » modifiée ({', '.join(patch.keys())})", pharmacy_id)
     return {**doc, **patch}
+
+
+PHARMACY_SCOPED_COLLECTIONS = [
+    "announcements", "appointments", "appointment_reminders", "audit_logs", "benefit_imports",
+    "chat_attachments", "chat_messages", "contract_signatures", "conversation_reads", "conversations",
+    "document_requests", "employee_profiles", "evaluations", "hr_custom_fields", "incidents", "kudos",
+    "leave_balances", "leave_policies", "leave_requests", "licenses", "login_events", "notifications",
+    "open_shifts", "pay_settings", "pharmacy_settings", "polls", "punch_settings", "punches",
+    "replacement_offers", "replacement_requests", "report_schedules", "report_settings",
+    "schedule_proposals", "schedule_publications", "schedule_settings", "schedule_templates",
+    "schedule_views", "security_settings", "shift_tasks", "shifts", "sst_incidents", "task_goals",
+    "time_bank_entries", "training_assignments", "training_attempts", "trainings", "work_stations",
+    "agencies", "api_keys", "hr_states",
+]
 
 
 @api_router.delete("/superadmin/pharmacies/{pharmacy_id}")
@@ -1084,14 +1274,19 @@ async def sa_delete_pharmacy(pharmacy_id: str, su: dict = Depends(require_supera
     doc = await db.pharmacies.find_one({"id": pharmacy_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Pharmacie introuvable.")
-    linked = await db.users.count_documents({"pharmacy_id": pharmacy_id})
-    if linked > 0:
-        raise HTTPException(status_code=400,
-                            detail=f"Impossible : {linked} compte(s) rattaché(s) à cette pharmacie. Réassignez ou supprimez-les d'abord.")
+    users = await db.users.find({"pharmacy_id": pharmacy_id}, {"_id": 0, "email": 1}).to_list(2000)
+    emails = [u["email"] for u in users]
+    res = await db.users.delete_many({"pharmacy_id": pharmacy_id, "role": {"$ne": "superadmin"}})
+    if emails:
+        await db.login_attempts.delete_many({"identifier": {"$in": emails}})
+        await db.password_resets.delete_many({"email": {"$in": emails}})
+    for coll in PHARMACY_SCOPED_COLLECTIONS:
+        await db[coll].delete_many({"pharmacy_id": pharmacy_id})
     await db.pharmacies.delete_one({"id": pharmacy_id})
+    _pharmacy_access_cache.pop(pharmacy_id, None)
     await log_audit(su["email"], su["role"], "SUPPRESSION_PHARMACIE", "pharmacie", pharmacy_id,
-                    f"Pharmacie « {doc['name']} » supprimée", pharmacy_id)
-    return {"status": "supprimé"}
+                    f"Pharmacie « {doc['name']} » supprimée définitivement avec {res.deleted_count} compte(s) et toutes ses données", pharmacy_id)
+    return {"status": "supprimé", "accounts_deleted": res.deleted_count}
 
 
 class EmailTestIn(BaseModel):
@@ -8392,7 +8587,7 @@ async def create_demo_request(payload: DemoRequestIn, request: Request):
         "ip": ip, "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.demo_requests.insert_one({**doc})
-    notify_to = os.environ.get("DEMO_NOTIFY_EMAIL", "")
+    notify_to = os.environ.get("DEMO_NOTIFY_EMAIL", "").strip() or "info@arriereplanrh.com"
     sent = False
     if os.environ.get("RESEND_API_KEY", "") and notify_to:
         rows = "".join(

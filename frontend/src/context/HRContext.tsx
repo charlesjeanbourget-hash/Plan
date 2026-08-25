@@ -459,7 +459,24 @@ const HRProviderInner = ({ scope, token, children }: InnerProps) => {
     updatePharmacy: (id, patch) =>
       patchList('pharmacies', (items) => items.map((i) => (i.id === id ? { ...i, ...patch } : i))),
     addBranch: (b) => patchList('branches', (items) => [...items, { ...b, id: uid() }]),
-    deleteBranch: (id) => patchList('branches', (items) => items.filter((i) => i.id !== id)),
+    deleteBranch: (id) => {
+      const doomedShifts = state.shifts.filter((s) => s.branchId === id).map((s) => s.id);
+      setState((prev) => ({
+        ...prev,
+        branches: prev.branches.filter((b) => b.id !== id),
+        employees: prev.employees.map((e) => ({
+          ...e,
+          branchId: e.branchId === id ? '' : e.branchId,
+          branchIds: e.branchIds ? e.branchIds.filter((bid) => bid !== id) : e.branchIds,
+        })),
+        shifts: prev.shifts.filter((s) => s.branchId !== id),
+      }));
+      if (canSync && getToken()) {
+        doomedShifts.forEach((sid) => {
+          void axios.delete(`${API}/shifts/${sid}`, { headers: authHeaders() }).catch(() => undefined);
+        });
+      }
+    },
     addResource: (r) => patchList('resources', (items) => [...items, { ...r, id: uid() }]),
     updateResource: (id, patch) =>
       patchList('resources', (items) => items.map((i) => (i.id === id ? { ...i, ...patch } : i))),
