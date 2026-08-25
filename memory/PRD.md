@@ -610,3 +610,9 @@ Bug rapporté : « les données du superadmin se retrouvent dans les nouveaux co
 - Cause PROD identifiée (capture client) : expéditeur configuré = charlesjeanbourget@gmail.com → Resend refuse (« gmail.com domain is not verified »). Solution communiquée : mettre info@arriereplanrh.com dans le panneau expéditeur DE LA PROD + Enregistrer + tester.
 - Garde-fou ajouté : POST /api/email-settings refuse (400 + message explicite) les domaines publics (gmail, hotmail, outlook, yahoo, icloud, live, videotron, aol) ; le toast frontend affiche désormais le détail de l'erreur (12 s).
 - Préversion revalidée : envoi externe OK depuis info@arriereplanrh.com.
+
+## Itération 56 (25 août 2026) — Entrée = champ suivant dans tous les formulaires — testée (Playwright)
+- Handler global (App.tsx, keydown capture) : Entrée dans un input de formulaire → preventDefault + focus sur le PROCHAIN champ de saisie (input/textarea/select/combobox visibles, hors checkbox/radio/boutons) ; après le dernier champ → focus sur le bouton de soumission (Entrée dessus soumet alors normalement). Textarea non affecté (retour à la ligne conservé).
+- Vérifié : connexion (courriel → mdp → bouton → soumission) + dialogue Nouvel employé (Prénom → Nom, dialogue non soumis).
+- PROD (même conversation) : le client a corrigé l'expéditeur en prod (faute de frappe arrireplanrh → arriereplanrh) — envois confirmés fonctionnels en production (« ok ça marche »).
+

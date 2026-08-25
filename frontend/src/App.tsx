@@ -88,6 +88,37 @@ function App(): JSX.Element {
     if (currentUser?.role === 'superadmin') setActiveModule('superadmin');
   }, [currentUser?.role]);
 
+  useEffect(() => {
+    // Entrée dans un champ = passer au champ suivant (au lieu de soumettre le formulaire)
+    const onEnter = (e: KeyboardEvent): void => {
+      if (e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.metaKey) return;
+      const target = e.target as HTMLElement;
+      if (!(target instanceof HTMLInputElement)) return;
+      if (['checkbox', 'radio', 'button', 'submit', 'reset', 'file'].includes(target.type)) return;
+      const form = target.closest('form');
+      if (!form) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const fields = Array.from(form.querySelectorAll<HTMLElement>(
+        'input:not([type=hidden]):not([disabled]), textarea:not([disabled]), select:not([disabled]), [role="combobox"]'
+      )).filter((el) => {
+        if (el.offsetParent === null) return false;
+        if (el instanceof HTMLInputElement && ['checkbox', 'radio', 'button', 'submit', 'reset', 'file'].includes(el.type)) return false;
+        return true;
+      });
+      const idx = fields.indexOf(target);
+      const next = fields[idx + 1];
+      if (next) {
+        next.focus();
+        return;
+      }
+      const submit = form.querySelector<HTMLElement>('button[type="submit"], input[type="submit"]');
+      if (submit && submit.offsetParent !== null) submit.focus();
+    };
+    document.addEventListener('keydown', onEnter, true);
+    return () => document.removeEventListener('keydown', onEnter, true);
+  }, []);
+
   const replacementToken = new URLSearchParams(window.location.search).get('remplacement');
   if (replacementToken) {
     return (
