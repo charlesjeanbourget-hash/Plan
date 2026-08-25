@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Shift, Branch, Employee } from '@/types';
 import { AlertTriangle, CheckCircle2, Building2 } from 'lucide-react';
 import { FillGapDialog, CoverageGap } from '@/components/FillGapDialog';
+import { branchLabel } from '@/lib/branchLabel';
 
 interface Props {
   days: string[];
@@ -131,7 +132,7 @@ export const MultiBranchView = ({ days, branches, shifts, getEmployee, weather, 
                           type="button"
                           data-testid={`gap-fill-empty-${c.id || 'none'}-${d}`}
                           disabled={!canManage}
-                          onClick={() => setGapToFill({ date: d, start: openTime, end: closeTime, branchId: c.id, branchName: c.name })}
+                          onClick={() => setGapToFill({ date: d, start: openTime, end: closeTime, branchId: c.id, branchName: branchLabel({ name: c.name, address: c.address ?? '' }) })}
                           className={`inline-flex items-center gap-1 rounded-full bg-red-50 border border-red-200 text-red-700 px-2 py-0.5 text-[10px] font-bold ${canManage ? 'hover:bg-red-100 hover:border-red-300 cursor-pointer' : 'cursor-default'}`}
                           title={canManage ? 'Cliquez pour combler ce trou' : undefined}
                         >
@@ -157,7 +158,7 @@ export const MultiBranchView = ({ days, branches, shifts, getEmployee, weather, 
                               type="button"
                               data-testid={`gap-fill-${c.id || 'none'}-${d}-${s}`}
                               disabled={!canManage}
-                              onClick={() => setGapToFill({ date: d, start: fmtMin(s), end: fmtMin(e), branchId: c.id, branchName: c.name })}
+                              onClick={() => setGapToFill({ date: d, start: fmtMin(s), end: fmtMin(e), branchId: c.id, branchName: branchLabel({ name: c.name, address: c.address ?? '' }) })}
                               className={`inline-flex items-center gap-1 rounded-full bg-red-50 border border-red-200 text-red-700 px-2 py-0.5 text-[10px] font-bold mr-1 ${canManage ? 'hover:bg-red-100 hover:border-red-300 cursor-pointer' : 'cursor-default'}`}
                               title={canManage ? 'Cliquez pour combler ce trou' : undefined}
                             >

@@ -211,9 +211,9 @@ export default function EmployeeDossier(): JSX.Element {
                 <div className="space-y-2">
                   <p className="text-slate-500">Succursale{(selected.branchIds ?? []).length > 1 ? 's' : ''} : <span className="font-semibold text-slate-800" data-testid="employee-branches-label">{
                     ((selected.branchIds ?? []).length > 0 ? (selected.branchIds ?? []) : [selected.branchId])
-                      .map((bid) => state.branches.find((b) => b.id === bid)?.name)
+                      .map((bid) => { const b = state.branches.find((x) => x.id === bid); return b ? branchLabel(b) : undefined; })
                       .filter(Boolean)
-                      .join(', ') || '—'
+                      .join(' · ') || '—'
                   }</span></p>
                   <p className="text-slate-500">Embauche : <span className="font-semibold text-slate-800">{selected.hireDate}</span></p>
                   <p className="text-slate-500">Taux horaire : <span className="font-semibold text-slate-800">{(selected.hourlyRate ?? 0).toFixed(2)} $ / h</span></p>
@@ -451,6 +451,7 @@ export default function EmployeeDossier(): JSX.Element {
                         key={b.id}
                         type="button"
                         data-testid={`edit-extra-branch-${b.id}`}
+                        title={branchLabel(b)}
                         onClick={() => setEditForm((f) => ({ ...f, branchIds: on ? f.branchIds.filter((x) => x !== b.id) : [...f.branchIds, b.id] }))}
                         className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${on ? 'bg-emerald-600 border-emerald-600 text-white' : 'bg-white border-slate-200 text-slate-600 hover:border-emerald-300'}`}
                       >

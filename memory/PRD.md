@@ -639,3 +639,8 @@ Bug rapporté : « les données du superadmin se retrouvent dans les nouveaux co
 - Wizard essai gratuit : nom + adresse exacte OBLIGATOIRES pour chaque succursale (même une seule — étape « Nommez votre succursale et son adresse ») ; bouton Continuer désactivé tant que les 2 champs sont vides ; résumé « nom (adresse) ».
 - Helper `/app/frontend/src/lib/branchLabel.ts` (« nom — adresse », tolère address absent) appliqué à TOUS les sélecteurs de succursale : EmployeeDossier (3), SchedulingModule (filtre + succursale du quart), PayrollModule, LicensesModule, HireCandidateDialog (nouveau Select hire-branch-select), ScheduleProposals (budgets par succursale), MySpaceModule (sous-titre), MultiBranchView (adresse sous le nom de colonne, slate-500 11px).
 - PROD : redéploiement requis.
+
+## Itération 54 (25 août 2026) — Couverture complète « nom — adresse » validée à 100 % (iteration_52.json)
+- Corrigés et validés en UI : shift-branch-select (succursale du quart, multi-succursales), employee-branches-label (profil employé, séparateur « · »), colonne Succursale du Registre des licences, FillGapDialog (sous-titre), contraste adresse MultiBranchView (slate-500/11px), infobulle title=branchLabel sur les puces « Succursales additionnelles ».
+- Test complet : 7/7 sélecteurs + wizard + régressions = 100 %, aucune erreur console. Données ph1 restaurées après test.
+- PROD : redéploiement requis.

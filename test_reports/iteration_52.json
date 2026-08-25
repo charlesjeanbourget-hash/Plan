@@ -1,0 +1,27 @@
+{
+  "summary": "Frontend-only (itération 52). Vérification de l'affichage « Nom de succursale — adresse exacte » PARTOUT. PRIORITÉ 1 VALIDÉE : après avoir affecté Sophie Lavoie à 2 succursales (edit-extra-branch), le Select « Succursale du quart » (shift-branch-select) liste bien ['Succursale Centre-Ville — 1200 rue Sainte-Catherine, Montréal', 'Succursale Plateau — 88 av. du Parc, Montréal'] — l'échec de l'itération 51 est corrigé ; l'employé a été REMIS à sa succursale d'origine (label vérifié identique à l'état initial). Autres vérifications toutes conformes : employee-branches-label (nom — adresse, et liste des 2 succursales quand multi), colonne Succursale du Registre des licences (3 lignes au format nom — adresse), FillGapDialog (sous-titre « lundi 24 août · Succursale Centre-Ville — 1200 rue Sainte-Catherine, Montréal · 08:00–21:00 ») ouvert depuis un trou de MultiBranchView, adresse d'en-tête de colonne MultiBranchView désormais text-[11px] text-slate-500 (contraste corrigé). RÉGRESSION des 6 sélecteurs : employee-branch-select (Nouvel employé), employees-branch-filter, scheduling-branch-filter, payroll-branch-filter, license-branch-filter, hire-branch-select (Recrutement → statut « Embauché(e) » sur c3, statut RESTAURÉ à « Présélection ») et sous-titre Mon espace (compte julie@luminahr.ca : « ATP · Succursale Centre-Ville — 1200 rue Sainte-Catherine, Montréal ») — tous au format « nom — adresse ». RÉGRESSION wizard essai 1 succursale : onboarding-next désactivé si nom vide, désactivé avec nom seul, activé avec nom+adresse ; résumé « QA52 Succursale Nord (999 boul. QA, Laval) » ; succursale créée avec les bonnes valeurs (dialogue Succursales). Aucune erreur console sur Employés, Horaires (semaine + vue Succursales), Paie, Licences, Recrutement, Mon espace, wizard. Backend non retesté (demande frontend uniquement).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Employés → Modifier le dossier → « Succursales additionnelles »", "issues": ["Les puces de sélection (edit-extra-branch-*) affichent uniquement le nom de la succursale (« Succursale Plateau »), sans l'adresse — cohérent visuellement (puces compactes) mais divergent de la règle « nom — adresse » ; à confirmer côté produit (facultatif : ajouter title={branchLabel(b)} en infobulle)."]},
+      {"screen": "Recrutement", "issues": ["Compteur « Pipeline de candidatures (3) » désormais cohérent avec les 3 lignes affichées — l'anomalie signalée en itération 51 n'est plus reproductible."]}
+    ]
+  },
+  "test_report_links": ["/app/test_reports/iteration_52.json"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "SchedulingModule.tsx dépasse toujours ~1500 lignes (limite recommandée 700) — découper le dialogue de quart, les filtres et les panneaux en sous-composants.",
+    "MultiBranchView passe déjà `branchLabel({name, address ?? ''})` à FillGapDialog ; le champ CoverageGap.branchName contient donc un libellé d'affichage — il est aussi réutilisé dans les notes envoyées au backend (note open-shift, notes de demande de remplacement). C'est acceptable, mais si l'on veut un nom « pur » côté données, séparer branchName (donnée) et branchLabel (affichage).",
+    "EmployeeDossier employee-branches-label joint les succursales par ', ' alors que chaque libellé contient déjà des virgules dans l'adresse (« … Sainte-Catherine, Montréal, Succursale Plateau — … ») — lisibilité perfectible : utiliser ' · ' comme séparateur ou une liste."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "non testé (demande frontend uniquement)", "frontend": "100% (7/7 sélecteurs + FillGapDialog + tableau Licences + wizard essai conformes)"},
+  "seed_data_creation": "1 compte/pharmacie d'essai temporaire créé (qa52branch@exemple.ca / « QA52 Pharmacie Test », id ph_8a23961d) puis SUPPRIMÉ (utilisateur + pharmacie + données liées) ; signup_events purgé avant et après. ph1 et ph_a89755dc intacts. Modifications temporaires ph1 restaurées : branchIds de Sophie Lavoie (retour à 1 succursale) et statut du candidat c3 (retour à « Présélection »).",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "admin@luminahr.ca / Nlpx!tTE3Aw27 · julie@luminahr.ca / O1ka!gfVV6e54 (lus dans /app/memory/test_credentials.md)",
+  "context_for_next_testing_agent": "Navigation : pas de route /login → [data-testid=footer-login-link] ; « Mon espace » n'existe PAS dans la sidebar admin (tester avec julie@luminahr.ca). hire-branch-select s'ouvre en passant le Select candidate-status-select-c3 à « Embauché(e) » — PENSER À RESTAURER « Présélection ». shift-branch-select n'apparaît que si l'employé est rattaché à ≥2 succursales (puces edit-extra-branch-* dans Modifier le dossier). Rate-limit essai 3/h/IP : purger db.signup_events avant inscription. Nettoyage des pharmacies d'essai : supprimer users + pharmacies + docs par pharmacy_id directement en Mongo (fait ici) ou via DELETE /api/superadmin/pharmacies/{id}.",
+  "rca_of_the_issue": "N/A — les 5 correctifs de l'itération 52 (shift-branch-select, employee-branches-label, colonne Licences, FillGapDialog, contraste MultiBranchView) sont tous confirmés en direct dans l'UI ; aucun défaut fonctionnel trouvé."
+}

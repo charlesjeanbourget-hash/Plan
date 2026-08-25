@@ -244,7 +244,7 @@ export default function LicensesModule(): JSX.Element {
                     <p className="font-semibold text-slate-800">{emp.firstName} {emp.lastName}</p>
                     <p className="text-xs text-slate-500">{emp.position}</p>
                   </td>
-                  <td className="p-4 text-slate-600">{branch?.name ?? '—'}</td>
+                  <td className="p-4 text-slate-600">{branch ? branchLabel(branch) : '—'}</td>
                   <td className="p-4 font-mono text-slate-700">{lic?.license_number ?? '—'}</td>
                   <td className="p-4 text-slate-600">{lic?.expiry_date ?? '—'}</td>
                   <td className="p-4">
