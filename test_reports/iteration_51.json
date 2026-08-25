@@ -1,0 +1,31 @@
+{
+  "summary": "Frontend-only (itération 51). Testé : (1) wizard essai gratuit à 1 succursale — étape « Nommez votre succursale et son adresse » s'affiche bien, onboarding-next DÉSACTIVÉ tant que nom OU adresse est vide, activé quand les deux sont remplis, résumé affiche « nom (adresse) », wizard terminé → dashboard ; succursale créée avec nom+adresse exacts (dialogue Succursales). (2) Sélecteurs « nom — adresse » vérifiés en direct chez ph1 (admin@luminahr.ca) : Employés→Nouvel employé, Paie (payroll-branch-filter), Licences (license-branch-filter), Horaires (scheduling-branch-filter), Embauche candidat (hire-branch-select) — tous au format « Succursale Centre-Ville — 1200 rue Sainte-Catherine, Montréal ». (3) MultiBranchView : adresse affichée sous le nom de chaque colonne. (4) Régressions : wizard 2 succursales (2 étapes obligatoires, 2 succursales créées), « Configurer plus tard » (onboarding-skip) → dashboard, login admin ph1, login superadmin (tableau 5 pharmacies + boutons supprimer). Nettoyage effectué : 3 pharmacies d'essai + comptes supprimés, signup_events purgé, statut du candidat c3 restauré à « Présélection ». Aucune erreur console. Backend non retesté (aucun changement).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "SchedulingModule — dialogue de création de quart, « Succursale du quart »", "issue": "Ce Select n'utilise PAS le helper branchLabel : il affiche uniquement `b.name` (ligne ~1374 : state.branches.find((b) => b.id === bid)?.name). Exigence non respectée pour ce sélecteur (visible seulement quand l'employé choisi est rattaché à >1 succursale). Correctif : {branchLabel(state.branches.find(b=>b.id===bid) ?? {name: bid, address: ''})}.", "selector": "[data-testid=\"shift-branch-select\"]", "priority": "HIGH"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Horaires → vue Succursales (MultiBranchView)", "issues": ["L'adresse sous le nom de colonne est en text-[10px] text-slate-400 sur fond blanc (contraste ≈3:1, sous WCAG AA pour du très petit texte) — passer à text-slate-500/600 et 11px"]},
+      {"screen": "Recrutement", "issues": ["Le titre indique « Pipeline de candidatures (5) » alors que seules 3 lignes sont affichées (incohérence de compteur préexistante, hors périmètre de cette itération)"]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/cleanup_iteration51.py"],
+  "action_items": [
+    "Utiliser branchLabel() dans le Select « Succursale du quart » de SchedulingModule.tsx (~ligne 1374) pour afficher « nom — adresse »",
+    "Optionnel : augmenter le contraste de l'adresse dans les en-têtes de colonnes de MultiBranchView (slate-400 → slate-500/600)"
+  ],
+  "critical_code_review_comments": [
+    "branchLabel() faisait b.address.trim() alors que des Branch peuvent arriver sans champ address (données legacy / imports) → TypeError et écran blanc. Corrigé en (b.address ?? '').trim() — seul changement appliqué par le testeur.",
+    "SchedulingModule.tsx dépasse 1400 lignes — à découper (dialogue de quart, filtres, panneaux) pour respecter la limite de 700 lignes."
+  ],
+  "updated_files": ["/app/frontend/src/lib/branchLabel.ts", "/app/backend/tests/cleanup_iteration51.py"],
+  "success_rate": {"backend": "non testé (demande frontend uniquement)", "frontend": "95% (6/7 sélecteurs conformes ; shift-branch-select non conforme)"},
+  "seed_data_creation": "3 comptes/pharmacies d'essai temporaires créés puis SUPPRIMÉS (qa1b…, qa2b…, qaskip…@exemple.ca). ph1 et ph_a89755dc intacts. signup_events purgé.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "admin@luminahr.ca / Nlpx!tTE3Aw27 · jeffmenard78@hotmail.com / JeffSecure2026!x (lus dans /app/memory/test_credentials.md)",
+  "context_for_next_testing_agent": "Rate-limit essai 3/h/IP : purger db.signup_events avant chaque série d'inscriptions. Pas de route /login → [data-testid=footer-login-link]. Consentement Loi 25 avant le wizard → [data-testid=privacy-consent-accept]. Le Select « Succursale du quart » (shift-branch-select) n'apparaît que si l'employé est rattaché à ≥2 succursales — pour le tester, affecter d'abord un employé à 2 succursales dans EmployeeDossier. Toujours supprimer les pharmacies d'essai via /app/backend/tests/cleanup_iteration51.py.",
+  "rca_of_the_issue": "shift-branch-select : lors de la migration vers le helper branchLabel, l'occurrence de SchedulingModule.tsx ligne ~1374 (dialogue de quart) a été oubliée car elle utilise `.find()` sur un id au lieu d'un `.map()` sur state.branches — le grep de migration ne l'a pas captée."
+}

@@ -52,8 +52,8 @@ export const MultiBranchView = ({ days, branches, shifts, getEmployee, weather, 
 
   const branchOfShift = (s: Shift): string => s.branchId || (getEmployee(s.employeeId)?.branchId ?? '');
   const hasUnassigned = shifts.some((s) => !branchOfShift(s));
-  const columns: { id: string; name: string }[] = [
-    ...branches.map((b) => ({ id: b.id, name: b.name })),
+  const columns: { id: string; name: string; address?: string }[] = [
+    ...branches.map((b) => ({ id: b.id, name: b.name, address: b.address })),
     ...(hasUnassigned ? [{ id: '', name: 'Sans succursale' }] : []),
   ];
 
@@ -96,6 +96,9 @@ export const MultiBranchView = ({ days, branches, shifts, getEmployee, weather, 
                 return (
                   <th key={c.id} data-testid={`branch-col-${c.id || 'none'}`} className="text-left px-4 py-3 min-w-[190px]">
                     <p className="font-bold text-slate-800 text-xs">{c.name}</p>
+                    {c.address && c.address.trim() && (
+                      <p className="text-[11px] font-normal text-slate-500 truncate max-w-[190px]" title={c.address}>{c.address}</p>
+                    )}
                     <p className="text-[10px] font-normal text-slate-400 mt-0.5">
                       {weekHours(c.id).toFixed(1).replace('.', ',')} h planifiées ·{' '}
                       {gapDays > 0

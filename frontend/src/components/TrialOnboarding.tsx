@@ -22,16 +22,14 @@ export default function TrialOnboarding(): JSX.Element {
   const [address, setAddress] = useState('');
   const [city, setCity] = useState('');
   const [branchCount, setBranchCount] = useState(1);
-  const [branches, setBranches] = useState<BranchDraft[]>([]);
+  const [branches, setBranches] = useState<BranchDraft[]>([{ name: '', address: '' }]);
   const [employeeCount, setEmployeeCount] = useState('');
   const [hours, setHours] = useState('');
   const [stepIndex, setStepIndex] = useState(0);
   const [submitting, setSubmitting] = useState(false);
 
   const steps = useMemo<StepKey[]>(() => {
-    const branchSteps: StepKey[] = branchCount > 1
-      ? Array.from({ length: branchCount }, (_, i) => `branch-${i}` as StepKey)
-      : [];
+    const branchSteps: StepKey[] = Array.from({ length: branchCount }, (_, i) => `branch-${i}` as StepKey);
     return ['address', 'branchCount', ...branchSteps, 'employees', 'hours', 'summary'];
   }, [branchCount]);
 
@@ -41,23 +39,22 @@ export default function TrialOnboarding(): JSX.Element {
   const chooseBranchCount = (n: number): void => {
     setBranchCount(n);
     setBranches((prev) =>
-      Array.from({ length: n }, (_, i) => prev[i] ?? { name: `Succursale ${i + 1}`, address: '' })
+      Array.from({ length: n }, (_, i) => prev[i] ?? { name: '', address: '' })
     );
   };
 
   const patchBranch = (i: number, patch: Partial<BranchDraft>): void =>
     setBranches((prev) => prev.map((b, idx) => (idx === i ? { ...b, ...patch } : b)));
 
+  const branchSummary = (b: BranchDraft): string =>
+    b.address.trim() ? `${b.name} (${b.address})` : b.name;
+
   const finalize = async (skipped: boolean): Promise<void> => {
     setSubmitting(true);
     try {
       if (!skipped) {
         const pid = currentUser?.pharmacyId ?? '';
-        if (branchCount === 1) {
-          addBranch({ pharmacyId: pid, name: 'Pharmacie principale', address: [address, city].filter(Boolean).join(', ') });
-        } else {
-          branches.forEach((b) => addBranch({ pharmacyId: pid, name: b.name.trim() || 'Succursale', address: b.address.trim() }));
-        }
+        branches.forEach((b) => addBranch({ pharmacyId: pid, name: b.name.trim(), address: b.address.trim() }));
       }
       await axios.post(
         `${API}/onboarding`,
@@ -86,6 +83,8 @@ export default function TrialOnboarding(): JSX.Element {
   const back = (): void => setStepIndex((i) => Math.max(i - 1, 0));
 
   const branchIdx = step.startsWith('branch-') ? Number(step.split('-')[1]) : -1;
+  const branchStepIncomplete = branchIdx >= 0
+    && !((branches[branchIdx]?.name ?? '').trim() && (branches[branchIdx]?.address ?? '').trim());
 
   return (
     <div data-testid="onboarding-page" className="min-h-screen bg-slate-50 flex flex-col">
@@ -157,10 +156,10 @@ export default function TrialOnboarding(): JSX.Element {
             <div className="space-y-5">
               <Building2 className="w-9 h-9 text-emerald-600" />
               <h1 className="font-heading text-2xl sm:text-3xl font-bold text-slate-900">
-                Succursale {branchIdx + 1} sur {branchCount}
+                {branchCount === 1 ? 'Nommez votre succursale et son adresse' : `Succursale ${branchIdx + 1} sur ${branchCount}`}
               </h1>
               <div className="space-y-2">
-                <Label>Nom de la succursale</Label>
+                <Label>Nom de la succursale <span className="text-red-500">*</span></Label>
                 <Input
                   data-testid="onboarding-branch-name-input"
                   value={branches[branchIdx]?.name ?? ''}
@@ -170,14 +169,15 @@ export default function TrialOnboarding(): JSX.Element {
                 />
               </div>
               <div className="space-y-2">
-                <Label>Adresse</Label>
+                <Label>Adresse exacte <span className="text-red-500">*</span></Label>
                 <Input
                   data-testid="onboarding-branch-address-input"
                   value={branches[branchIdx]?.address ?? ''}
                   onChange={(e) => patchBranch(branchIdx, { address: e.target.value })}
-                  placeholder="Adresse complète"
+                  placeholder="Ex. 123 rue Principale, Montréal"
                 />
               </div>
+              <p className="text-sm text-slate-500">Le nom et l'adresse exacte apparaîtront partout où vous choisissez une succursale (employés, horaires, paie…).</p>
             </div>
           )}
 
@@ -225,7 +225,7 @@ export default function TrialOnboarding(): JSX.Element {
               <h1 className="font-heading text-2xl sm:text-3xl font-bold text-slate-900">Tout est prêt !</h1>
               <div data-testid="onboarding-summary" className="bg-white rounded-2xl border border-slate-200 divide-y divide-slate-100 text-sm">
                 <div className="px-5 py-3 flex justify-between gap-4"><span className="text-slate-500">Adresse principale</span><span className="font-semibold text-slate-800 text-right">{[address, city].filter(Boolean).join(', ') || 'À compléter plus tard'}</span></div>
-                <div className="px-5 py-3 flex justify-between gap-4"><span className="text-slate-500">Succursales</span><span className="font-semibold text-slate-800 text-right">{branchCount === 1 ? 'Pharmacie principale' : branches.map((b) => b.name).join(' · ')}</span></div>
+                <div className="px-5 py-3 flex justify-between gap-4"><span className="text-slate-500">Succursales</span><span className="font-semibold text-slate-800 text-right">{branches.map((b) => branchSummary(b)).join(' · ')}</span></div>
                 <div className="px-5 py-3 flex justify-between gap-4"><span className="text-slate-500">Employés</span><span className="font-semibold text-slate-800">{employeeCount || 'Non précisé'}</span></div>
                 <div className="px-5 py-3 flex justify-between gap-4"><span className="text-slate-500">Heures d'ouverture</span><span className="font-semibold text-slate-800 text-right">{hours || 'Non précisées'}</span></div>
               </div>
@@ -247,7 +247,7 @@ export default function TrialOnboarding(): JSX.Element {
           <Button
             data-testid={step === 'summary' ? 'onboarding-finish' : 'onboarding-next'}
             onClick={next}
-            disabled={submitting}
+            disabled={submitting || branchStepIncomplete}
             className="rounded-full bg-emerald-600 hover:bg-emerald-700 px-8"
           >
             {step === 'summary' ? (submitting ? 'Enregistrement…' : 'Terminer la configuration') : 'Continuer'}

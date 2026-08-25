@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Sparkles, Loader2, Check, X, Trash2, CalendarPlus, AlertTriangle, ExternalLink, Wallet, Users, Layers, ListOrdered } from 'lucide-react';
 import { toast } from 'sonner';
 import { DEPARTMENTS } from '@/lib/pharmacy';
+import { branchLabel } from '@/lib/branchLabel';
 
 interface PrioritySet {
   id: string;
@@ -735,7 +736,7 @@ export const ScheduleProposals = (): JSX.Element => {
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-3 pt-3 border-t border-slate-100">
                   {state.branches.map((b) => (
                     <div key={b.id} className="space-y-1">
-                      <Label className="text-[11px] text-slate-500">Succursale {b.name}</Label>
+                      <Label className="text-[11px] text-slate-500">{branchLabel(b)}</Label>
                       <Input
                         data-testid={`gen-branch-budget-${b.id}`}
                         value={branchBudgets[b.id] ?? ''}

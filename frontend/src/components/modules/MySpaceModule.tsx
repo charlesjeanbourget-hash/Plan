@@ -21,6 +21,7 @@ import { MyProposalsPanel } from '@/components/MyProposalsPanel';
 import { MyEvaluationsPanel } from '@/components/MyEvaluationsPanel';
 import { ProfileEditor } from '@/components/ProfileEditor';
 import { toast } from 'sonner';
+import { branchLabel } from '@/lib/branchLabel';
 
 const LEAVE_TYPES: LeaveType[] = ['Vacances', 'Maladie', 'Personnel', 'Formation'];
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -166,7 +167,7 @@ export default function MySpaceModule(): JSX.Element {
     <div data-testid="myspace-module">
       <ModuleHeader
         title="Mon espace"
-        subtitle={`${me.position} · ${state.branches.find((b) => b.id === me.branchId)?.name ?? ''}`}
+        subtitle={`${me.position}${(() => { const b = state.branches.find((x) => x.id === me.branchId); return b ? ` · ${branchLabel(b)}` : ''; })()}`}
         action={
           <Button data-testid="export-my-data-button" variant="outline" onClick={() => void exportMyData()} className="rounded-full border-emerald-300 text-emerald-800 hover:bg-emerald-50">
             <ShieldCheck className="w-4 h-4 mr-1" /> Télécharger mes données

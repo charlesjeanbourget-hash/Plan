@@ -28,6 +28,7 @@ import { OpenShiftsPanel } from '@/components/OpenShiftsPanel';
 import { MultiBranchView } from '@/components/MultiBranchView';
 import { downloadSchedulePdf } from '@/lib/schedulePdf';
 import { hoursBetween } from '@/lib/schedule';
+import { branchLabel } from '@/lib/branchLabel';
 import { DEPARTMENTS } from '@/lib/pharmacy';
 import { toast } from 'sonner';
 
@@ -721,7 +722,7 @@ export default function SchedulingModule(): JSX.Element {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Toutes les succursales</SelectItem>
-              {state.branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+              {state.branches.map((b) => <SelectItem key={b.id} value={b.id}>{branchLabel(b)}</SelectItem>)}
             </SelectContent>
           </Select>
         </div>
@@ -1369,9 +1370,10 @@ export default function SchedulingModule(): JSX.Element {
                 <Select value={shiftBranch} onValueChange={setShiftBranch}>
                   <SelectTrigger data-testid="shift-branch-select"><SelectValue placeholder="Choisir la succursale" /></SelectTrigger>
                   <SelectContent>
-                    {dialogEmpBranches.map((bid) => (
-                      <SelectItem key={bid} value={bid}>{state.branches.find((b) => b.id === bid)?.name ?? bid}</SelectItem>
-                    ))}
+                    {dialogEmpBranches.map((bid) => {
+                      const b = state.branches.find((x) => x.id === bid);
+                      return <SelectItem key={bid} value={bid}>{b ? branchLabel(b) : bid}</SelectItem>;
+                    })}
                   </SelectContent>
                 </Select>
                 <p className="text-[11px] text-slate-400">Cet employé travaille dans plusieurs succursales — le coût du quart sera imputé au budget de la succursale choisie.</p>

@@ -9,6 +9,7 @@ import { downloadPayStub } from '@/lib/paystub';
 import { PunchHoursPanel } from '@/components/PunchHoursPanel';
 import { BudgetExportCard } from '@/components/BudgetExportCard';
 import { toast } from 'sonner';
+import { branchLabel } from '@/lib/branchLabel';
 
 const PAYROLL_STATUSES: PayrollStatus[] = ['En préparation', 'Validée', 'Payée'];
 
@@ -54,7 +55,7 @@ export default function PayrollModule(): JSX.Element {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Toutes les succursales</SelectItem>
-            {state.branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+            {state.branches.map((b) => <SelectItem key={b.id} value={b.id}>{branchLabel(b)}</SelectItem>)}
           </SelectContent>
         </Select>
       </div>

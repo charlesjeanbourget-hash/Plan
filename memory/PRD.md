@@ -634,3 +634,8 @@ Bug rapporté : « les données du superadmin se retrouvent dans les nouveaux co
 - **Suppression complète d'un compte (superadmin)** : bouton 🗑 sur chaque ligne du tableau des pharmacies → confirmation en TAPANT LE NOM EXACT → cascade totale : comptes users, hr_states, ~50 collections scoped pharmacy_id, login_attempts, password_resets, cache d'accès. Audit SUPPRESSION_PHARMACIE conservé.
 - **Suppression de succursale par l'admin** (dialogue Succursales) : avertissement détaillé (X employés détachés, Y quarts supprimés, irréversible) au lieu de l'ancien blocage ; deleteBranch (HRContext) fait maintenant la cascade locale (détache employés, purge shifts) + DELETE serveur des quarts.
 - PROD : redéploiement requis pour recevoir ces changements.
+
+## Itération 53 (25 août 2026) — Succursales nommées avec adresse exacte partout — testée (iteration_51.json : 6/7 puis 7/7 après correctif)
+- Wizard essai gratuit : nom + adresse exacte OBLIGATOIRES pour chaque succursale (même une seule — étape « Nommez votre succursale et son adresse ») ; bouton Continuer désactivé tant que les 2 champs sont vides ; résumé « nom (adresse) ».
+- Helper `/app/frontend/src/lib/branchLabel.ts` (« nom — adresse », tolère address absent) appliqué à TOUS les sélecteurs de succursale : EmployeeDossier (3), SchedulingModule (filtre + succursale du quart), PayrollModule, LicensesModule, HireCandidateDialog (nouveau Select hire-branch-select), ScheduleProposals (budgets par succursale), MySpaceModule (sous-titre), MultiBranchView (adresse sous le nom de colonne, slate-500 11px).
+- PROD : redéploiement requis.

@@ -13,6 +13,7 @@ import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ShieldCheck, FileUp, Eye, Trash2, Mail, Send, ScrollText, BellRing } from 'lucide-react';
 import { toast } from 'sonner';
+import { branchLabel } from '@/lib/branchLabel';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -210,7 +211,7 @@ export default function LicensesModule(): JSX.Element {
           <SelectContent>
             <SelectItem value="all">Toutes les succursales</SelectItem>
             {state.branches.map((b) => (
-              <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+              <SelectItem key={b.id} value={b.id}>{branchLabel(b)}</SelectItem>
             ))}
           </SelectContent>
         </Select>

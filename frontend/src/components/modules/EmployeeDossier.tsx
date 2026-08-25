@@ -20,6 +20,7 @@ import { EmployeeImportDialog } from '@/components/EmployeeImportDialog';
 import { useAuth } from '@/context/AuthContext';
 import axios from 'axios';
 import { toast } from 'sonner';
+import { branchLabel } from '@/lib/branchLabel';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -295,7 +296,7 @@ export default function EmployeeDossier(): JSX.Element {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Toutes les succursales</SelectItem>
-                {state.branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                {state.branches.map((b) => <SelectItem key={b.id} value={b.id}>{branchLabel(b)}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -372,7 +373,7 @@ export default function EmployeeDossier(): JSX.Element {
               <Select value={branchId} onValueChange={setBranchId}>
                 <SelectTrigger data-testid="employee-branch-select"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {state.branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                  {state.branches.map((b) => <SelectItem key={b.id} value={b.id}>{branchLabel(b)}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -434,7 +435,7 @@ export default function EmployeeDossier(): JSX.Element {
                 <Select value={editForm.branchId} onValueChange={(v) => setEditForm((f) => ({ ...f, branchId: v, branchIds: f.branchIds.filter((b) => b !== v) }))}>
                   <SelectTrigger data-testid="edit-branch-select"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {state.branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                    {state.branches.map((b) => <SelectItem key={b.id} value={b.id}>{branchLabel(b)}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>

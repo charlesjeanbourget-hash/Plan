@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
+import { branchLabel } from '@/lib/branchLabel';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -24,6 +25,7 @@ export const HireCandidateDialog = ({ candidate, suggestedPosition, onClose }: {
   const { token } = useAuth();
   const { state, addEmployee, addOnboardingItem } = useHR();
   const [position, setPosition] = useState<Position>('ATP');
+  const [branchId, setBranchId] = useState('');
   const [rate, setRate] = useState('');
   const [capacities, setCapacities] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -31,8 +33,10 @@ export const HireCandidateDialog = ({ candidate, suggestedPosition, onClose }: {
   useEffect(() => {
     if (!candidate) return;
     setPosition(suggestedPosition ?? 'ATP');
+    setBranchId(state.branches[0]?.id ?? '');
     setRate('');
     setCapacities([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [candidate, suggestedPosition]);
 
   const toggleCapacity = (c: string): void =>
@@ -51,7 +55,7 @@ export const HireCandidateDialog = ({ candidate, suggestedPosition, onClose }: {
       email: candidate.email,
       phone: candidate.phone,
       position,
-      branchId: state.branches[0]?.id ?? 'b1',
+      branchId: branchId || (state.branches[0]?.id ?? 'b1'),
       status: 'Actif',
       hireDate: today,
       hourlyRate: Math.max(0, Number(rate.replace(',', '.')) || 0),
@@ -114,6 +118,15 @@ export const HireCandidateDialog = ({ candidate, suggestedPosition, onClose }: {
             <Label>Taux horaire ($/h, optionnel)</Label>
             <Input data-testid="hire-rate-input" value={rate} onChange={(e) => setRate(e.target.value)} inputMode="decimal" placeholder="Ex. 22.50" />
           </div>
+        </div>
+        <div className="space-y-2">
+          <Label>Succursale d'affectation</Label>
+          <Select value={branchId} onValueChange={setBranchId}>
+            <SelectTrigger data-testid="hire-branch-select"><SelectValue placeholder="Choisir une succursale" /></SelectTrigger>
+            <SelectContent>
+              {state.branches.map((b) => <SelectItem key={b.id} value={b.id}>{branchLabel(b)}</SelectItem>)}
+            </SelectContent>
+          </Select>
         </div>
         <div className="space-y-2">
           <Label>Capacités et tâches maîtrisées ({capacities.length})</Label>
