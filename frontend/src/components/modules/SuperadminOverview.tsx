@@ -127,8 +127,9 @@ export const SuperadminOverview = ({ pharmacies: clientPharmacies }: { pharmacie
     try {
       await axios.post(`${API}/email-settings`, { sender_email: senderEmail, sender_name: senderName }, { headers });
       toast.success('Adresse d\'expéditeur enregistrée.');
-    } catch {
-      toast.error("Impossible d'enregistrer l'expéditeur.");
+    } catch (err) {
+      const detail = axios.isAxiosError(err) && err.response ? (err.response.data as { detail?: string }).detail : null;
+      toast.error(detail ?? "Impossible d'enregistrer l'expéditeur.", { duration: 12000 });
     }
   };
 

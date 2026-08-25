@@ -1547,9 +1547,21 @@ async def get_email_settings(principal: dict = Depends(get_principal)):
     return {**base, "default_sender": DEFAULT_SENDER}
 
 
+PUBLIC_EMAIL_DOMAINS = {"gmail.com", "hotmail.com", "outlook.com", "yahoo.com", "yahoo.ca",
+                        "icloud.com", "live.com", "live.ca", "hotmail.ca", "videotron.ca", "aol.com"}
+
+
 @api_router.post("/email-settings")
 async def save_email_settings(payload: EmailSettingsIn, su: dict = Depends(require_superadmin)):
-    doc = {"id": "global", "sender_email": payload.sender_email.strip(),
+    sender = payload.sender_email.strip().lower()
+    if sender:
+        domain = sender.split("@")[-1]
+        if domain in PUBLIC_EMAIL_DOMAINS:
+            raise HTTPException(status_code=400,
+                                detail=f"Impossible d'envoyer depuis @{domain} : ce domaine appartient à un fournisseur public et "
+                                       "ne peut pas être vérifié. Utilisez une adresse de VOTRE domaine vérifié sur Resend "
+                                       "(ex. info@arriereplanrh.com).")
+    doc = {"id": "global", "sender_email": sender,
            "sender_name": payload.sender_name.strip() or "Arrière Plan"}
     await db.email_settings.update_one({"id": "global"}, {"$set": doc}, upsert=True)
     await log_audit(su["email"], su["role"], "MODIFICATION_EXPEDITEUR", "courriel", "global",

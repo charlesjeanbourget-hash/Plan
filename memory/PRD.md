@@ -604,3 +604,9 @@ Bug rapporté : « les données du superadmin se retrouvent dans les nouveaux co
 
 ## Itération 54 (24 août 2026) — Recherche employés — testée (screenshot)
 - Barre de recherche (employee-search-input) dans la liste Dossiers Employés : par nom, poste ou courriel, insensible aux accents/majuscules (normalisation NFD), combinée au filtre succursale ; message « Aucun employé ne correspond » (employee-search-empty).
+
+
+## Itération 55 (25 août 2026) — Diagnostic prod « courriels ne partent pas » + garde-fou expéditeur — testé (curl)
+- Cause PROD identifiée (capture client) : expéditeur configuré = charlesjeanbourget@gmail.com → Resend refuse (« gmail.com domain is not verified »). Solution communiquée : mettre info@arriereplanrh.com dans le panneau expéditeur DE LA PROD + Enregistrer + tester.
+- Garde-fou ajouté : POST /api/email-settings refuse (400 + message explicite) les domaines publics (gmail, hotmail, outlook, yahoo, icloud, live, videotron, aol) ; le toast frontend affiche désormais le détail de l'erreur (12 s).
+- Préversion revalidée : envoi externe OK depuis info@arriereplanrh.com.
