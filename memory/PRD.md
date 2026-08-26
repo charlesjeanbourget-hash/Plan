@@ -649,3 +649,11 @@ Bug rapporté : « les données du superadmin se retrouvent dans les nouveaux co
 - Signalement utilisateur : sélections invisibles/perdues après refresh. REPRODUIT EN PRÉVERSION : la persistance FONCTIONNE (toggle → relogin/refresh → sélection conservée, réciprocité OK). Le bogue vu par l'utilisateur est en PRODUCTION (build plus ancien) → REDÉPLOIEMENT REQUIS.
 - Améliorations UX livrées (IncompatibilitiesPanel.tsx réécrit) : encadré « Sélectionnés (X) » en haut (puces rouges, ✕ pour retirer), barre de recherche par nom (insensible aux accents), confirmation visuelle « ✓ Enregistré — appliqué aux deux employés » (4 s) + indicateur « Enregistrement… », liste du bas = employés non sélectionnés uniquement, max-h avec défilement.
 - data-testids : incompat-selected-box, incompat-selected-{id}, incompat-search-input, incompat-saved, incompat-saving, incompat-count, incompat-no-results.
+
+## Itération 56 (26 août 2026) — Création de comptes de connexion par les admins/gestionnaires — testée 100 % (iteration_53.json : backend 11/11, frontend 3/3)
+- **Formulaire dans « Accès aux modules »** : si l'employé n'a pas de compte, l'admin crée son compte sur place (courriel prérempli depuis la fiche, rôle Employé/Gestionnaire) → compte lié + courriel d'invitation Resend avec mot de passe temporaire (affiché seulement si le courriel échoue). Fichier : ModuleAccessPanel.tsx.
+- **Bouton « Inscription du personnel »** (en-tête module Employés) : dialogue listant les employés avec courriel sans compte, case à cocher par ligne, rôle suggéré selon poste (propriétaire→Admin, pharmacien/chef/superviseur/gérant→Gestionnaire, autres→Employé, modifiable), envoi en lot + résultats détaillés. Fichier : StaffEnrollmentDialog.tsx.
+- **Import Excel** : si le fichier contient des courriels, comptes créés AUTOMATIQUEMENT post-import (rôle dérivé du poste) + panneau de résultats dans le dialogue (import-invite-results). Fichier : EmployeeImportDialog.tsx.
+- Backend : POST /api/accounts/for-employee, POST /api/accounts/bulk-invite (max 200), GET /api/accounts/linked-employee-ids — admin + gestionnaire (le gestionnaire ne peut PAS créer de compte administrateur : 403/skip), employé 403. Helper _create_employee_account (validations FR, is_temporary_password, audit).
+- lib/accountRole.ts : roleForPosition + labels.
+- PROD : redéploiement requis.

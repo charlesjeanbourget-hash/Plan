@@ -17,6 +17,7 @@ import { SalaryHistory } from '@/components/SalaryHistory';
 import { PayrollNumbersDialog } from '@/components/PayrollNumbersDialog';
 import { BranchManagerDialog } from '@/components/BranchManagerDialog';
 import { EmployeeImportDialog } from '@/components/EmployeeImportDialog';
+import { StaffEnrollmentDialog } from '@/components/StaffEnrollmentDialog';
 import { useAuth } from '@/context/AuthContext';
 import axios from 'axios';
 import { toast } from 'sonner';
@@ -49,6 +50,7 @@ export default function EmployeeDossier(): JSX.Element {
   const [hourlyRate, setHourlyRate] = useState('25');
   const [branchId, setBranchId] = useState(state.branches[0]?.id ?? '');
   const [payrollNumbersOpen, setPayrollNumbersOpen] = useState(false);
+  const [enrollmentOpen, setEnrollmentOpen] = useState(false);
   const [branchesOpen, setBranchesOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -163,6 +165,9 @@ export default function EmployeeDossier(): JSX.Element {
               <Button data-testid="import-employees-button" variant="outline" onClick={() => setImportOpen(true)} className="rounded-full border-bronze-300 text-bronze-800 hover:bg-bronze-50">
                 <FileSpreadsheet className="w-4 h-4 mr-1" /> Importer (Excel)
               </Button>
+              <Button data-testid="staff-enrollment-button" variant="outline" onClick={() => setEnrollmentOpen(true)} className="rounded-full border-bronze-300 text-bronze-800 hover:bg-bronze-50">
+                <KeySquare className="w-4 h-4 mr-1" /> Inscription du personnel
+              </Button>
               <Button data-testid="payroll-numbers-button" variant="outline" onClick={() => setPayrollNumbersOpen(true)} className="rounded-full border-bronze-300 text-bronze-800 hover:bg-bronze-50">
                 <Hash className="w-4 h-4 mr-1" /> Matricules paie
               </Button>
@@ -176,6 +181,7 @@ export default function EmployeeDossier(): JSX.Element {
       <PayrollNumbersDialog open={payrollNumbersOpen} onClose={() => setPayrollNumbersOpen(false)} />
       <BranchManagerDialog open={branchesOpen} onClose={() => setBranchesOpen(false)} />
       <EmployeeImportDialog open={importOpen} onClose={() => setImportOpen(false)} />
+      <StaffEnrollmentDialog open={enrollmentOpen} onClose={() => setEnrollmentOpen(false)} />
       {state.employees.length === 0 ? (
         <EmptyState text="Aucun employé. Ajoutez votre premier membre d'équipe." />
       ) : selected ? (

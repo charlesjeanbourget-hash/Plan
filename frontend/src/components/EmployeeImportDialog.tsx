@@ -5,9 +5,10 @@ import { useHR } from '@/context/HRContext';
 import { useAuth } from '@/context/AuthContext';
 import { POSITIONS, Position } from '@/types';
 import { DEPARTMENTS } from '@/lib/pharmacy';
+import { roleForPosition, ACCOUNT_ROLE_LABELS, AccountRole } from '@/lib/accountRole';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { FileSpreadsheet, Upload, Download, CheckCircle2, AlertTriangle, XCircle, Loader2 } from 'lucide-react';
+import { FileSpreadsheet, Upload, Download, CheckCircle2, AlertTriangle, XCircle, Loader2, Mail } from 'lucide-react';
 import { toast } from 'sonner';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -97,6 +98,17 @@ interface ParsedRow {
 
 const AVATAR_COLORS = ['bg-emerald-600', 'bg-sky-600', 'bg-amber-600', 'bg-rose-600', 'bg-teal-600', 'bg-indigo-600'];
 
+interface InviteResult {
+  employee_id: string;
+  email: string;
+  name?: string;
+  role?: string;
+  created: boolean;
+  email_sent?: boolean;
+  temporary_password?: string | null;
+  reason?: string;
+}
+
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -109,6 +121,7 @@ export const EmployeeImportDialog = ({ open, onClose }: Props): JSX.Element => {
   const [rows, setRows] = useState<ParsedRow[]>([]);
   const [fileName, setFileName] = useState('');
   const [importing, setImporting] = useState(false);
+  const [inviteResults, setInviteResults] = useState<InviteResult[] | null>(null);
 
   const reset = (): void => {
     setRows([]);
@@ -236,6 +249,7 @@ export const EmployeeImportDialog = ({ open, onClose }: Props): JSX.Element => {
     if (ok.length === 0) return;
     setImporting(true);
     const puts: Promise<unknown>[] = [];
+    const createdEmps: { empId: string; row: ParsedRow }[] = [];
     ok.forEach((r, i) => {
       const emp = addEmployee({
         firstName: r.firstName, lastName: r.lastName, email: r.email, phone: r.phone,
@@ -243,14 +257,36 @@ export const EmployeeImportDialog = ({ open, onClose }: Props): JSX.Element => {
         hourlyRate: r.hourlyRate, weeklyHours: r.weeklyHours, address: r.address,
         emergencyContact: r.emergencyContact, avatarColor: AVATAR_COLORS[i % AVATAR_COLORS.length],
       });
+      createdEmps.push({ empId: emp.id, row: r });
       const body: Record<string, unknown> = { hourly_rate: r.hourlyRate, employee_name: `${r.firstName} ${r.lastName}` };
       if (r.department) body.department = r.department;
       puts.push(axios.put(`${API}/profiles/${emp.id}`, body, { headers: { Authorization: `Bearer ${token ?? ''}` } }).catch(() => null));
     });
     await Promise.all(puts);
-    setImporting(false);
     const dups = rows.filter((r) => r.status === 'duplicate').length;
-    toast.success(`${ok.length} employé(s) importés${dups > 0 ? ` · ${dups} ignorés (déjà présents)` : ''} — il ne reste qu'à cocher les préférences et compétences dans chaque profil.`);
+    const withEmail = createdEmps.filter((x) => x.row.email.trim());
+    if (withEmail.length > 0) {
+      try {
+        const r = await axios.post<{ results: InviteResult[]; created: number }>(
+          `${API}/accounts/bulk-invite`,
+          { items: withEmail.map((x) => ({
+              employee_id: x.empId, email: x.row.email.trim(),
+              name: `${x.row.firstName} ${x.row.lastName}`, role: roleForPosition(x.row.position) })) },
+          { headers: { Authorization: `Bearer ${token ?? ''}` } });
+        setImporting(false);
+        setRows([]);
+        setFileName('');
+        if (fileRef.current) fileRef.current.value = '';
+        setInviteResults(r.data.results);
+        toast.success(`${ok.length} employé(s) importés${dups > 0 ? ` · ${dups} ignorés (déjà présents)` : ''} · ${r.data.created} invitation(s) de compte envoyée(s) automatiquement.`, { duration: 8000 });
+        return;
+      } catch {
+        toast.warning('Employés importés, mais l\'envoi automatique des invitations a échoué — utilisez le bouton « Inscription du personnel ».', { duration: 10000 });
+      }
+    } else {
+      toast.success(`${ok.length} employé(s) importés${dups > 0 ? ` · ${dups} ignorés (déjà présents)` : ''} — ajoutez leurs courriels pour leur créer des comptes de connexion.`);
+    }
+    setImporting(false);
     reset();
     onClose();
   };
@@ -260,7 +296,7 @@ export const EmployeeImportDialog = ({ open, onClose }: Props): JSX.Element => {
   const errCount = rows.filter((r) => r.status === 'error').length;
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) { reset(); onClose(); } }}>
+    <Dialog open={open} onOpenChange={(v) => { if (!v) { reset(); setInviteResults(null); onClose(); } }}>
       <DialogContent data-testid="employee-import-dialog" className="max-w-3xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="font-heading inline-flex items-center gap-2">
@@ -287,6 +323,26 @@ export const EmployeeImportDialog = ({ open, onClose }: Props): JSX.Element => {
           />
           {fileName && <span className="text-xs text-slate-500">{fileName}</span>}
         </div>
+        {inviteResults && (
+          <div className="space-y-2" data-testid="import-invite-results">
+            <p className="text-sm font-bold text-slate-900 inline-flex items-center gap-2">
+              <Mail className="w-4 h-4 text-emerald-600" /> Comptes de connexion créés automatiquement
+            </p>
+            {inviteResults.map((r) => (
+              <div key={r.employee_id} className={`rounded-lg border px-4 py-2 text-xs ${r.created ? 'border-emerald-200 bg-emerald-50/50' : 'border-amber-200 bg-amber-50/50'}`}>
+                <span className="font-semibold text-slate-800">{r.name || r.email}</span>{' — '}
+                {r.created
+                  ? r.email_sent
+                    ? <>compte {ACCOUNT_ROLE_LABELS[(r.role as AccountRole) ?? 'employee']} créé, invitation envoyée à {r.email}</>
+                    : <>compte créé, courriel non livré — mot de passe temporaire : <span className="font-mono font-bold">{r.temporary_password}</span></>
+                  : r.reason}
+              </div>
+            ))}
+            <Button data-testid="import-invite-close" onClick={() => { setInviteResults(null); onClose(); }} className="w-full rounded-full bg-emerald-600 hover:bg-emerald-700">
+              Fermer
+            </Button>
+          </div>
+        )}
         <p className="text-[11px] text-slate-400">
           Colonnes reconnues (français ou anglais) : Prénom, Nom (ou Nom complet), Courriel, Téléphone, Poste, Taux horaire, Succursale, Date d'embauche, Heures par semaine, Département, Adresse, Contact d'urgence. Les doublons (courriel ou nom déjà au dossier) sont ignorés automatiquement.
         </p>

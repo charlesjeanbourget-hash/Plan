@@ -8317,6 +8317,86 @@ async def set_module_overrides(employee_id: str, payload: ModuleOverridesIn, pri
     return {"module_overrides": overrides}
 
 
+class EmployeeAccountIn(BaseModel):
+    employee_id: str
+    email: str
+    name: str = ""
+    role: str = "employee"
+
+
+class BulkInviteIn(BaseModel):
+    items: list[EmployeeAccountIn] = []
+
+
+ACCOUNT_ROLES = ("employee", "manager", "admin")
+
+
+async def _create_employee_account(pid: str, item: EmployeeAccountIn) -> dict:
+    email = item.email.strip().lower()
+    base = {"employee_id": item.employee_id, "email": email, "name": item.name, "created": False}
+    if "@" not in email or "." not in email.split("@")[-1]:
+        return {**base, "reason": "Courriel invalide"}
+    if await db.users.find_one({"email": email}):
+        return {**base, "reason": "Un compte existe déjà avec ce courriel"}
+    if await db.users.find_one({"pharmacy_id": pid, "employee_id": item.employee_id}):
+        return {**base, "reason": "Cet employé a déjà un compte lié"}
+    role = item.role if item.role in ACCOUNT_ROLES else "employee"
+    temp = gen_temp_password()
+    doc = {"id": str(uuid.uuid4()), "email": email, "password_hash": hash_password(temp),
+           "name": (item.name.strip() or email)[:120], "role": role, "pharmacy_id": pid,
+           "employee_id": item.employee_id, "is_temporary_password": True, "suspended": False,
+           "created_at": datetime.now(timezone.utc).isoformat()}
+    await db.users.insert_one(doc)
+    email_sent = await send_credentials_email(item.name.strip() or email, email, temp)
+    return {"employee_id": item.employee_id, "email": email, "name": item.name, "role": role,
+            "created": True, "email_sent": email_sent,
+            "temporary_password": None if email_sent else temp}
+
+
+@api_router.post("/accounts/for-employee")
+async def create_account_for_employee(payload: EmployeeAccountIn, principal: dict = Depends(get_principal)):
+    if principal["role"] not in ("admin", "manager", "superadmin"):
+        raise HTTPException(status_code=403, detail="Réservé aux administrateurs et gestionnaires.")
+    if principal["role"] == "manager" and payload.role == "admin":
+        raise HTTPException(status_code=403, detail="Seul un administrateur peut créer un compte administrateur.")
+    pid = scoped_pid(principal)
+    res = await _create_employee_account(pid, payload)
+    if not res.get("created"):
+        raise HTTPException(status_code=400, detail=res.get("reason", "Création impossible."))
+    await log_audit(principal["email"], principal["role"], "CREATION_COMPTE_EMPLOYE", "utilisateur", res["email"],
+                    f"Compte {res['role']} créé pour l'employé {payload.employee_id} (invitation par courriel)", pid)
+    return res
+
+
+@api_router.post("/accounts/bulk-invite")
+async def bulk_invite_accounts(payload: BulkInviteIn, principal: dict = Depends(get_principal)):
+    if principal["role"] not in ("admin", "manager", "superadmin"):
+        raise HTTPException(status_code=403, detail="Réservé aux administrateurs et gestionnaires.")
+    pid = scoped_pid(principal)
+    results = []
+    for item in payload.items[:200]:
+        if principal["role"] == "manager" and item.role == "admin":
+            results.append({"employee_id": item.employee_id, "email": item.email, "name": item.name,
+                            "created": False, "reason": "Seul un administrateur peut créer un compte administrateur"})
+            continue
+        results.append(await _create_employee_account(pid, item))
+    created = sum(1 for r in results if r.get("created"))
+    if results:
+        await log_audit(principal["email"], principal["role"], "INSCRIPTION_PERSONNEL", "utilisateur", pid,
+                        f"Inscription du personnel : {created} compte(s) créé(s) sur {len(results)} demandé(s)", pid)
+    return {"results": results, "created": created}
+
+
+@api_router.get("/accounts/linked-employee-ids")
+async def linked_employee_ids(principal: dict = Depends(get_principal)):
+    if principal["role"] not in ("admin", "manager", "superadmin"):
+        raise HTTPException(status_code=403, detail="Réservé aux administrateurs et gestionnaires.")
+    pid = scoped_pid(principal)
+    docs = await db.users.find({"pharmacy_id": pid, "employee_id": {"$nin": [None, ""]}},
+                               {"_id": 0, "employee_id": 1}).to_list(2000)
+    return {"ids": [d["employee_id"] for d in docs]}
+
+
 REPORT_CATALOG = [
     {"id": "planifie_vs_travaille", "title": "Temps planifié vs travaillé",
      "desc": "Heures à l'horaire et heures pointées des 7 derniers jours, par employé."},
