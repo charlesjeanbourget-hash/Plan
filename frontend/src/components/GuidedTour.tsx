@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { MockSchedule, MockPunch, MockTasks, MockChat, MockDelivery, MockLicenses } from '@/components/LandingMockups';
 import { Sparkles, Fingerprint, ListChecks, MessagesSquare, Truck, ShieldCheck, Play, Pause, ChevronLeft, ChevronRight, Clock3, CheckCircle2, LucideIcon } from 'lucide-react';
 
@@ -66,14 +66,25 @@ const STEPS: TourStep[] = [
 
 export const GuidedTour = (): JSX.Element => {
   const [step, setStep] = useState(0);
-  const [playing, setPlaying] = useState(true);
+  const [playing, setPlaying] = useState(() =>
+    typeof window === 'undefined' || !window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   const [cycle, setCycle] = useState(0);
+  const [inView, setInView] = useState(true);
+  const sectionRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
-    if (!playing) return undefined;
+    const el = sectionRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') return undefined;
+    const obs = new IntersectionObserver(([e]) => setInView(e.isIntersecting), { threshold: 0.15 });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!playing || !inView) return undefined;
     const t = window.setTimeout(() => setStep((s) => (s + 1) % STEPS.length), STEP_SECONDS * 1000);
     return () => window.clearTimeout(t);
-  }, [playing, step, cycle]);
+  }, [playing, inView, step, cycle]);
 
   const goTo = (i: number): void => {
     setStep((i + STEPS.length) % STEPS.length);
@@ -85,11 +96,8 @@ export const GuidedTour = (): JSX.Element => {
     setCycle((c) => c + 1);
   };
 
-  const s = STEPS[step];
-  const Icon = s.icon;
-
   return (
-    <section className="bg-white" data-testid="guided-tour-section" id="visite">
+    <section ref={sectionRef} className="bg-white" data-testid="guided-tour-section" id="visite">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-14 sm:py-20">
         <div className="flex flex-wrap items-end justify-between gap-4 mb-8">
           <div>
@@ -123,7 +131,7 @@ export const GuidedTour = (): JSX.Element => {
                     className="block h-full bg-emerald-400"
                     style={{
                       animation: `tourProgress ${STEP_SECONDS}s linear forwards`,
-                      animationPlayState: playing ? 'running' : 'paused',
+                      animationPlayState: playing && inView ? 'running' : 'paused',
                     }}
                   />
                 )}
@@ -132,22 +140,34 @@ export const GuidedTour = (): JSX.Element => {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-10 items-center px-5 sm:px-8 py-8 sm:py-10 relative">
-            <div className="lg:col-span-5" key={`text-${step}`}>
-              <div className="animate-fade-up">
-                <p className="text-xs uppercase tracking-[0.2em] text-emerald-400 font-bold mb-3 inline-flex items-center gap-2">
-                  <Icon className="w-4 h-4" /> {s.kicker}
-                </p>
-                <h3 data-testid="tour-step-title" className="font-heading text-xl sm:text-2xl font-extrabold text-white leading-snug mb-3">
-                  {s.title}
-                </h3>
-                <p className="text-sm text-slate-300 mb-5 max-w-md">{s.desc}</p>
-                <ul className="space-y-2.5 mb-7">
-                  {s.bullets.map((b) => (
-                    <li key={b} className="flex items-start gap-2.5 text-sm text-slate-200">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" /> {b}
-                    </li>
-                  ))}
-                </ul>
+            <div className="lg:col-span-5">
+              <div className="grid">
+                {STEPS.map((st, i) => {
+                  const StepIcon = st.icon;
+                  const active = i === step;
+                  return (
+                    <div
+                      key={st.kicker}
+                      aria-hidden={!active}
+                      className={`col-start-1 row-start-1 ${active ? 'animate-fade-up' : 'invisible pointer-events-none'}`}
+                    >
+                      <p className="text-xs uppercase tracking-[0.2em] text-emerald-400 font-bold mb-3 inline-flex items-center gap-2">
+                        <StepIcon className="w-4 h-4" /> {st.kicker}
+                      </p>
+                      <h3 data-testid={active ? 'tour-step-title' : undefined} className="font-heading text-xl sm:text-2xl font-extrabold text-white leading-snug mb-3">
+                        {st.title}
+                      </h3>
+                      <p className="text-sm text-slate-300 mb-5 max-w-md">{st.desc}</p>
+                      <ul className="space-y-2.5 mb-7">
+                        {st.bullets.map((b) => (
+                          <li key={b} className="flex items-start gap-2.5 text-sm text-slate-200">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" /> {b}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  );
+                })}
               </div>
               <div className="flex items-center gap-3">
                 <button
@@ -180,9 +200,17 @@ export const GuidedTour = (): JSX.Element => {
               </div>
             </div>
 
-            <div className="lg:col-span-7 min-w-0" key={`mock-${step}`}>
-              <div className="animate-fade-up rounded-2xl bg-gradient-to-br from-white/5 to-white/[0.02] border border-white/10 p-2 sm:p-4">
-                {s.mock}
+            <div className="lg:col-span-7 min-w-0">
+              <div className="grid">
+                {STEPS.map((st, i) => (
+                  <div
+                    key={st.kicker}
+                    aria-hidden={i !== step}
+                    className={`col-start-1 row-start-1 rounded-2xl bg-gradient-to-br from-white/5 to-white/[0.02] border border-white/10 p-2 sm:p-4 ${i === step ? 'animate-fade-up' : 'invisible pointer-events-none'}`}
+                  >
+                    {st.mock}
+                  </div>
+                ))}
               </div>
             </div>
           </div>

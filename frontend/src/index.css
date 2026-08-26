@@ -88,6 +88,20 @@
   animation: floatSoft 6.5s ease-in-out 1.2s infinite;
 }
 
+/* Stabilité mobile/tablette : pas d'animations flottantes sur petits écrans ni en mouvement réduit */
+@media (max-width: 767px), (prefers-reduced-motion: reduce) {
+  .animate-float,
+  .animate-float-slow {
+    animation: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-up {
+    animation: none;
+  }
+}
+
 /* Mode simplifié : textes agrandis + contrastes renforcés pour le personnel moins à l'aise avec les petits caractères */
 html.simple-mode {
   font-size: 125%;

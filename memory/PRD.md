@@ -657,3 +657,10 @@ Bug rapporté : « les données du superadmin se retrouvent dans les nouveaux co
 - Backend : POST /api/accounts/for-employee, POST /api/accounts/bulk-invite (max 200), GET /api/accounts/linked-employee-ids — admin + gestionnaire (le gestionnaire ne peut PAS créer de compte administrateur : 403/skip), employé 403. Helper _create_employee_account (validations FR, is_temporary_password, audit).
 - lib/accountRole.ts : roleForPosition + labels.
 - PROD : redéploiement requis.
+
+## Itération 57 (26 août 2026) — Stabilité mobile/tablette de la page d'accueil — testée (mesures Playwright 390px)
+- Cause du « sursaut » : la visite guidée auto-défilante (10 s/étape) changeait de hauteur à chaque étape → toute la page sautait sur mobile.
+- Correctifs (GuidedTour.tsx) : toutes les étapes (textes + maquettes) empilées en grid col-start-1/row-start-1 (hauteur verrouillée = étape la plus haute, invisible/pointer-events-none pour les inactives) ; auto-défilement EN PAUSE quand la section n'est pas visible (IntersectionObserver, threshold 0.15) ; démarre en pause si prefers-reduced-motion.
+- index.css : animations flottantes (animate-float/-slow) désactivées < 768px et en prefers-reduced-motion ; animate-fade-up désactivée en reduced-motion.
+- Mesures : hauteur section identique sur les 6 étapes (1130px), hauteur document stable (27387px), débordement horizontal 0px.
+- PROD : redéploiement requis pour que l'utilisateur voie le correctif sur mobile.
