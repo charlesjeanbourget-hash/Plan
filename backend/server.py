@@ -3115,6 +3115,12 @@ SCHEDULE_SYSTEM = (
     "les heures d'ouverture, MÊME en période de faible achalandage, tant qu'il y a assez de personnel disponible et que le budget et "
     "les disponibilités le permettent. PRIORITÉ ABSOLUE au Laboratoire et à la caisse (service au comptoir — département Plancher) : "
     "s'il faut faire des compromis, couvre-les en premier et explique le compromis dans le summary.\n"
+    "- PERSONNEL REQUIS (DOTATION) : si personnel_requis_par_departement ou personnel_requis_par_succursale sont fournis, planifie "
+    "EN TOUT TEMPS pendant les heures d'ouverture AU MOINS ce nombre d'employés EN SIMULTANÉ dans chaque département et chaque "
+    "succursale concernés. Ces exigences PRIMENT sur la règle de couverture minimale par défaut et sur la règle d'achalandage "
+    "(l'achalandage peut AJOUTER du personnel au-delà du minimum, jamais en retirer en dessous). Vérifie plage par plage que le "
+    "compte est respecté. Si le budget, les disponibilités ou l'effectif rendent l'exigence impossible sur certaines plages, "
+    "couvre d'abord les plages les plus achalandées et détaille précisément chaque manque (jour, plage, département/succursale) dans le summary.\n"
     "- BUDGETS PAR DÉPARTEMENT ET PAR SUCCURSALE : s'ils sont fournis (budgets_par_departement, budgets_par_succursale), la masse "
     "salariale des quarts de chaque département — et celle des quarts rattachés à chaque succursale (champ branch_id du QUART) — ne doit "
     "pas dépasser son budget respectif, en plus du budget hebdomadaire global.\n"
@@ -3196,6 +3202,8 @@ class ScheduleSettingsIn(BaseModel):
     traffic_periods: list | None = None
     dept_budgets: dict | None = None
     branch_budgets: list | None = None
+    dept_staffing: dict | None = None
+    branch_staffing: list | None = None
     priorities: dict | None = None
     priority_sets: list | None = None
     auto_break: dict | None = None
@@ -3218,6 +3226,8 @@ async def get_schedule_settings(user: dict = Depends(get_current_user)):
             "traffic_periods": (doc or {}).get("traffic_periods", []),
             "dept_budgets": (doc or {}).get("dept_budgets", {}),
             "branch_budgets": (doc or {}).get("branch_budgets", []),
+            "dept_staffing": (doc or {}).get("dept_staffing", {}),
+            "branch_staffing": (doc or {}).get("branch_staffing", []),
             "priorities": (doc or {}).get("priorities", {}),
             "priority_sets": (doc or {}).get("priority_sets", []),
             "auto_break": (doc or {}).get("auto_break", {"enabled": False, "threshold_hours": 6, "minutes": 30, "paid": False})}
@@ -3283,6 +3293,37 @@ async def set_schedule_settings(payload: ScheduleSettingsIn, principal: dict = D
                 branch_list.append({"branch_id": str(b.get("branch_id") or ""),
                                     "branch_name": str(b.get("branch_name") or "")[:80], "budget": round(n, 2)})
         update["branch_budgets"] = branch_list
+    if payload.dept_staffing is not None:
+        staff_map = {}
+        for k, v in payload.dept_staffing.items():
+            if k not in DEPARTMENTS_BE:
+                continue
+            try:
+                n = int(float(v))
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="Personnel requis par département invalide.")
+            if not (0 <= n <= 100):
+                raise HTTPException(status_code=400, detail="Personnel requis par département invalide (0 à 100).")
+            if n > 0:
+                staff_map[k] = n
+        update["dept_staffing"] = staff_map
+    if payload.branch_staffing is not None:
+        if len(payload.branch_staffing) > 20:
+            raise HTTPException(status_code=400, detail="Maximum 20 exigences de succursale.")
+        staff_list = []
+        for b in payload.branch_staffing:
+            if not isinstance(b, dict):
+                raise HTTPException(status_code=400, detail="Personnel requis par succursale invalide.")
+            try:
+                n = int(float(b.get("count") or 0))
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="Personnel requis par succursale invalide.")
+            if not (0 <= n <= 100):
+                raise HTTPException(status_code=400, detail="Personnel requis par succursale invalide (0 à 100).")
+            if n > 0:
+                staff_list.append({"branch_id": str(b.get("branch_id") or ""),
+                                   "branch_name": str(b.get("branch_name") or "")[:80], "count": n})
+        update["branch_staffing"] = staff_list
     if payload.priorities is not None:
         update["priorities"] = _sanitize_priorities(payload.priorities)
     if payload.priority_sets is not None:
@@ -5306,6 +5347,8 @@ async def generate_schedule_content(proposal_id: str, pharmacy_id: str, week_sta
         traffic = settings.get("traffic") or {}
         dept_budgets = settings.get("dept_budgets") or {}
         branch_budgets = settings.get("branch_budgets") or []
+        dept_staffing = settings.get("dept_staffing") or {}
+        branch_staffing = settings.get("branch_staffing") or []
         priorities = settings.get("priorities") or {}
         traffic_payload = {}
         for i, d in enumerate(week_days):
@@ -5324,6 +5367,12 @@ async def generate_schedule_content(proposal_id: str, pharmacy_id: str, week_sta
                                         or "Aucun budget par département."),
             "budgets_par_succursale": ([{"succursale": b.get("branch_name", ""), "budget_max": f"{b.get('budget', 0):.2f} $"}
                                         for b in branch_budgets] or "Aucun budget par succursale."),
+            "personnel_requis_par_departement": ({d: f"{n} personne(s) EN SIMULTANÉ, en tout temps pendant les heures d'ouverture"
+                                                  for d, n in dept_staffing.items()}
+                                                 or "Aucune exigence de dotation par département."),
+            "personnel_requis_par_succursale": ([{"succursale": b.get("branch_name", ""), "branch_id": b.get("branch_id", ""),
+                                                  "personnes_minimum_en_simultane": b.get("count", 0)}
+                                                 for b in branch_staffing] or "Aucune exigence de dotation par succursale."),
             "priorites_du_gestionnaire": _priorities_text(priorities),
             "budget_salarial_hebdomadaire": (
                 f"{weekly_budget:.2f} $ — masse salariale MAXIMALE pour l'ensemble des quarts de la semaine"
@@ -8484,7 +8533,7 @@ async def build_report_html(pid: str, report_id: str) -> tuple[str, str]:
     raise HTTPException(status_code=404, detail="Rapport inconnu.")
 
 
-async def send_report_email(pid: str, report_id: str, recipients: list) -> bool:
+async def send_scheduled_report_email(pid: str, report_id: str, recipients: list) -> bool:
     if not os.environ.get("RESEND_API_KEY", "") or not recipients:
         return False
     subject, table = await build_report_html(pid, report_id)
@@ -8545,7 +8594,7 @@ async def set_report_schedule(report_id: str, payload: ReportScheduleIn, princip
 @api_router.post("/reports/{report_id}/send")
 async def send_report_now(report_id: str, principal: dict = Depends(get_principal)):
     pid = scoped_pid(principal)
-    ok = await send_report_email(pid, report_id, [principal["email"]])
+    ok = await send_scheduled_report_email(pid, report_id, [principal["email"]])
     if not ok:
         raise HTTPException(status_code=400, detail="Envoi impossible — le courriel expéditeur/destinataire n'est pas autorisé par Resend (vérifiez votre domaine sur resend.com/domains).")
     return {"ok": True, "sent_to": principal["email"]}
@@ -8562,7 +8611,7 @@ async def scheduled_reports_job():
             continue
         admins = await db.users.find({"pharmacy_id": s["pharmacy_id"], "role": {"$in": ["admin", "manager"]},
                                       "suspended": {"$ne": True}}, {"_id": 0, "email": 1}).to_list(20)
-        if await send_report_email(s["pharmacy_id"], s["report_id"], [a["email"] for a in admins]):
+        if await send_scheduled_report_email(s["pharmacy_id"], s["report_id"], [a["email"] for a in admins]):
             sent += 1
     if sent:
         logger.info(f"Rapports programmés envoyés : {sent}")

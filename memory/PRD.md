@@ -664,3 +664,11 @@ Bug rapporté : « les données du superadmin se retrouvent dans les nouveaux co
 - index.css : animations flottantes (animate-float/-slow) désactivées < 768px et en prefers-reduced-motion ; animate-fade-up désactivée en reduced-motion.
 - Mesures : hauteur section identique sur les 6 étapes (1130px), hauteur document stable (27387px), débordement horizontal 0px.
 - PROD : redéploiement requis pour que l'utilisateur voie le correctif sur mobile.
+
+## Itération 58 (28 août 2026) — Dotation requise par département et par succursale (génération IA) — testée E2E (curl + UI + vraie génération)
+- Le propriétaire définit le nombre MINIMUM de personnes présentes en simultané par département ET par succursale pour la génération d'horaires IA.
+- UI : nouveau volet « Personnel requis par département et par succursale (facultatif) » dans le dialogue Générer l'horaire par IA (gen-detail-staffing, gen-dept-staffing-{dept}, gen-branch-staffing-{branchId}) ; valeurs mémorisées dans les réglages et préremplies ; volet auto-ouvert si valeurs existantes.
+- Backend : schedule_settings.dept_staffing (dict, 0-100, départements valides seulement) + branch_staffing ([{branch_id, branch_name, count}], max 20) ; GET/PUT /schedule/settings ; injectés dans le prompt IA (personnel_requis_par_departement / personnel_requis_par_succursale) + règle SYSTEM « PERSONNEL REQUIS (DOTATION) » : prime sur la couverture par défaut, l'achalandage ajoute mais ne descend jamais sous le minimum, manques détaillés dans le summary.
+- Test réel : génération gpt-5.4 avec 3 employés + exigence Laboratoire 3/Plancher 2 → le summary signale explicitement la dotation impossible → contrainte bien transmise. Données de test nettoyées.
+- BONUS lint : bug préexistant corrigé — 2 fonctions send_report_email en conflit (la 2e écrasait la 1re et cassait silencieusement le rapport mensuel de licences) → la variante planifiée renommée send_scheduled_report_email.
+- PROD : redéploiement requis.

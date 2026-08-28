@@ -109,6 +109,8 @@ export const ScheduleProposals = (): JSX.Element => {
   const [genDept, setGenDept] = useState('all');
   const [deptBudgets, setDeptBudgets] = useState<Record<string, string>>({});
   const [branchBudgets, setBranchBudgets] = useState<Record<string, string>>({});
+  const [deptStaffing, setDeptStaffing] = useState<Record<string, string>>({});
+  const [branchStaffing, setBranchStaffing] = useState<Record<string, string>>({});
   const [prioDeptOrder, setPrioDeptOrder] = useState<string[]>([]);
   const [prioEmpType, setPrioEmpType] = useState('none');
   const [prioAvail, setPrioAvail] = useState('none');
@@ -142,7 +144,7 @@ export const ScheduleProposals = (): JSX.Element => {
 
   useEffect(() => {
     if (!genOpen || !token) return;
-    axios.get<{ weekly_budget: number; traffic: TrafficGrid; traffic_periods?: TrafficPeriod[]; dept_budgets?: Record<string, number>; branch_budgets?: { branch_id: string; budget: number }[]; priorities?: { dept_order?: string[]; employee_type?: string; availability?: string; extra?: string[] }; priority_sets?: PrioritySet[] }>(`${API}/schedule/settings`, { headers: { Authorization: `Bearer ${token}` } })
+    axios.get<{ weekly_budget: number; traffic: TrafficGrid; traffic_periods?: TrafficPeriod[]; dept_budgets?: Record<string, number>; branch_budgets?: { branch_id: string; budget: number }[]; dept_staffing?: Record<string, number>; branch_staffing?: { branch_id: string; count: number }[]; priorities?: { dept_order?: string[]; employee_type?: string; availability?: string; extra?: string[] }; priority_sets?: PrioritySet[] }>(`${API}/schedule/settings`, { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => {
         setBudget(r.data.weekly_budget > 0 ? String(r.data.weekly_budget) : '');
         setTraffic(r.data.traffic ?? {});
@@ -154,6 +156,12 @@ export const ScheduleProposals = (): JSX.Element => {
         const bb: Record<string, string> = {};
         (r.data.branch_budgets ?? []).forEach((b) => { bb[b.branch_id] = String(b.budget); });
         setBranchBudgets(bb);
+        const ds: Record<string, string> = {};
+        Object.entries(r.data.dept_staffing ?? {}).forEach(([k, v]) => { ds[k] = String(v); });
+        setDeptStaffing(ds);
+        const bs: Record<string, string> = {};
+        (r.data.branch_staffing ?? []).forEach((b) => { bs[b.branch_id] = String(b.count); });
+        setBranchStaffing(bs);
         const pr = r.data.priorities ?? {};
         setPrioDeptOrder(pr.dept_order ?? []);
         setPrioEmpType(pr.employee_type || 'none');
@@ -350,13 +358,21 @@ export const ScheduleProposals = (): JSX.Element => {
       const branchB = state.branches
         .map((b) => ({ branch_id: b.id, branch_name: b.name, budget: Math.max(0, Number((branchBudgets[b.id] ?? '').replace(',', '.')) || 0) }))
         .filter((b) => b.budget > 0);
+      const deptS: Record<string, number> = {};
+      DEPARTMENTS.forEach((d) => {
+        const n = Math.max(0, Math.floor(Number(deptStaffing[d] ?? '') || 0));
+        if (n > 0) deptS[d] = n;
+      });
+      const branchS = state.branches
+        .map((b) => ({ branch_id: b.id, branch_name: b.name, count: Math.max(0, Math.floor(Number(branchStaffing[b.id] ?? '') || 0)) }))
+        .filter((b) => b.count > 0);
       const priorities = {
         dept_order: prioDeptOrder,
         employee_type: prioEmpType === 'none' ? '' : prioEmpType,
         availability: prioAvail === 'none' ? '' : prioAvail,
         extra: prioExtra,
       };
-      await axios.put(`${API}/schedule/settings`, { weekly_budget: budgetNum, traffic, dept_budgets: deptB, branch_budgets: branchB, priorities }, { headers });
+      await axios.put(`${API}/schedule/settings`, { weekly_budget: budgetNum, traffic, dept_budgets: deptB, branch_budgets: branchB, dept_staffing: deptS, branch_staffing: branchS, priorities }, { headers });
       await axios.post(`${API}/schedule/generate`, {
         week_start: weekStart,
         instructions,
@@ -751,6 +767,49 @@ export const ScheduleProposals = (): JSX.Element => {
               )}
               <p className="text-[11px] text-slate-400 mt-2">
                 Vide = sans limite. L'IA respecte ces plafonds en plus du budget global de la semaine ; tout dépassement est signalé dans les points à vérifier.
+              </p>
+            </details>
+            <details data-testid="gen-detail-staffing" className="rounded-lg border border-slate-200 p-3" open={Object.values(deptStaffing).some((v) => Number(v) > 0) || Object.values(branchStaffing).some((v) => Number(v) > 0)}>
+              <summary className="text-xs font-semibold text-slate-600 cursor-pointer select-none">
+                Personnel requis par département et par succursale (facultatif)
+              </summary>
+              <p className="text-[11px] text-slate-500 mt-2">
+                Nombre minimum de personnes présentes <strong>en même temps</strong>, en tout temps pendant les heures d'ouverture. L'IA le respecte en priorité — l'achalandage peut ajouter du personnel, jamais descendre sous ce minimum.
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-3">
+                {DEPARTMENTS.map((d) => (
+                  <div key={d} className="space-y-1">
+                    <Label className="text-[11px] text-slate-500">{d}</Label>
+                    <Input
+                      data-testid={`gen-dept-staffing-${d}`}
+                      value={deptStaffing[d] ?? ''}
+                      onChange={(e) => setDeptStaffing((m) => ({ ...m, [d]: e.target.value }))}
+                      inputMode="numeric"
+                      placeholder="pers. min"
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                ))}
+              </div>
+              {state.branches.length > 0 && (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-3 pt-3 border-t border-slate-100">
+                  {state.branches.map((b) => (
+                    <div key={b.id} className="space-y-1">
+                      <Label className="text-[11px] text-slate-500">{branchLabel(b)}</Label>
+                      <Input
+                        data-testid={`gen-branch-staffing-${b.id}`}
+                        value={branchStaffing[b.id] ?? ''}
+                        onChange={(e) => setBranchStaffing((m) => ({ ...m, [b.id]: e.target.value }))}
+                        inputMode="numeric"
+                        placeholder="pers. min"
+                        className="h-8 text-xs"
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+              <p className="text-[11px] text-slate-400 mt-2">
+                Vide = aucune exigence. Vos exigences sont mémorisées pour les prochaines générations ; tout manque impossible à combler est expliqué dans le résumé de l'IA.
               </p>
             </details>
             <details data-testid="gen-detail-priorities" className="rounded-lg border border-slate-200 p-3" open={prioDeptOrder.length > 0 || prioEmpType !== 'none' || prioAvail !== 'none' || prioExtra.length > 0}>
