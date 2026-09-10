@@ -886,6 +886,7 @@ class UserUpdateIn(BaseModel):
     email: Optional[str] = None
     role: Optional[str] = None
     pharmacy_id: Optional[str] = None
+    employee_id: Optional[str] = None
     suspended: Optional[bool] = None
 
 
@@ -1047,10 +1048,18 @@ def scoped_pid(user: dict) -> str:
     raise HTTPException(status_code=403, detail="Aucune pharmacie associée à ce compte. Contactez votre administrateur.")
 
 
-async def get_principal(user: dict = Depends(get_current_user)):
+async def get_principal(request: Request, user: dict = Depends(get_current_user)):
     if user["role"] not in ("admin", "manager", "superadmin"):
         raise HTTPException(status_code=403, detail="Accès refusé : réservé aux administrateurs (Loi 25).")
-    return {"email": user["email"], "role": user["role"], "pharmacy_id": user.get("pharmacy_id") or ""}
+    pid = (user.get("pharmacy_id") or "").strip()
+    if user["role"] == "superadmin":
+        hdr = (request.headers.get("X-Pharmacy-Id") or request.query_params.get("pharmacy_id") or "").strip()
+        if hdr:
+            exists = await db.pharmacies.find_one({"id": hdr}, {"_id": 1})
+            if not exists:
+                raise HTTPException(status_code=404, detail="Pharmacie introuvable.")
+            pid = hdr
+    return {"email": user["email"], "role": user["role"], "pharmacy_id": pid}
 
 
 def license_scope(principal: dict, pharmacy_id: Optional[str] = None) -> dict:
@@ -1200,6 +1209,17 @@ async def sa_list_pharmacies(su: dict = Depends(require_superadmin)):
     for d in docs:
         d["accounts_count"] = counts.get(d["id"], 0)
     return docs
+
+
+@api_router.get("/superadmin/pharmacies/{pharmacy_id}")
+async def sa_get_pharmacy(pharmacy_id: str, su: dict = Depends(require_superadmin)):
+    doc = await db.pharmacies.find_one({"id": pharmacy_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Pharmacie introuvable.")
+    accounts = await db.users.find({"pharmacy_id": pharmacy_id}, {"_id": 0, "password_hash": 0}).to_list(500)
+    doc["accounts"] = [user_public({**a, "password_hash": ""}) for a in accounts]
+    doc["accounts_count"] = len(accounts)
+    return doc
 
 
 @api_router.post("/superadmin/pharmacies")
@@ -3827,6 +3847,104 @@ async def _notify_admins(pid: str, title: str, detail: str, module: str = "vacat
         "tone": tone, "created_at": datetime.now(timezone.utc).isoformat()})
 
 
+def _inclusive_dates(start: str, end: str) -> list:
+    s, e = date.fromisoformat(start), date.fromisoformat(end)
+    out = []
+    cur = s
+    while cur <= e:
+        out.append(cur.isoformat())
+        cur += timedelta(days=1)
+    return out
+
+
+async def _approved_leave_on(pid: str, employee_id: str, day: str) -> Optional[dict]:
+    if not employee_id:
+        return None
+    return await db.leave_requests.find_one({
+        "pharmacy_id": pid, "employee_id": employee_id, "status": "Approuvée",
+        "start_date": {"$lte": day}, "end_date": {"$gte": day}}, {"_id": 0, "id": 1, "type": 1})
+
+
+async def _vacate_shifts_for_leave(pid: str, leave_doc: dict, actor: str) -> dict:
+    """Retire les quarts de l'employé en congé et ouvre des quarts à combler."""
+    days = _inclusive_dates(leave_doc["start_date"], leave_doc["end_date"])
+    shifts = await db.shifts.find(
+        {"pharmacy_id": pid, "employee_id": leave_doc["employee_id"], "date": {"$in": days}},
+        {"_id": 0}).to_list(500)
+    opened = []
+    for sh in shifts:
+        os_doc = {
+            "id": str(uuid.uuid4()), "pharmacy_id": pid, "date": sh["date"],
+            "start": sh.get("start") or "09:00", "end": sh.get("end") or "17:00",
+            "department": sh.get("department") if sh.get("department") in DEPARTMENTS_BE else "Général",
+            "branch_id": sh.get("branch_id") or "", "positions": [],
+            "note": f"Libéré : congé {leave_doc.get('type') or ''} de {leave_doc.get('employee_name') or leave_doc['employee_id']}",
+            "status": "open", "mode": "premier_arrive", "applicants": [],
+            "claimed_by": None, "claimed_by_name": None, "claimed_at": None,
+            "created_by": actor, "created_at": datetime.now(timezone.utc).isoformat(),
+            "source_leave_id": leave_doc.get("id"), "source_shift_id": sh.get("id"),
+        }
+        await db.open_shifts.insert_one({**os_doc})
+        opened.append(os_doc)
+        await db.shifts.delete_one({"id": sh["id"], "pharmacy_id": pid})
+    if shifts:
+        await _mark_shifts_ready(pid)
+        await _notify_admins(
+            pid, "Quarts libérés par un congé",
+            f"{leave_doc.get('employee_name') or leave_doc['employee_id']} : {len(opened)} quart(s) ouvert(s) "
+            f"du {leave_doc['start_date']} au {leave_doc['end_date']}.",
+            module="scheduling", tone="amber")
+    return {"removed": len(shifts), "open_shifts": len(opened)}
+
+
+async def _auto_replacement_for_leave(pid: str, leave_doc: dict, actor: str) -> Optional[dict]:
+    """Crée une demande d'agence si l'officine a des partenaires pour le rôle."""
+    prof = await db.employee_profiles.find_one(
+        {"pharmacy_id": pid, "employee_id": leave_doc["employee_id"]},
+        {"_id": 0, "roles": 1, "department": 1}) or {}
+    role = (prof.get("roles") or ["ATP"])[0] if (prof.get("roles") or ["ATP"]) else "ATP"
+    agencies = await db.agencies.find(
+        {"$or": [{"pharmacy_id": pid}, {"pharmacy_id": ""}, {"global": True}], "roles": role},
+        {"_id": 0, "id": 1}).to_list(5)
+    partners = await db.global_partners.find({"roles": role}, {"_id": 0, "id": 1}).to_list(5)
+    if not agencies and not partners:
+        return None
+    days = _inclusive_dates(leave_doc["start_date"], leave_doc["end_date"])
+    # plages = quarts libérés s'il y en a, sinon journée type 09-17
+    vacated = await db.open_shifts.find(
+        {"pharmacy_id": pid, "source_leave_id": leave_doc.get("id")}, {"_id": 0}).to_list(50)
+    if vacated:
+        slots = [{"date": s["date"], "start": s["start"], "end": s["end"]} for s in vacated]
+    else:
+        slots = [{"date": d, "start": "09:00", "end": "17:00"} for d in days[:14]]
+    payload = ReplacementRequestIn(
+        role=str(role)[:60],
+        slots=[ReplacementSlot(**s) for s in slots],
+        notes=f"Congé {leave_doc.get('type') or ''} — {leave_doc.get('employee_name') or leave_doc['employee_id']}",
+        urgency="Urgente" if len(days) <= 3 else "Normale",
+        public_base_url=os.environ.get("PUBLIC_APP_URL", "https://arriereplanrh.com"),
+    )
+    # réutilise la création officielle (courriels agences)
+    fake_principal = {"email": actor, "role": "admin", "pharmacy_id": pid}
+    # inlining minimal insert to avoid circular call issues with Depends
+    token = secrets.token_urlsafe(24)
+    link = f"{payload.public_base_url.rstrip('/')}/?remplacement={token}"
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "id": str(uuid.uuid4()), "pharmacy_id": pid, "role": payload.role,
+        "slots": [s.model_dump() for s in payload.slots], "notes": payload.notes,
+        "urgency": payload.urgency, "status": "open", "token": token, "link": link,
+        "chosen_offer_id": None, "emails_sent": 0, "source_leave_id": leave_doc.get("id"),
+        "created_by": actor, "created_at": now, "updated_at": now,
+    }
+    await db.replacement_requests.insert_one({**doc})
+    await _notify_admins(pid, "Demande de remplacement ouverte",
+                         f"{payload.role} — {len(payload.slots)} plage(s) suite au congé de "
+                         f"{leave_doc.get('employee_name') or leave_doc['employee_id']}.",
+                         module="replacements", tone="sky")
+    return {"id": doc["id"], "link": link, "role": payload.role, "slots": len(payload.slots)}
+
+
 def _leave_admin_view(doc: dict) -> dict:
     return {k: v for k, v in doc.items() if k != "pharmacy_id"}
 
@@ -3918,11 +4036,21 @@ async def decide_leave_request(req_id: str, payload: LeaveDecideIn, principal: d
         + (f" Note : {note}" if note else ""),
         "emerald" if status == "Approuvée" else "red", module="vacations", icon="leave")
     remaining = await _leave_remaining(pid, doc["employee_id"], doc["type"]) if status == "Approuvée" else None
+    gaps = {"removed": 0, "open_shifts": 0}
+    replacement = None
+    if status == "Approuvée":
+        gaps = await _vacate_shifts_for_leave(pid, doc, principal["email"])
+        if gaps.get("open_shifts"):
+            try:
+                replacement = await _auto_replacement_for_leave(pid, doc, principal["email"])
+            except Exception as exc:
+                logger.error(f"Auto-remplacement congé {req_id} : {exc}")
     await log_audit(principal["email"], principal["role"],
                     "CONGE_APPROUVE" if status == "Approuvée" else "CONGE_REFUSE", "conge", req_id,
                     f"Demande {doc['type']} du {doc['start_date']} au {doc['end_date']} de "
-                    f"{doc.get('employee_name') or doc['employee_id']} : {status}", pid)
-    return {"status": status, "remaining": remaining}
+                    f"{doc.get('employee_name') or doc['employee_id']} : {status}"
+                    + (f" — {gaps['open_shifts']} quart(s) ouvert(s)" if gaps.get("open_shifts") else ""), pid)
+    return {"status": status, "remaining": remaining, "gaps": gaps, "replacement": replacement}
 
 
 @api_router.delete("/leave/requests/{req_id}")
@@ -5257,7 +5385,7 @@ class ScheduleGenIn(BaseModel):
     week_start: str
     instructions: str = ""
     approval_deadline_hours: int = 48
-    employees: list[RosterEmployee]
+    employees: list[RosterEmployee] = []
     absences: list[AbsenceIn] = []
     weekly_budget: float = -1
     department: str = ""
@@ -5614,15 +5742,39 @@ async def generate_schedule_content(proposal_id: str, pharmacy_id: str, week_sta
 async def schedule_generate(payload: ScheduleGenIn, principal: dict = Depends(get_principal)):
     pid = scoped_pid(principal)
     try:
-        date.fromisoformat(payload.week_start)
+        week0 = date.fromisoformat(payload.week_start)
     except ValueError:
         raise HTTPException(status_code=400, detail="Date de début de semaine invalide.")
-    if not payload.employees:
-        raise HTTPException(status_code=400, detail="Aucun employé fourni.")
+    week1 = week0 + timedelta(days=6)
     if not (1 <= payload.approval_deadline_hours <= 168):
         raise HTTPException(status_code=400, detail="Délai d'approbation invalide (1 à 168 h).")
     roster = [e.model_dump() for e in payload.employees]
+    if not roster:
+        profiles_db = await db.employee_profiles.find({"pharmacy_id": pid}, {"_id": 0}).to_list(500)
+        roster = [{
+            "id": p.get("employee_id"),
+            "name": p.get("employee_name") or p.get("employee_id"),
+            "position": (p.get("roles") or ["Général"])[0] if (p.get("roles") or ["Général"]) else "Général",
+            "branch_id": "", "branch_name": "", "branch_ids": [], "branch_names": [],
+            "hire_date": p.get("hire_date") or "",
+        } for p in profiles_db if p.get("employee_id")]
+    if not roster:
+        raise HTTPException(status_code=400, detail="Aucun employé dans cette officine.")
     absences = [a.model_dump() for a in payload.absences]
+    leave_docs = await db.leave_requests.find({
+        "pharmacy_id": pid, "status": "Approuvée",
+        "start_date": {"$lte": week1.isoformat()}, "end_date": {"$gte": week0.isoformat()},
+    }, {"_id": 0}).to_list(500)
+    seen_abs = {(a.get("employee_id"), a.get("start"), a.get("end")) for a in absences}
+    for lv in leave_docs:
+        key = (lv.get("employee_id"), lv.get("start_date"), lv.get("end_date"))
+        if key in seen_abs:
+            continue
+        absences.append({
+            "employee_id": lv.get("employee_id"), "employee_name": lv.get("employee_name") or "",
+            "start": lv.get("start_date"), "end": lv.get("end_date"), "type": lv.get("type") or "Congé",
+        })
+        seen_abs.add(key)
     profiles = []
     for e in roster:
         profiles.append(await get_or_create_profile(pid, e["id"], e["name"]))
@@ -5646,6 +5798,18 @@ async def schedule_generate(payload: ScheduleGenIn, principal: dict = Depends(ge
             if s.get("date") and s.get("start") and s.get("end") and s.get("employee_id"):
                 existing.append({"employee_id": str(s["employee_id"]), "employee_name": str(s.get("employee_name", "")),
                                  "date": str(s["date"]), "start": str(s["start"]), "end": str(s["end"])})
+        if not existing:
+            db_shifts = await db.shifts.find({
+                "pharmacy_id": pid,
+                "date": {"$gte": week0.isoformat(), "$lte": week1.isoformat()},
+            }, {"_id": 0}).to_list(500)
+            for s in db_shifts:
+                if s.get("date") and s.get("start") and s.get("end") and s.get("employee_id"):
+                    existing.append({
+                        "employee_id": str(s["employee_id"]),
+                        "employee_name": str(s.get("employee_name") or ""),
+                        "date": str(s["date"]), "start": str(s["start"]), "end": str(s["end"]),
+                    })
     now = datetime.now(timezone.utc)
     doc = {
         "id": str(uuid.uuid4()), "pharmacy_id": pid, "week_start": payload.week_start,
@@ -7061,6 +7225,16 @@ async def create_delivery(payload: DeliveryIn, principal: dict = Depends(get_pri
     if not payload.courier_employee_id:
         raise HTTPException(status_code=400, detail="Choisissez un livreur.")
     pid = scoped_pid(principal)
+    courier_user = await db.users.find_one(
+        {"employee_id": payload.courier_employee_id, "pharmacy_id": pid, "suspended": {"$ne": True}},
+        {"_id": 0, "email": 1, "name": 1})
+    if not courier_user:
+        raise HTTPException(status_code=400,
+                            detail="Ce livreur n'a pas de compte employé actif. Créez-lui un accès avant d'assigner une tournée.")
+    today = datetime.now(timezone.utc).astimezone(MONTREAL_TZ).date().isoformat()
+    on_leave = await _approved_leave_on(pid, payload.courier_employee_id, today)
+    if on_leave:
+        raise HTTPException(status_code=400, detail="Ce livreur est en congé approuvé aujourd'hui.")
     now = datetime.now(timezone.utc).isoformat()
     doc = {
         "id": str(uuid.uuid4()), "pharmacy_id": pid,
@@ -7074,10 +7248,13 @@ async def create_delivery(payload: DeliveryIn, principal: dict = Depends(get_pri
         "created_by": principal["email"], "created_at": now, "updated_at": now,
     }
     await db.deliveries.insert_one({**doc})
+    await _notify_shift_change(
+        pid, payload.courier_employee_id,
+        "Nouvelle livraison assignée",
+        f"{doc['client_name']} — {doc['address']}" + (" (URGENT)" if payload.priority == "urgent" else ""),
+        "red" if payload.priority == "urgent" else "sky", module="deliveries", icon="delivery")
     email_sent = False
     api_key = os.environ.get("RESEND_API_KEY", "")
-    courier_user = await db.users.find_one(
-        {"employee_id": payload.courier_employee_id, "pharmacy_id": pid}, {"_id": 0, "email": 1})
     if api_key and courier_user and courier_user.get("email"):
         resend.api_key = api_key
         sender = await get_sender()
@@ -7780,10 +7957,48 @@ async def choose_replacement_offer(request_id: str, payload: ChooseOfferIn, prin
                     "html": chosen_html if is_chosen else declined_html})
             except Exception as exc:
                 logger.error(f"Courriel décision agence {to_email} échoué : {exc}")
+    rem_id = "rem_" + uuid.uuid4().hex[:10]
+    rem_name = offer.get("candidate_name") or "Remplaçant"
+    await get_or_create_profile(pid, rem_id, rem_name)
+    await db.employee_profiles.update_one(
+        {"pharmacy_id": pid, "employee_id": rem_id},
+        {"$set": {
+            "hourly_rate": float(offer.get("hourly_rate") or 0),
+            "roles": [req.get("role") or "Remplaçant"],
+            "notes": f"Agence {offer.get('agency_name') or ''} — offre {offer.get('id')}",
+            "department": "",
+        }})
+    created_shifts = []
+    for slot in req.get("slots") or []:
+        if not slot.get("date") or not slot.get("start") or not slot.get("end"):
+            continue
+        shift_doc = {
+            "id": str(uuid.uuid4()), "pharmacy_id": pid, "employee_id": rem_id,
+            "employee_name": rem_name, "date": slot["date"], "start": slot["start"], "end": slot["end"],
+            "department": "Général", "resource_ids": [], "ai_generated": False,
+            "proposal_id": "", "branch_id": "",
+            "notes": f"Remplacement {req.get('role') or ''} — {offer.get('agency_name') or ''}",
+            "updated_at": now,
+        }
+        await db.shifts.insert_one({**shift_doc})
+        created_shifts.append(shift_doc["id"])
+        # fermer le quart ouvert correspondant s'il existe
+        await db.open_shifts.update_many(
+            {"pharmacy_id": pid, "status": "open", "date": slot["date"],
+             "start": slot["start"], "end": slot["end"]},
+            {"$set": {"status": "claimed", "claimed_by": rem_id, "claimed_by_name": rem_name,
+                      "claimed_at": now}})
+    if created_shifts:
+        await _mark_shifts_ready(pid)
+    await _notify_admins(pid, "Remplaçant intégré à l'horaire",
+                         f"{rem_name} ({offer.get('agency_name') or 'agence'}) : {len(created_shifts)} quart(s) ajouté(s).",
+                         module="scheduling", tone="emerald")
     await log_audit(principal["email"], principal["role"], "CHOIX_REMPLACANT", "remplacement", request_id,
                     f"{offer['candidate_name']} ({offer['agency_name']}) retenu(e) à {offer['hourly_rate']} $/h "
-                    f"pour {len(req['slots'])} plage(s)", pid)
-    return {"request": {**req, "status": "filled", "chosen_offer_id": offer["id"]}, "offer": {**offer, "status": "chosen"}}
+                    f"pour {len(req['slots'])} plage(s) — fiche {rem_id}, {len(created_shifts)} quart(s)", pid)
+    return {"request": {**req, "status": "filled", "chosen_offer_id": offer["id"]},
+            "offer": {**offer, "status": "chosen"},
+            "employee_id": rem_id, "shifts_created": len(created_shifts)}
 
 
 @api_router.delete("/replacements/requests/{request_id}")
@@ -8396,6 +8611,12 @@ async def _create_employee_account(pid: str, item: EmployeeAccountIn) -> dict:
            "employee_id": item.employee_id, "is_temporary_password": True, "suspended": False,
            "created_at": datetime.now(timezone.utc).isoformat()}
     await db.users.insert_one(doc)
+    conv = await db.conversations.find_one({"pharmacy_id": pid, "type": "equipe"})
+    if conv:
+        parts = list(conv.get("participants") or [])
+        if email not in parts:
+            parts.append(email)
+            await db.conversations.update_one({"id": conv["id"]}, {"$set": {"participants": parts}})
     email_sent = await send_credentials_email(item.name.strip() or email, email, temp)
     return {"employee_id": item.employee_id, "email": email, "name": item.name, "role": role,
             "created": True, "email_sent": email_sent,
@@ -8975,6 +9196,78 @@ async def unlock_identifier(payload: UnlockIn, su: dict = Depends(require_supera
     await log_audit(su["email"], su["role"], "DEVERROUILLAGE_COMPTE", "compte", ident,
                     "Verrou de connexion levé par le superadmin", "")
     return {"ok": True}
+
+
+class RepairTenantIn(BaseModel):
+    pharmacy_id: str
+    pharmacy_name: Optional[str] = None
+    link_admin_employee: bool = True
+
+
+@api_router.post("/superadmin/repair-tenant")
+async def sa_repair_tenant(payload: RepairTenantIn, su: dict = Depends(require_superadmin)):
+    """Raccorde comptes, fiches employés et chat d'équipe pour une officine."""
+    pid = payload.pharmacy_id.strip()
+    ph = await db.pharmacies.find_one({"id": pid}, {"_id": 0})
+    if not ph:
+        raise HTTPException(status_code=404, detail="Pharmacie introuvable.")
+    actions = []
+    if payload.pharmacy_name and payload.pharmacy_name.strip():
+        await db.pharmacies.update_one({"id": pid}, {"$set": {"name": payload.pharmacy_name.strip()[:120]}})
+        actions.append("nom_pharmacie")
+    users = await db.users.find({"pharmacy_id": pid}, {"_id": 0}).to_list(500)
+    emails = [u.get("email") for u in users if u.get("email")]
+    conv = await db.conversations.find_one({"pharmacy_id": pid, "type": "equipe"})
+    if conv:
+        await db.conversations.update_one({"id": conv["id"]}, {"$set": {"participants": emails}})
+        actions.append("chat_equipe")
+    elif emails:
+        await db.conversations.insert_one({
+            "id": str(uuid.uuid4()), "pharmacy_id": pid, "type": "equipe",
+            "name": "Toute l'équipe", "participants": emails,
+            "created_by": su["email"], "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        actions.append("chat_equipe_cree")
+    linked = 0
+    if payload.link_admin_employee:
+        for u in users:
+            if u.get("employee_id"):
+                continue
+            if u.get("role") not in ("admin", "manager"):
+                continue
+            emp_id = "emp_" + uuid.uuid4().hex[:10]
+            name = u.get("name") or u.get("email")
+            await db.employee_profiles.update_one(
+                {"pharmacy_id": pid, "employee_id": emp_id},
+                {"$setOnInsert": {
+                    "id": str(uuid.uuid4()), "pharmacy_id": pid, "employee_id": emp_id,
+                    "employee_name": name, "hourly_rate": 0, "roles": ["Pharmacien(ne) propriétaire"],
+                    "department": "", "punch_code_set": False,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "updated_by": su["email"],
+                }},
+                upsert=True,
+            )
+            await db.users.update_one({"id": u["id"]}, {"$set": {"employee_id": emp_id}})
+            linked += 1
+        if linked:
+            actions.append(f"admins_lies:{linked}")
+    profiles = await db.employee_profiles.find({"pharmacy_id": pid}, {"_id": 0, "employee_id": 1, "employee_name": 1}).to_list(2000)
+    for p in profiles:
+        exists = await db.leave_balances.find_one({"employee_id": p["employee_id"], "year": datetime.now(timezone.utc).year})
+        if not exists:
+            await db.leave_balances.insert_one({
+                "employee_id": p["employee_id"], "employee_name": p.get("employee_name") or "",
+                "year": datetime.now(timezone.utc).year,
+                "allocations": {"Vacances": 0.0, "Maladie": 0.0, "Mobile": 0.0},
+                "carryover": {"Vacances": 0.0, "Maladie": 0.0, "Mobile": 0.0},
+                "used": {"Vacances": 0, "Maladie": 0, "Mobile": 0},
+                "remaining": {"Vacances": 0.0, "Maladie": 0.0, "Mobile": 0.0},
+            })
+    actions.append("soldes_conges")
+    await log_audit(su["email"], su["role"], "REPARATION_OFFICINE", "pharmacie", pid,
+                    f"Réparation : {', '.join(actions)}", pid)
+    return {"ok": True, "pharmacy_id": pid, "actions": actions, "accounts": len(users), "profiles": len(profiles)}
 
 
 @api_router.get("/me/expiring")
