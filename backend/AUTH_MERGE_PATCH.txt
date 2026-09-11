@@ -1,0 +1,20 @@
+Coller JUSTE APRÈS :
+    api_router = APIRouter(prefix="/api")
+
+Ces 5 lignes :
+
+# Auth extraite : enregistrée AVANT les handlers plus bas (premier match FastAPI).
+from routers.auth import router as _extracted_auth_router
+from routers.auth_reset import router as _extracted_auth_reset_router
+api_router.include_router(_extracted_auth_router)
+api_router.include_router(_extracted_auth_reset_router)
+
+Ensuite smoke :
+- POST /api/auth/login
+- GET /api/auth/me
+- reset mot de passe
+- MFA si actif
+
+Ne pas merger dans main tant que le smoke n'est pas vert.
+Les anciens @api_router.post("/auth/...") restent dans server.py comme filet ;
+les routeurs extraits passent en premier.
