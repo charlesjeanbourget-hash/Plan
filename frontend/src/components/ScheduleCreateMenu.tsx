@@ -1,17 +1,17 @@
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
-import { Plus, Sparkles, Stethoscope, TreePalm, Megaphone } from 'lucide-react';
+import { Plus, Sparkles, Stethoscope, TreePalm, Megaphone, Building2 } from 'lucide-react';
 import { openSection } from '@/components/modules/shared';
 
 interface Props {
   onCreateShift: () => void;
   onCreateLeave: () => void;
   onCreateAppointment: () => void;
+  onCreateAgencyRequest?: () => void;
   canCreateAppointment: boolean;
 }
 
-/** Barre Agendrix : Créer à la main + Générer avec l’IA. */
-export function ScheduleCreateMenu({ onCreateShift, onCreateLeave, onCreateAppointment, canCreateAppointment }: Props): JSX.Element {
+export function ScheduleCreateMenu({ onCreateShift, onCreateLeave, onCreateAppointment, onCreateAgencyRequest, canCreateAppointment }: Props): JSX.Element {
   return (
     <div className="flex flex-wrap gap-2" data-testid="schedule-dual-path">
       <DropdownMenu>
@@ -35,14 +35,14 @@ export function ScheduleCreateMenu({ onCreateShift, onCreateLeave, onCreateAppoi
           <DropdownMenuItem data-testid="create-open-shift-item" onClick={() => openSection('sched-open-shifts')}>
             <Megaphone className="w-4 h-4 mr-2 text-bronze-600" /> Quart à combler
           </DropdownMenuItem>
+          {onCreateAgencyRequest && (
+            <DropdownMenuItem data-testid="create-agency-item" onClick={onCreateAgencyRequest}>
+              <Building2 className="w-4 h-4 mr-2 text-emerald-700" /> Demande aux agences
+            </DropdownMenuItem>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
-      <Button
-        data-testid="generate-ai-button"
-        variant="outline"
-        onClick={() => openSection('sched-proposals')}
-        className="rounded-full border-violet-300 text-violet-800 hover:bg-violet-50"
-      >
+      <Button data-testid="generate-ai-button" variant="outline" onClick={() => openSection('sched-proposals')} className="rounded-full border-violet-300 text-violet-800 hover:bg-violet-50">
         <Sparkles className="w-4 h-4 mr-1" /> Générer avec l’IA
       </Button>
     </div>
