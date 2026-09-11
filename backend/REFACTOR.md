@@ -3,8 +3,13 @@
 Branche `refactor/modular-backend`.
 
 - `backend/server.py` reste la source de vérité en production.
-- `backend/core/` : config Mongo/FastAPI + sécurité JWT extraite à l'identique.
-- `backend/routers/auth.py` : login + /me (première extraction).
+- `backend/core/` : config + sécurité JWT extraite à l'identique.
+- `backend/routers/auth.py` :
+  - POST /auth/login
+  - POST /auth/mfa/setup|enable|disable|verify
+  - POST /auth/accept-privacy
+  - GET /auth/me
+  - POST /auth/change-password
 
-Prochaines étapes : MFA, change-password, pharmacies, licences.
+Encore dans le monolithe : forgot/reset-password, admin users, pharmacies, licences.
 Ne pas merger tant que les tests d'itération auth ne passent pas contre le monolithe.

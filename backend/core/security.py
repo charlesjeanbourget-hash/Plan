@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import os
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import bcrypt
 import jwt
+import pyotp
 from fastapi import Depends, HTTPException, Request
 
 from .config import db
@@ -14,9 +16,11 @@ from .config import db
 JWT_ALGORITHM = "HS256"
 LOCKOUT_ATTEMPTS = 5
 LOCKOUT_MINUTES = 15
+TRUSTED_PROXY_HOPS = max(1, int(os.environ.get("TRUSTED_PROXY_HOPS", "1")))
 
 _pharmacy_access_cache: dict = {}
 _security_cache: dict = {}
+_SPECIAL_CHARS = set("!@#$%^&*()-_=+[]{};:,.<>?/\\|~'\"`")
 
 DEFAULT_SECURITY_SETTINGS = {
     "mfa_required": False,
@@ -33,6 +37,11 @@ def get_jwt_secret() -> str:
     return os.environ["JWT_SECRET"]
 
 
+def get_fernet():
+    from cryptography.fernet import Fernet
+    return Fernet(os.environ["LICENSE_ENCRYPTION_KEY"].encode("utf-8"))
+
+
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
@@ -41,6 +50,13 @@ def verify_password(plain: str, hashed: str) -> bool:
     try:
         return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
     except ValueError:
+        return False
+
+
+def _totp_valid(secret: str, code: str) -> bool:
+    try:
+        return pyotp.TOTP(secret).verify(code.strip().replace(" ", ""), valid_window=1)
+    except Exception:
         return False
 
 
@@ -74,7 +90,6 @@ def create_access_token(user: dict) -> str:
 
 
 def scoped_pid(user: dict) -> str:
-    """Cloisonnement strict : chaque compte n'accède qu'aux données de SA pharmacie."""
     pid = (user.get("pharmacy_id") or "").strip()
     if pid:
         return pid
@@ -134,6 +149,22 @@ async def get_security_settings(pharmacy_id: str) -> dict:
     return settings
 
 
+async def validate_password_strength(pw: str, pharmacy_id: str = "") -> Optional[str]:
+    pol = await get_security_settings(pharmacy_id)
+    min_len = max(8, min(64, int(pol.get("pw_min_length") or 10)))
+    if len(pw) < min_len:
+        return f"Le mot de passe doit contenir au moins {min_len} caractères."
+    if pol.get("pw_require_upper") and not any(c.isupper() for c in pw):
+        return "Le mot de passe doit contenir au moins une majuscule."
+    if pol.get("pw_require_lower") and not any(c.islower() for c in pw):
+        return "Le mot de passe doit contenir au moins une minuscule."
+    if pol.get("pw_require_digit") and not any(c.isdigit() for c in pw):
+        return "Le mot de passe doit contenir au moins un chiffre."
+    if pol.get("pw_require_special") and not any(c in _SPECIAL_CHARS for c in pw):
+        return "Le mot de passe doit contenir au moins un caractère spécial (!, @, #, $…)."
+    return None
+
+
 def password_is_expired(user: dict, pol: dict) -> bool:
     days = int(pol.get("pw_expiry_days") or 0)
     if days <= 0:
@@ -145,6 +176,65 @@ def password_is_expired(user: dict, pol: dict) -> bool:
         return datetime.now(timezone.utc) - datetime.fromisoformat(changed) > timedelta(days=days)
     except ValueError:
         return False
+
+
+async def auth_flags(user: dict) -> dict:
+    pol = await get_security_settings(user.get("pharmacy_id") or "")
+    return {
+        "password_expired": password_is_expired(user, pol),
+        "mfa_setup_required": bool(pol.get("mfa_required")) and not user.get("mfa_enabled", False),
+    }
+
+
+def client_ip(request: Request) -> str:
+    cf = request.headers.get("cf-connecting-ip", "").strip()
+    if cf:
+        return cf
+    fwd = request.headers.get("x-forwarded-for", "")
+    if not fwd:
+        return request.client.host if request.client else "inconnu"
+    ips = [p.strip() for p in fwd.split(",") if p.strip()]
+    if not ips:
+        return request.client.host if request.client else "inconnu"
+    return ips[-min(TRUSTED_PROXY_HOPS, len(ips))]
+
+
+async def is_new_ip_login(user_id: str, ip: str) -> bool:
+    prior = await db.login_events.count_documents({"user_id": user_id, "event": "CONNEXION"})
+    if prior == 0:
+        return False
+    seen = await db.login_events.find_one({"user_id": user_id, "event": "CONNEXION", "ip": ip})
+    return seen is None
+
+
+async def record_login_event(user: dict, event: str, request: Request, flagged_new_ip: bool = False):
+    await db.login_events.insert_one({
+        "id": str(uuid.uuid4()),
+        "user_id": user["id"],
+        "email": user["email"],
+        "name": user.get("name", ""),
+        "role": user["role"],
+        "event": event,
+        "ip": client_ip(request),
+        "user_agent": request.headers.get("user-agent", "")[:300],
+        "flagged_new_ip": flagged_new_ip,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+
+async def log_audit(actor_email: str, actor_role: str, action: str, resource_type: str,
+                    resource_id: str, details: str, pharmacy_id: str = ""):
+    await db.audit_logs.insert_one({
+        "id": str(uuid.uuid4()),
+        "actor_email": actor_email,
+        "actor_role": actor_role,
+        "action": action,
+        "resource_type": resource_type,
+        "resource_id": resource_id,
+        "details": details,
+        "pharmacy_id": pharmacy_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
 
 
 async def get_current_user(request: Request) -> dict:
