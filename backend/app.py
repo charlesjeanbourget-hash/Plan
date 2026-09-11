@@ -17,6 +17,7 @@ from routers.trainings import router as trainings_router
 from routers.security_settings import router as security_settings_router
 from routers.chat import router as chat_router
 from routers.payroll import pay_router
+from routers.schedule_settings import router as schedule_settings_router
 
 api_router.include_router(auth_router)
 api_router.include_router(auth_reset_router)
@@ -32,5 +33,6 @@ api_router.include_router(trainings_router)
 api_router.include_router(security_settings_router)
 api_router.include_router(chat_router)
 api_router.include_router(pay_router)
+api_router.include_router(schedule_settings_router)
 
 app.include_router(api_router)

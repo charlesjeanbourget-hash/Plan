@@ -1,11 +1,11 @@
-"""Période de paie + lecture des budgets d'horaire."""
+"""Période de paie."""
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from core.config import db
-from core.security import get_current_user, get_principal, log_audit, scoped_pid
+from core.security import get_principal, log_audit, scoped_pid
 
 pay_router = APIRouter(tags=["payroll"])
 
@@ -39,21 +39,3 @@ async def save_pay_settings(payload: PaySettingsIn, principal: dict = Depends(ge
         pid,
     )
     return doc
-
-
-@pay_router.get("/schedule/settings")
-async def get_schedule_settings(user: dict = Depends(get_current_user)):
-    pid = scoped_pid(user)
-    doc = await db.schedule_settings.find_one({"pharmacy_id": pid}, {"_id": 0})
-    return {
-        "weekly_budget": (doc or {}).get("weekly_budget", 0),
-        "traffic": (doc or {}).get("traffic", {}),
-        "traffic_periods": (doc or {}).get("traffic_periods", []),
-        "dept_budgets": (doc or {}).get("dept_budgets", {}),
-        "branch_budgets": (doc or {}).get("branch_budgets", []),
-        "dept_staffing": (doc or {}).get("dept_staffing", {}),
-        "branch_staffing": (doc or {}).get("branch_staffing", []),
-        "priorities": (doc or {}).get("priorities", {}),
-        "priority_sets": (doc or {}).get("priority_sets", []),
-        "auto_break": (doc or {}).get("auto_break", {"enabled": False, "threshold_hours": 6, "minutes": 30, "paid": False}),
-    }
