@@ -2,16 +2,16 @@ import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import { Plus, Sparkles, Stethoscope, TreePalm, Megaphone } from 'lucide-react';
 import { openSection } from '@/components/modules/shared';
-import { requestNavigate } from '@/lib/nav';
 
 interface Props {
   onCreateShift: () => void;
+  onCreateLeave: () => void;
   onCreateAppointment: () => void;
   canCreateAppointment: boolean;
 }
 
 /** Barre Agendrix : Créer à la main + Générer avec l’IA. */
-export function ScheduleCreateMenu({ onCreateShift, onCreateAppointment, canCreateAppointment }: Props): JSX.Element {
+export function ScheduleCreateMenu({ onCreateShift, onCreateLeave, onCreateAppointment, canCreateAppointment }: Props): JSX.Element {
   return (
     <div className="flex flex-wrap gap-2" data-testid="schedule-dual-path">
       <DropdownMenu>
@@ -24,8 +24,8 @@ export function ScheduleCreateMenu({ onCreateShift, onCreateAppointment, canCrea
           <DropdownMenuItem data-testid="create-shift-item" onClick={onCreateShift}>
             <Plus className="w-4 h-4 mr-2 text-emerald-600" /> Quart de travail
           </DropdownMenuItem>
-          <DropdownMenuItem data-testid="create-leave-item" onClick={() => requestNavigate('vacations')}>
-            <TreePalm className="w-4 h-4 mr-2 text-emerald-600" /> Congé
+          <DropdownMenuItem data-testid="create-leave-item" onClick={onCreateLeave}>
+            <TreePalm className="w-4 h-4 mr-2 text-amber-600" /> Absence / congé
           </DropdownMenuItem>
           {canCreateAppointment && (
             <DropdownMenuItem data-testid="create-appt-item" onClick={onCreateAppointment}>
