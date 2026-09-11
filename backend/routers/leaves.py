@@ -1,4 +1,5 @@
-"""Congés — extraits de server.py (sans auto-remplacement / vacation quarts)."""
+"""Congés — extraits de server.py."""
+import logging
 import uuid
 from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
@@ -8,8 +9,10 @@ from pydantic import BaseModel
 
 from core.config import db
 from core.security import get_current_user, get_principal, log_audit, scoped_pid
+from routers.leave_ops import auto_replacement_for_leave, vacate_shifts_for_leave
 from routers.shifts import notify_shift_change
 
+logger = logging.getLogger(__name__)
 MONTREAL_TZ = ZoneInfo("America/Montreal")
 LEAVE_TYPES_BE = ("Vacances", "Maladie", "Mobile", "Personnel", "Formation")
 LEAVE_ALLOC_TYPES = ("Vacances", "Maladie", "Mobile")
@@ -170,13 +173,23 @@ async def decide_leave_request(req_id: str, payload: LeaveDecideIn, principal: d
         "emerald" if status == "Approuvée" else "red", module="vacations", icon="leave",
     )
     remaining = await leave_remaining(pid, doc["employee_id"], doc["type"]) if status == "Approuvée" else None
+    gaps = {"removed": 0, "open_shifts": 0}
+    replacement = None
+    if status == "Approuvée":
+        gaps = await vacate_shifts_for_leave(pid, doc, principal["email"])
+        if gaps.get("open_shifts"):
+            try:
+                replacement = await auto_replacement_for_leave(pid, doc, principal["email"])
+            except Exception as exc:
+                logger.error(f"Auto-remplacement congé {req_id} : {exc}")
     await log_audit(
         principal["email"], principal["role"],
         "CONGE_APPROUVE" if status == "Approuvée" else "CONGE_REFUSE", "conge", req_id,
         f"Demande {doc['type']} du {doc['start_date']} au {doc['end_date']} de "
-        f"{doc.get('employee_name') or doc['employee_id']} : {status}", pid,
+        f"{doc.get('employee_name') or doc['employee_id']} : {status}"
+        + (f" — {gaps['open_shifts']} quart(s) ouvert(s)" if gaps.get("open_shifts") else ""), pid,
     )
-    return {"status": status, "remaining": remaining, "gaps": {"removed": 0, "open_shifts": 0}, "replacement": None}
+    return {"status": status, "remaining": remaining, "gaps": gaps, "replacement": replacement}
 
 
 @router.delete("/requests/{req_id}")
