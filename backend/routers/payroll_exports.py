@@ -1,17 +1,51 @@
 """Exports paie — extraits de server.py."""
 import io
 import json
-from datetime import date, datetime, timezone
+from datetime import date
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 
 from core.config import db
 from core.security import get_principal, log_audit, scoped_pid
-from routers.punches import aggregate_punch_hours, get_punch_settings, punch_hours
+from routers.punches import get_punch_settings, punch_break_minutes, punch_hours
 
 PAYROLL_EXPORT_FORMATS = ("employeurd", "nethris", "adp")
 router = APIRouter(tags=["payroll-exports"])
+
+
+def aggregate_punch_hours(docs: list, settings: Optional[dict] = None) -> list:
+    settings = settings or {}
+    rows: dict = {}
+    weekly: dict = {}
+    for p in docs:
+        r = rows.setdefault(p["employee_id"], {
+            "employee_id": p["employee_id"], "employee_name": p["employee_name"],
+            "punched_hours": 0.0, "manual_hours": 0.0, "total_hours": 0.0,
+            "regular_hours": 0.0, "overtime_hours": 0.0, "break_minutes": 0.0,
+            "entries": 0, "open_entries": 0,
+        })
+        if not p.get("punch_out"):
+            r["open_entries"] += 1
+            continue
+        h = punch_hours(p, settings)
+        r["break_minutes"] += punch_break_minutes(p)
+        r["entries"] += 1
+        r["punched_hours" if p["source"] == "punch" else "manual_hours"] += h
+        r["total_hours"] += h
+        iso = date.fromisoformat(p["date"]).isocalendar()
+        wk = (p["employee_id"], iso[0], iso[1])
+        weekly[wk] = weekly.get(wk, 0.0) + h
+    for (eid, _, _), h in weekly.items():
+        if h > 40:
+            rows[eid]["overtime_hours"] += h - 40
+    for r in rows.values():
+        r["regular_hours"] = r["total_hours"] - r["overtime_hours"]
+        r["break_minutes"] = round(r["break_minutes"], 1)
+        for k in ("punched_hours", "manual_hours", "total_hours", "regular_hours", "overtime_hours"):
+            r[k] = round(r[k], 2)
+    return sorted(rows.values(), key=lambda r: r["employee_name"])
 
 
 def time_to_minutes(hhmm: str) -> int:
@@ -131,7 +165,6 @@ async def export_branch_budgets(
     shifts = await db.shifts.find(
         {"pharmacy_id": pid, "date": {"$gte": start, "$lte": end}}, {"_id": 0}
     ).to_list(20000)
-
     planned: dict = {}
     shifts_by_emp_day: dict = {}
     for s in shifts:
@@ -141,7 +174,6 @@ async def export_branch_budgets(
         row["hours"] += h
         row["cost"] += h * rate_by.get(s["employee_id"], 0)
         shifts_by_emp_day.setdefault((s["employee_id"], s["date"]), []).append(s)
-
     punches = await db.punches.find(
         {"pharmacy_id": pid, "date": {"$gte": start, "$lte": end}, "punch_out": {"$ne": None}},
         {"_id": 0},
@@ -165,7 +197,6 @@ async def export_branch_budgets(
             row = real.setdefault(s.get("branch_id") or "", {"hours": 0.0, "cost": 0.0})
             row["hours"] += h * frac
             row["cost"] += h * frac * rate
-
     days = (d1 - d0).days + 1
     factor = days / 7
     all_bids = sorted(
