@@ -12,6 +12,7 @@ from routers.licenses import router as licenses_router
 from routers.admin_users import router as admin_users_router
 from routers.punches import punch_router, punches_router
 from routers.shifts import router as shifts_router
+from routers.leaves import router as leaves_router
 
 api_router.include_router(auth_router)
 api_router.include_router(auth_reset_router)
@@ -22,5 +23,6 @@ api_router.include_router(admin_users_router)
 api_router.include_router(punch_router)
 api_router.include_router(punches_router)
 api_router.include_router(shifts_router)
+api_router.include_router(leaves_router)
 
 app.include_router(api_router)
