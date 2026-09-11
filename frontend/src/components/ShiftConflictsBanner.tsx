@@ -2,6 +2,7 @@ import { AlertTriangle } from 'lucide-react';
 import { Employee, Shift } from '@/types';
 import { ScheduleWeekOps } from '@/components/ScheduleWeekOps';
 import { ShiftSwapPanel } from '@/components/ShiftSwapPanel';
+import { ScheduleDayHourView } from '@/components/ScheduleDayHourView';
 
 export function ShiftConflictsBanner({
   conflicts,
@@ -18,6 +19,7 @@ export function ShiftConflictsBanner({
     <>
       <ScheduleWeekOps weekStart={weekStart} />
       <ShiftSwapPanel />
+      <ScheduleDayHourView />
       {conflicts.length > 0 && (
     <div data-testid="shift-conflicts-banner" className="mb-4 rounded-xl border-2 border-red-400 bg-red-50 p-4">
       <p className="text-sm font-bold text-red-800 inline-flex items-center gap-2">
