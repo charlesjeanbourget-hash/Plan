@@ -16,6 +16,8 @@ from routers.payroll import pay_router
 from routers.schedule_settings import router as schedule_settings_router
 from routers.payroll_exports import router as payroll_exports_router
 from routers.work_stations import router as work_stations_router
+from routers.replacements import router as replacements_router
+from routers.agencies import router as agencies_router
 
 api_router.include_router(auth_router)
 api_router.include_router(auth_reset_router)
@@ -34,4 +36,6 @@ api_router.include_router(pay_router)
 api_router.include_router(schedule_settings_router)
 api_router.include_router(payroll_exports_router)
 api_router.include_router(work_stations_router)
+api_router.include_router(replacements_router)
+api_router.include_router(agencies_router)
 app.include_router(api_router)
