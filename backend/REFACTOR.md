@@ -8,9 +8,10 @@ Branche `refactor/modular-backend`.
 - core : config, security, email, storage
 - routers/auth.py + auth_reset.py
 - routers/pharmacies.py
-- routers/licenses.py — liste, CRUD, certificat chiffré, rapport 60 jours, droit à l'oubli
+- routers/licenses.py
+- routers/admin_users.py — liste, création, maj, reset MDP, suppression
 
 ## Encore dans le monolithe
-comptes admin, horaires, pointages, paie, formations, envoi courriel du rapport licences.
+horaires, pointages, paie, formations, sécurité par pharmacie.
 
 Ne pas merger tant que les tests d'itération ne passent pas contre le monolithe.
