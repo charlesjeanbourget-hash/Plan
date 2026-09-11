@@ -3,6 +3,7 @@ import axios from 'axios';
 import { useAuth } from '@/context/AuthContext';
 import { Evaluation } from '@/types';
 import { TrendingUp, ArrowRight } from 'lucide-react';
+import { EmployeeContractsPanel } from '@/components/EmployeeContractsPanel';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -28,6 +29,7 @@ export const SalaryHistory = ({ employeeId, currentRate }: Props): JSX.Element =
     .sort((a, b) => (a.employee_decision?.at ?? a.created_at).localeCompare(b.employee_decision?.at ?? b.created_at));
 
   return (
+    <>
     <div className="bg-white rounded-xl border border-slate-200 border-t-4 border-t-bronze-500 p-7" data-testid="salary-history-panel">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
         <h2 className="font-heading text-base font-bold text-slate-900 inline-flex items-center gap-2">
@@ -65,5 +67,7 @@ export const SalaryHistory = ({ employeeId, currentRate }: Props): JSX.Element =
         </div>
       )}
     </div>
+    <EmployeeContractsPanel employeeId={employeeId} />
+    </>
   );
 };
