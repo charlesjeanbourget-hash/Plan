@@ -1,17 +1,24 @@
 import { AlertTriangle } from 'lucide-react';
 import { Employee, Shift } from '@/types';
+import { ScheduleWeekOps } from '@/components/ScheduleWeekOps';
+import { ShiftSwapPanel } from '@/components/ShiftSwapPanel';
 
 export function ShiftConflictsBanner({
   conflicts,
   employees,
   reasonOf,
+  weekStart,
 }: {
   conflicts: Shift[];
   employees: Employee[];
   reasonOf: (s: Shift) => string | null;
-}): JSX.Element | null {
-  if (conflicts.length === 0) return null;
+  weekStart?: string;
+}): JSX.Element {
   return (
+    <>
+      <ScheduleWeekOps weekStart={weekStart} />
+      <ShiftSwapPanel />
+      {conflicts.length > 0 && (
     <div data-testid="shift-conflicts-banner" className="mb-4 rounded-xl border-2 border-red-400 bg-red-50 p-4">
       <p className="text-sm font-bold text-red-800 inline-flex items-center gap-2">
         <AlertTriangle className="w-4 h-4" />
@@ -29,5 +36,7 @@ export function ShiftConflictsBanner({
         })}
       </ul>
     </div>
+      )}
+    </>
   );
 }
