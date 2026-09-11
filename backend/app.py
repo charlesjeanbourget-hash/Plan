@@ -14,6 +14,7 @@ from routers.punches import punch_router, punches_router
 from routers.shifts import router as shifts_router
 from routers.leaves import router as leaves_router
 from routers.trainings import router as trainings_router
+from routers.security_settings import router as security_settings_router
 
 api_router.include_router(auth_router)
 api_router.include_router(auth_reset_router)
@@ -26,5 +27,6 @@ api_router.include_router(punches_router)
 api_router.include_router(shifts_router)
 api_router.include_router(leaves_router)
 api_router.include_router(trainings_router)
+api_router.include_router(security_settings_router)
 
 app.include_router(api_router)
