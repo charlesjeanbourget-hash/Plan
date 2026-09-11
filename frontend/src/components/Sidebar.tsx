@@ -14,7 +14,7 @@ import { toast } from 'sonner';
 import {
   LayoutDashboard, Users, CalendarClock, Briefcase, Wallet, RefreshCw, TreePalm,
   TrendingUp, ClipboardCheck, FileText, HeartHandshake, HelpCircle, ShieldCheck,
-  LogOut, Menu, X, LucideIcon, BadgeCheck, UserRound, KeyRound, Eye, EyeOff, GraduationCap, ListChecks, Truck, MessagesSquare, Boxes, PartyPopper, Glasses, HeartPulse, BarChart3,
+  LogOut, Menu, X, LucideIcon, BadgeCheck, UserRound, KeyRound, Eye, EyeOff, GraduationCap, ListChecks, Truck, MessagesSquare, Boxes, PartyPopper, Glasses, HeartPulse, ChevronDown,
 } from 'lucide-react';
 
 interface Props {
@@ -29,31 +29,68 @@ interface NavItem {
   icon: LucideIcon;
 }
 
-const NAV_ITEMS: NavItem[] = [
-  { key: 'dashboard', label: 'Tableau de bord', icon: LayoutDashboard },
-  { key: 'myspace', label: 'Mon espace', icon: UserRound },
-  { key: 'messages', label: 'Messages', icon: MessagesSquare },
-  { key: 'team', label: 'Équipe', icon: PartyPopper },
-  { key: 'employees', label: 'Employés', icon: Users },
-  { key: 'licenses', label: 'Licences pro.', icon: BadgeCheck },
-  { key: 'scheduling', label: 'Horaires', icon: CalendarClock },
-  { key: 'resources', label: 'Ressources', icon: Boxes },
-  { key: 'tasks', label: 'Tâches par quart', icon: ListChecks },
-  { key: 'deliveries', label: 'Livraisons', icon: Truck },
-  { key: 'recruitment', label: 'Recrutement', icon: Briefcase },
-  { key: 'payroll', label: 'Paie', icon: Wallet },
-  { key: 'reports', label: 'Rapports & API', icon: BarChart3 },
-  { key: 'replacements', label: 'Remplacements', icon: RefreshCw },
-  { key: 'vacations', label: 'Vacances', icon: TreePalm },
-  { key: 'performance', label: 'Performance', icon: TrendingUp },
-  { key: 'onboarding', label: 'Onboarding', icon: ClipboardCheck },
-  { key: 'training', label: 'Formations', icon: GraduationCap },
-  { key: 'contracts', label: 'Contrats', icon: FileText },
-  { key: 'sst', label: 'Santé & sécurité', icon: HeartPulse },
-  { key: 'benefits', label: 'Avantages sociaux', icon: HeartHandshake },
-  { key: 'faq', label: 'FAQ', icon: HelpCircle },
-  { key: 'superadmin', label: 'Superadmin', icon: ShieldCheck },
+interface NavGroup {
+  id: string;
+  label: string;
+  items: NavItem[];
+}
+
+const NAV_GROUPS: NavGroup[] = [
+  {
+    id: 'quotidien',
+    label: 'Au quotidien',
+    items: [
+      { key: 'dashboard', label: 'Tableau de bord', icon: LayoutDashboard },
+      { key: 'myspace', label: 'Mon espace', icon: UserRound },
+      { key: 'messages', label: 'Messages', icon: MessagesSquare },
+      { key: 'scheduling', label: 'Horaires', icon: CalendarClock },
+      { key: 'tasks', label: 'Tâches', icon: ListChecks },
+      { key: 'deliveries', label: 'Livraisons', icon: Truck },
+      { key: 'replacements', label: 'Remplacements', icon: RefreshCw },
+      { key: 'vacations', label: 'Congés', icon: TreePalm },
+    ],
+  },
+  {
+    id: 'equipe',
+    label: 'Équipe',
+    items: [
+      { key: 'employees', label: 'Employés', icon: Users },
+      { key: 'team', label: 'Vie d’équipe', icon: PartyPopper },
+      { key: 'licenses', label: 'Licences', icon: BadgeCheck },
+      { key: 'resources', label: 'Ressources', icon: Boxes },
+      { key: 'performance', label: 'Performance', icon: TrendingUp },
+      { key: 'training', label: 'Formations', icon: GraduationCap },
+    ],
+  },
+  {
+    id: 'rh',
+    label: 'RH & paie',
+    items: [
+      { key: 'recruitment', label: 'Recrutement', icon: Briefcase },
+      { key: 'onboarding', label: 'Intégration', icon: ClipboardCheck },
+      { key: 'contracts', label: 'Contrats', icon: FileText },
+      { key: 'payroll', label: 'Paie', icon: Wallet },
+      { key: 'benefits', label: 'Avantages', icon: HeartHandshake },
+    ],
+  },
+  {
+    id: 'sst',
+    label: 'Santé & sécurité',
+    items: [
+      { key: 'sst', label: 'Docs & événements', icon: HeartPulse },
+    ],
+  },
+  {
+    id: 'aide',
+    label: 'Aide',
+    items: [
+      { key: 'faq', label: 'FAQ', icon: HelpCircle },
+      { key: 'superadmin', label: 'Superadmin', icon: ShieldCheck },
+    ],
+  },
 ];
+
+const HIDDEN_FOR_NOW: ModuleKey[] = ['reports'];
 
 const EMPLOYEE_MODULES: ModuleKey[] = ['dashboard', 'myspace', 'messages', 'team', 'scheduling', 'tasks', 'deliveries', 'vacations', 'training', 'sst', 'benefits', 'faq'];
 
@@ -71,6 +108,13 @@ export default function Sidebar({ active, onSelect, onLogout }: Props): JSX.Elem
   const [newPwd, setNewPwd] = useState('');
   const [pwdError, setPwdError] = useState('');
   const [simpleMode, setSimpleMode] = useState(() => localStorage.getItem(SIMPLE_MODE_KEY) === '1');
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
+    quotidien: true,
+    equipe: true,
+    rh: true,
+    sst: true,
+    aide: false,
+  });
 
   useEffect(() => {
     document.documentElement.classList.toggle('simple-mode', simpleMode);
@@ -92,40 +136,61 @@ export default function Sidebar({ active, onSelect, onLogout }: Props): JSX.Elem
     }
   };
 
-  const items = NAV_ITEMS.filter((item) => {
+  const allowed = (key: ModuleKey): boolean => {
+    if (HIDDEN_FOR_NOW.includes(key)) return false;
     const overrides = currentUser?.moduleOverrides ?? {};
-    if (overrides[item.key] === false) return false;
-    if (simpleMode && !SIMPLE_MODULES.includes(item.key)) return false;
-    if (currentUser?.role === 'superadmin') return item.key === 'superadmin';
-    if (currentUser?.role === 'employee') return overrides[item.key] === true || EMPLOYEE_MODULES.includes(item.key);
-    if (item.key === 'myspace') return false;
-    if (item.key === 'superadmin') return false;
+    if (overrides[key] === false) return false;
+    if (simpleMode && !SIMPLE_MODULES.includes(key)) return false;
+    if (currentUser?.role === 'superadmin') return key === 'superadmin';
+    if (currentUser?.role === 'employee') return overrides[key] === true || EMPLOYEE_MODULES.includes(key);
+    if (key === 'myspace') return false;
+    if (key === 'superadmin') return false;
     return true;
-  });
+  };
+
+  const groups = NAV_GROUPS
+    .map((g) => ({ ...g, items: g.items.filter((i) => allowed(i.key)) }))
+    .filter((g) => g.items.length > 0);
 
   const content = (
     <div className="flex flex-col h-full bg-white">
       <div className="flex items-center px-5 h-20 border-b border-slate-200">
         <BrandLogo size="sm" />
       </div>
-      <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-0.5" data-testid="sidebar-nav">
-        {items.map((item) => (
-          <button
-            key={item.key}
-            data-testid={`sidebar-link-${item.key}`}
-            onClick={() => {
-              onSelect(item.key);
-              setMobileOpen(false);
-            }}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-left border-l-4 ${
-              active === item.key
-                ? 'bg-emerald-50 text-emerald-800 border-emerald-600'
-                : 'text-slate-500 border-transparent hover:text-slate-900 hover:bg-slate-50'
-            }`}
-          >
-            <item.icon className={`w-4 h-4 shrink-0 ${active === item.key ? 'text-emerald-600' : ''}`} />
-            {item.label}
-          </button>
+      <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-3" data-testid="sidebar-nav">
+        {groups.map((group) => (
+          <div key={group.id}>
+            <button
+              type="button"
+              onClick={() => setOpenGroups((prev) => ({ ...prev, [group.id]: !prev[group.id] }))}
+              className="w-full flex items-center justify-between px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400 hover:text-slate-600"
+            >
+              {group.label}
+              <ChevronDown className={`w-3.5 h-3.5 transition-transform ${openGroups[group.id] === false ? '-rotate-90' : ''}`} />
+            </button>
+            {openGroups[group.id] !== false && (
+              <div className="space-y-0.5">
+                {group.items.map((item) => (
+                  <button
+                    key={item.key}
+                    data-testid={`sidebar-link-${item.key}`}
+                    onClick={() => {
+                      onSelect(item.key);
+                      setMobileOpen(false);
+                    }}
+                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors text-left border-l-4 ${
+                      active === item.key
+                        ? 'bg-emerald-50 text-emerald-800 border-emerald-600'
+                        : 'text-slate-500 border-transparent hover:text-slate-900 hover:bg-slate-50'
+                    }`}
+                  >
+                    <item.icon className={`w-4 h-4 shrink-0 ${active === item.key ? 'text-emerald-600' : ''}`} />
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         ))}
       </nav>
       <div className="p-4 border-t border-slate-200">
