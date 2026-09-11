@@ -19,13 +19,14 @@ from routers.work_stations import router as work_stations_router
 from routers.replacements import router as replacements_router
 from routers.agencies import router as agencies_router
 from routers.tasks import router as tasks_router
+from routers.evaluations import router as evaluations_router
 
 for r in (
     auth_router, auth_reset_router, pharmacies_sa_router, pharmacy_settings_router,
     licenses_router, admin_users_router, punch_router, punches_router, shifts_router,
     leaves_router, trainings_router, security_settings_router, chat_router, pay_router,
     schedule_settings_router, payroll_exports_router, work_stations_router,
-    replacements_router, agencies_router, tasks_router,
+    replacements_router, agencies_router, tasks_router, evaluations_router,
 ):
     api_router.include_router(r)
 app.include_router(api_router)
