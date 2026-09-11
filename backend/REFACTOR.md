@@ -2,9 +2,15 @@
 
 Branche `refactor/modular-backend`.
 
-- `backend/server.py` reste la source de vérité en production.
-- `backend/core/` : config, sécurité JWT, courriel.
-- `backend/routers/auth.py` : login, MFA, me, change-password, accept-privacy, **forgot/reset-password**.
+`backend/server.py` reste la source de vérité en production.
 
-Encore dans le monolithe : admin users, pharmacies, licences.
-Ne pas merger tant que les tests d'itération auth ne passent pas contre le monolithe.
+## Extraits
+- `core/` config, security, email
+- `routers/auth.py` login MFA me change-password accept-privacy
+- `routers/auth_reset.py` forgot/reset
+- `routers/pharmacies.py` CRUD superadmin + /pharmacy/settings
+
+## Encore dans le monolithe
+licences, comptes admin, horaires, pointages, paie, formations.
+
+Ne pas merger tant que les tests d'itération ne passent pas contre le monolithe.
