@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Route, MapPin, ExternalLink, AlertTriangle } from 'lucide-react';
 import { directionsEmbedUrl, hasGoogleMapsKey, mapsSearchUrl } from '@/lib/googleMaps';
 import { geocodeOsm, optimizeTourOsm, osmDirectionsUrl, GeoPos, OptimizedTour } from '@/lib/osmRoute';
+import { optimizeTourGraphHopper, hasGraphHopper } from '@/lib/graphhopper';
 import { OsmTourMap } from '@/components/OsmTourMap';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -33,6 +34,7 @@ export const DeliveryTourDialog = ({ open, onClose }: { open: boolean; onClose: 
   const [loading, setLoading] = useState(false);
   const [osmPts, setOsmPts] = useState<GeoPos[]>([]);
   const [opt, setOpt] = useState<OptimizedTour | null>(null);
+  const [engine, setEngine] = useState('');
 
   useEffect(() => {
     if (!open) return;
@@ -40,6 +42,7 @@ export const DeliveryTourDialog = ({ open, onClose }: { open: boolean; onClose: 
     setTour(null);
     setOpt(null);
     setOsmPts([]);
+    setEngine('');
     axios.get<TourData>(`${API}/deliveries/route`, { headers: { Authorization: `Bearer ${token ?? ''}` } })
       .then(async (r) => {
         setTour(r.data);
@@ -52,8 +55,15 @@ export const DeliveryTourDialog = ({ open, onClose }: { open: boolean; onClose: 
         }
         setOsmPts(geo);
         if (geo.length >= 2) {
-          const t = await optimizeTourOsm(geo).catch(() => null);
-          setOpt(t);
+          const gh = hasGraphHopper() ? await optimizeTourGraphHopper(geo).catch(() => null) : null;
+          if (gh) {
+            setOpt(gh);
+            setEngine('GraphHopper');
+          } else {
+            const t = await optimizeTourOsm(geo).catch(() => null);
+            setOpt(t);
+            setEngine(t ? 'OpenStreetMap / OSRM' : '');
+          }
         }
       })
       .catch(() => setTour(null))
@@ -79,7 +89,7 @@ export const DeliveryTourDialog = ({ open, onClose }: { open: boolean; onClose: 
             <Route className="w-4 h-4 text-bronze-600" /> Ma tournée du jour
           </DialogTitle>
           <DialogDescription>
-            Itinéraire multi-arrêts optimisé (OSRM / OpenStreetMap). Urgences conservées en tête par le serveur, trajet le plus court ensuite.
+            Trajet optimisé pour le livreur. {engine ? `Moteur : ${engine}.` : 'Urgences en tête, plus court chemin ensuite.'}
           </DialogDescription>
         </DialogHeader>
         {loading ? (
